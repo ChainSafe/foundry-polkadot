@@ -1,5 +1,5 @@
 use super::Result;
-use crate::Vm::Rpc;
+use crate::{CheatcodeInspectorStrategy, Vm::Rpc};
 use alloy_primitives::{map::AddressHashMap, U256};
 use foundry_common::{fs::normalize_path, ContractsByArtifact};
 use foundry_compilers::{utils::canonicalize, ArtifactId, ProjectPathsConfig};
@@ -61,6 +61,8 @@ pub struct CheatsConfig {
     pub chains: HashMap<String, ChainData>,
     /// Mapping of chain IDs to their aliases
     pub chain_id_to_alias: HashMap<u64, String>,
+    /// Cheatcode inspector behavior.
+    pub strategy: CheatcodeInspectorStrategy,
 }
 
 /// Chain data for getChain cheatcodes
@@ -74,6 +76,7 @@ pub struct ChainData {
 impl CheatsConfig {
     /// Extracts the necessary settings from the Config
     pub fn new(
+        strategy: CheatcodeInspectorStrategy,
         config: &Config,
         evm_opts: EvmOpts,
         available_artifacts: Option<ContractsByArtifact>,
@@ -111,12 +114,19 @@ impl CheatsConfig {
             internal_expect_revert: config.allow_internal_expect_revert,
             chains: HashMap::new(),
             chain_id_to_alias: HashMap::new(),
+            strategy,
         }
     }
 
     /// Returns a new `CheatsConfig` configured with the given `Config` and `EvmOpts`.
     pub fn clone_with(&self, config: &Config, evm_opts: EvmOpts) -> Self {
-        Self::new(config, evm_opts, self.available_artifacts.clone(), self.running_artifact.clone())
+        Self::new(
+            self.strategy.clone(),
+            config,
+            evm_opts,
+            self.available_artifacts.clone(),
+            self.running_artifact.clone(),
+        )
     }
 
     /// Attempts to canonicalize (see [std::fs::canonicalize]) the path.
@@ -314,6 +324,7 @@ impl Default for CheatsConfig {
             internal_expect_revert: false,
             chains: HashMap::new(),
             chain_id_to_alias: HashMap::new(),
+            strategy: CheatcodeInspectorStrategy::new_evm(),
         }
     }
 }
@@ -712,6 +723,7 @@ mod tests {
 
     fn config(root: &str, fs_permissions: FsPermissions) -> CheatsConfig {
         CheatsConfig::new(
+            CheatcodeInspectorStrategy::new_evm(),
             &Config { root: root.into(), fs_permissions, ..Default::default() },
             Default::default(),
             None,
