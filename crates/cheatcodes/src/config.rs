@@ -1,5 +1,5 @@
 use super::Result;
-use crate::{CheatcodeInspectorStrategy, Vm::Rpc};
+use crate::{CheatcodesStrategy, Vm::Rpc};
 use alloy_primitives::{map::AddressHashMap, U256};
 use foundry_common::{fs::normalize_path, ContractsByArtifact};
 use foundry_compilers::{utils::canonicalize, ArtifactId, ProjectPathsConfig};
@@ -62,7 +62,7 @@ pub struct CheatsConfig {
     /// Mapping of chain IDs to their aliases
     pub chain_id_to_alias: HashMap<u64, String>,
     /// Cheatcode inspector behavior.
-    pub strategy: CheatcodeInspectorStrategy,
+    pub strategy: CheatcodesStrategy,
 }
 
 /// Chain data for getChain cheatcodes
@@ -76,7 +76,7 @@ pub struct ChainData {
 impl CheatsConfig {
     /// Extracts the necessary settings from the Config
     pub fn new(
-        strategy: CheatcodeInspectorStrategy,
+        strategy: CheatcodesStrategy,
         config: &Config,
         evm_opts: EvmOpts,
         available_artifacts: Option<ContractsByArtifact>,
@@ -324,7 +324,7 @@ impl Default for CheatsConfig {
             internal_expect_revert: false,
             chains: HashMap::new(),
             chain_id_to_alias: HashMap::new(),
-            strategy: CheatcodeInspectorStrategy::new_evm(),
+            strategy: CheatcodesStrategy::new_evm(),
         }
     }
 }
@@ -723,7 +723,7 @@ mod tests {
 
     fn config(root: &str, fs_permissions: FsPermissions) -> CheatsConfig {
         CheatsConfig::new(
-            CheatcodeInspectorStrategy::new_evm(),
+            CheatcodesStrategy::new_evm(),
             &Config { root: root.into(), fs_permissions, ..Default::default() },
             Default::default(),
             None,
