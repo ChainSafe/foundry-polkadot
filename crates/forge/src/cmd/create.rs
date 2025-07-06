@@ -35,11 +35,11 @@ use foundry_config::{
     merge_impl_figment_convert, Config,
 };
 use serde_json::json;
-use tracing::debug;
 use std::{
     borrow::Borrow, collections::HashSet, marker::PhantomData, path::PathBuf, sync::Arc,
     time::Duration,
 };
+use tracing::debug;
 merge_impl_figment_convert!(CreateArgs, build, eth);
 
 /// CLI arguments for `forge create`.
