@@ -35,9 +35,10 @@ use foundry_config::{
     merge_impl_figment_convert, Config,
 };
 use serde_json::json;
-use std::collections::HashSet;
-use std::{borrow::Borrow, marker::PhantomData, path::PathBuf, sync::Arc, time::Duration};
-
+use std::{
+    borrow::Borrow, collections::HashSet, marker::PhantomData, path::PathBuf, sync::Arc,
+    time::Duration,
+};
 merge_impl_figment_convert!(CreateArgs, build, eth);
 
 /// CLI arguments for `forge create`.
@@ -249,7 +250,6 @@ fn extract_contract_name_from_expression(expr: &solang_parser::pt::Expression) -
         Expression::Variable(identifier) => identifier.name.clone(),
         Expression::MemberAccess(_, _, identifier) => identifier.name.clone(),
         Expression::FunctionCall(_, func_expr, _args) => {
-            // Handle cases like ContractName() where the contract name is in the function expression
             extract_contract_name_from_expression(func_expr)
         }
         Expression::Type(_, ty) => extract_contract_name_from_type(ty),
@@ -262,16 +262,16 @@ fn extract_contract_name_from_type(ty: &solang_parser::pt::Type) -> String {
     use solang_parser::pt::*;
 
     match ty {
-        Type::Address
-        | Type::AddressPayable
-        | Type::Bool
-        | Type::String
-        | Type::Int(_)
-        | Type::Uint(_)
-        | Type::Bytes(_)
-        | Type::DynamicBytes
-        | Type::Mapping { .. }
-        | Type::Function { .. } => String::new(),
+        Type::Address |
+        Type::AddressPayable |
+        Type::Bool |
+        Type::String |
+        Type::Int(_) |
+        Type::Uint(_) |
+        Type::Bytes(_) |
+        Type::DynamicBytes |
+        Type::Mapping { .. } |
+        Type::Function { .. } => String::new(),
         _ => {
             // For custom types (likely contracts), try to extract the identifier
             let type_str = format!("{:?}", ty);
@@ -305,8 +305,8 @@ async fn upload_child_contract_alloy(
     use alloy_primitives::{Address, U256};
     use alloy_provider::Provider;
     use alloy_rpc_types::TransactionRequest;
-    use alloy_signer_local::PrivateKeySigner;
     use alloy_serde::WithOtherFields;
+    use alloy_signer_local::PrivateKeySigner;
     use foundry_common::provider::ProviderBuilder;
     use std::str::FromStr;
 
@@ -314,25 +314,20 @@ async fn upload_child_contract_alloy(
     let wallet = PrivateKeySigner::from_str(&private_key)?;
 
     // 2. Create provider with wallet using the proper Foundry pattern
-    let provider = ProviderBuilder::new(&rpc_url)
-        .build_with_wallet(EthereumWallet::new(wallet))?;
+    let provider = ProviderBuilder::new(&rpc_url).build_with_wallet(EthereumWallet::new(wallet))?;
 
     // 3. Build transaction
     let magic_address: Address = "0x6d6f646c70792f70616464720000000000000000".parse()?;
-    
     // Convert hex string to bytes for input
     let input_bytes = hex::decode(encoded_bytes.trim_start_matches("0x"))?;
-    
     let tx = TransactionRequest::default()
         .to(magic_address)
         .input(input_bytes.into())
         .value(U256::from(0u64));
-
     // 4. Sign and send transaction
     let wrapped_tx = WithOtherFields::new(tx);
     let pending_tx = provider.send_transaction(wrapped_tx).await?;
     let receipt = pending_tx.get_receipt().await?;
-    
     Ok(receipt.transaction_hash.to_string())
 }
 
@@ -374,20 +369,33 @@ impl CreateArgs {
                             let scaled_encoded_bytes = bytes.encode();
                             let storage_deposit_limit = Compact(10000000000u128);
                             let encoded_storage_deposit_limit = storage_deposit_limit.encode();
-                            let combined_hex = "0x3c04".to_string()
-                                + &hex::encode(&scaled_encoded_bytes)
-                                + &hex::encode(&encoded_storage_deposit_limit);
+                            let combined_hex = "0x3c04".to_string() +
+                                &hex::encode(&scaled_encoded_bytes) +
+                                &hex::encode(&encoded_storage_deposit_limit);
 
                             // Pass RPC URL and private key to upload_child_contract
                             let rpc_url = config.get_rpc_url_or_localhost_http()?;
-                            let private_key = self.eth.wallet.raw.private_key.clone()
-                            .ok_or_eyre("Private key not provided")?;
-                            
-                            let tx_hash =upload_child_contract_alloy(rpc_url.as_ref(), private_key, combined_hex).await?;
-                            println!("Transaction sent! Hash: {:?} for child contract {:?}", tx_hash, contract_name);
+                            let private_key = self
+                                .eth
+                                .wallet
+                                .raw
+                                .private_key
+                                .clone()
+                                .ok_or_eyre("Private key not provided")?;
+
+                            let tx_hash = upload_child_contract_alloy(
+                                rpc_url.as_ref(),
+                                private_key,
+                                combined_hex,
+                            )
+                            .await?;
+                            println!(
+                                "Transaction sent! Hash: {:?} for child contract {:?}",
+                                tx_hash, contract_name
+                            );
                         }
                         BytecodeObject::Unlinked(_) => {
-                            println!("Bytecode: Available (unlinked)");
+                            println!("Bytecode: Available (unlinked) for child contract) {:?}", contract_name);
                         }
                     }
                 } else {
