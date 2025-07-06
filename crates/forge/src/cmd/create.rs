@@ -35,6 +35,7 @@ use foundry_config::{
     merge_impl_figment_convert, Config,
 };
 use serde_json::json;
+use tracing::debug;
 use std::{
     borrow::Borrow, collections::HashSet, marker::PhantomData, path::PathBuf, sync::Arc,
     time::Duration,
@@ -158,28 +159,25 @@ fn find_contract_initializations(
 ) {
     use solang_parser::pt::*;
 
-    for part in source_unit_parts.iter() {
-        match part {
-            SourceUnitPart::ContractDefinition(contract) => {
-                // Look for initializations within contract functions
-                for contract_part in contract.parts.iter() {
-                    match contract_part {
-                        ContractPart::FunctionDefinition(func) => {
-                            if let Some(Statement::Block { statements, .. }) = &func.body {
-                                find_initializations_in_statements(statements, initialized_names);
-                            }
+    for part in source_unit_parts {
+        if let SourceUnitPart::ContractDefinition(contract) = part {
+            // Look for initializations within contract functions
+            for contract_part in &contract.parts {
+                match contract_part {
+                    ContractPart::FunctionDefinition(func) => {
+                        if let Some(Statement::Block { statements, .. }) = &func.body {
+                            find_initializations_in_statements(statements, initialized_names);
                         }
-                        ContractPart::VariableDefinition(var_def) => {
-                            // Check for contract initializations in variable definitions
-                            if let Some(expr) = &var_def.initializer {
-                                find_initializations_in_expression(expr, initialized_names);
-                            }
-                        }
-                        _ => {}
                     }
+                    ContractPart::VariableDefinition(var_def) => {
+                        // Check for contract initializations in variable definitions
+                        if let Some(expr) = &var_def.initializer {
+                            find_initializations_in_expression(expr, initialized_names);
+                        }
+                    }
+                    _ => {}
                 }
             }
-            _ => {}
         }
     }
 }
@@ -191,7 +189,7 @@ fn find_initializations_in_statements(
 ) {
     use solang_parser::pt::*;
 
-    for stmt in statements.iter() {
+    for stmt in statements {
         match stmt {
             Statement::Expression(_, expr) => {
                 find_initializations_in_expression(expr, initialized_names);
@@ -227,7 +225,7 @@ fn find_initializations_in_expression(
         Expression::FunctionCall(_, func_expr, args) => {
             // Recursively check function call expressions and arguments
             find_initializations_in_expression(func_expr, initialized_names);
-            for arg in args.iter() {
+            for arg in args {
                 find_initializations_in_expression(arg, initialized_names);
             }
         }
@@ -274,7 +272,7 @@ fn extract_contract_name_from_type(ty: &solang_parser::pt::Type) -> String {
         Type::Function { .. } => String::new(),
         _ => {
             // For custom types (likely contracts), try to extract the identifier
-            let type_str = format!("{:?}", ty);
+            let type_str = format!("{ty:?}");
 
             // Look for identifier patterns in the debug output
             if let Some(start) = type_str.find("name: \"") {
@@ -288,7 +286,7 @@ fn extract_contract_name_from_type(ty: &solang_parser::pt::Type) -> String {
             // Fallback: look for capitalized identifiers
             type_str
                 .split_whitespace()
-                .find(|s| s.chars().next().map_or(false, |c| c.is_ascii_uppercase()) && s.len() > 1)
+                .find(|s| s.chars().next().is_some_and(|c| c.is_ascii_uppercase()) && s.len() > 1)
                 .unwrap_or("")
                 .trim_matches(',')
                 .trim_matches(')')
@@ -314,7 +312,7 @@ async fn upload_child_contract_alloy(
     let wallet = PrivateKeySigner::from_str(&private_key)?;
 
     // 2. Create provider with wallet using the proper Foundry pattern
-    let provider = ProviderBuilder::new(&rpc_url).build_with_wallet(EthereumWallet::new(wallet))?;
+    let provider = ProviderBuilder::new(rpc_url).build_with_wallet(EthereumWallet::new(wallet))?;
 
     // 3. Build transaction
     let magic_address: Address = "0x6d6f646c70792f70616464720000000000000000".parse()?;
@@ -356,9 +354,9 @@ impl CreateArgs {
         // Find all contracts being initialized in the target contract along with their paths
         let initialized_contracts = find_initialized_contracts_with_paths(&target_path, &output)?;
         if !initialized_contracts.is_empty() {
-            println!("Contracts being initialized in {}:", target_path.display());
+            debug!("Contracts being initialized in {}:", target_path.display());
             for (contract_name, contract_path) in &initialized_contracts {
-                println!("  - {} (defined in: {})", contract_name, contract_path.display());
+                debug!("  - {} (defined in: {})", contract_name, contract_path.display());
 
                 // Try to get bytecode information for this contract
                 if let Ok((_, bin, _)) =
@@ -389,20 +387,20 @@ impl CreateArgs {
                                 combined_hex,
                             )
                             .await?;
-                            println!(
+                            debug!(
                                 "Transaction sent! Hash: {:?} for child contract {:?}",
                                 tx_hash, contract_name
                             );
                         }
                         BytecodeObject::Unlinked(_) => {
-                            println!(
+                            debug!(
                                 "Bytecode: Available (unlinked) for child contract) {:?}",
                                 contract_name
                             );
                         }
                     }
                 } else {
-                    println!("Bytecode: Not available or compilation error");
+                    debug!("Bytecode: Not available or compilation error");
                 }
             }
         }
