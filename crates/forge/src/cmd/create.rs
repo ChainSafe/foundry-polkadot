@@ -395,7 +395,10 @@ impl CreateArgs {
                             );
                         }
                         BytecodeObject::Unlinked(_) => {
-                            println!("Bytecode: Available (unlinked) for child contract) {:?}", contract_name);
+                            println!(
+                                "Bytecode: Available (unlinked) for child contract) {:?}",
+                                contract_name
+                            );
                         }
                     }
                 } else {
