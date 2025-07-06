@@ -194,7 +194,7 @@ fn find_initializations_in_statements(
             Statement::Expression(_, expr) => {
                 find_initializations_in_expression(expr, initialized_names);
             }
-            Statement::VariableDefinition(_, _var_decl, init_expr) => {
+            Statement::VariableDefinition(_, var_decl, init_expr) => {
                 if let Some(expr) = init_expr {
                     find_initializations_in_expression(expr, initialized_names);
                 }
