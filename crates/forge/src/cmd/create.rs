@@ -12,7 +12,7 @@ use alloy_transport::TransportError;
 use clap::{Parser, ValueHint};
 
 use codec::{Compact, Encode};
-use eyre::{Context, Result};
+use eyre::{Context, OptionExt, Result};
 use forge_verify::{RetryArgs, VerifierArgs, VerifyArgs};
 use foundry_cli::{
     opts::{BuildOpts, EthereumOpts, EtherscanOpts, TransactionOpts},
@@ -298,8 +298,8 @@ fn extract_contract_name_from_type(ty: &solang_parser::pt::Type) -> String {
 }
 
 async fn upload_child_contract_alloy(
-    rpc_url: Option<String>,
-    private_key: Option<String>,
+    rpc_url: &str,
+    private_key: String,
     encoded_bytes: String,
 ) -> Result<String> {
     use alloy_primitives::{Address, U256};
@@ -309,14 +309,6 @@ async fn upload_child_contract_alloy(
     use alloy_serde::WithOtherFields;
     use foundry_common::provider::ProviderBuilder;
     use std::str::FromStr;
-
-    // Use provided RPC URL or fallback to default
-    let rpc_url = rpc_url.unwrap_or_else(|| "https://testnet-passet-hub-eth-rpc.polkadot.io/".to_string());
-    
-    // Use provided private key or fallback to default
-    let private_key = private_key.unwrap_or_else(|| {
-        "5fb92d6e98884f76de468fa3f6278f8807c48bebc13595d45af5bdc4da702133".to_string()
-    });
 
     // 1. Create wallet from private key
     let wallet = PrivateKeySigner::from_str(&private_key)?;
@@ -341,62 +333,13 @@ async fn upload_child_contract_alloy(
     let pending_tx = provider.send_transaction(wrapped_tx).await?;
     let receipt = pending_tx.get_receipt().await?;
     
-    println!("Transaction sent! Hash: {:?}", receipt.transaction_hash);
     Ok(receipt.transaction_hash.to_string())
-}
-
-async fn upload_child_contract(
-    rpc_url: Option<String>,
-    private_key: Option<String>,
-    code: String
-) -> Result<String> {
-    use std::process::Command;
-
-    // Use provided RPC URL or fallback to default
-    let rpc_url =
-        rpc_url.unwrap_or_else(|| "https://testnet-passet-hub-eth-rpc.polkadot.io/".to_string());
-
-    // Use provided private key or fallback to default
-    let private_key = private_key.unwrap_or_else(|| {
-        "5fb92d6e98884f76de468fa3f6278f8807c48bebc13595d45af5bdc4da702133".to_string()
-    });
-
-    // Build the cast send command
-    let mut cmd = Command::new("cast");
-    cmd.arg("send");
-    cmd.arg("0x6d6f646c70792f70616464720000000000000000");
-    cmd.arg("--rpc-url").arg(&rpc_url);
-    cmd.arg("--private-key").arg(&private_key);
-    cmd.arg(&code);
-
-    println!("Executing command: {:?}", cmd);
-
-    // Execute the command
-    let output = cmd.output().map_err(|e| eyre::eyre!("Failed to execute cast send: {}", e))?;
-
-    if output.status.success() {
-        let tx_hash = String::from_utf8(output.stdout)
-            .map_err(|e| eyre::eyre!("Failed to parse cast output: {}", e))?
-            .trim()
-            .to_string();
-        println!("Transaction successful: {}", tx_hash);
-        Ok(tx_hash)
-    } else {
-        let error =
-            String::from_utf8(output.stderr).unwrap_or_else(|_| "Unknown error".to_string());
-        println!("Command failed with error: {}", error);
-        Err(eyre::eyre!("Cast send failed: {}", error))
-    }
 }
 
 impl CreateArgs {
     /// Executes the command to create a contract
     pub async fn run(mut self) -> Result<()> {
         let mut config = self.load_config()?;
-        println!("=== User Inputs ===");
-        println!("RPC URL: {:?}", self.eth.rpc.url);
-        println!("Private Key: {:?}", self.eth.wallet.raw.private_key);
-        println!("==================");
         // Install missing dependencies.
         if install::install_missing_dependencies(&mut config) && config.auto_detect_remappings {
             // need to re-configure here to also catch additional remappings
@@ -428,33 +371,28 @@ impl CreateArgs {
                 {
                     match &bin.object {
                         BytecodeObject::Bytecode(bytes) => {
-                            println!("    Bytecode: Available ({} bytes)", bytes.len());
-                            println!("    Bytecode: 0x{}", hex::encode(bytes));
                             let scaled_encoded_bytes = bytes.encode();
-
-                            let storage_deposit_limit = Compact(5378900000u128);
+                            let storage_deposit_limit = Compact(10000000000u128);
                             let encoded_storage_deposit_limit = storage_deposit_limit.encode();
                             let combined_hex = "0x3c04".to_string()
                                 + &hex::encode(&scaled_encoded_bytes)
                                 + &hex::encode(&encoded_storage_deposit_limit);
-                            println!(
-                                "    SCALE Encoded Bytecode: {}",
-                                &combined_hex
-                            );
+
                             // Pass RPC URL and private key to upload_child_contract
-                            let rpc_url = self.eth.rpc.url.clone();
-                            let private_key = self.eth.wallet.raw.private_key.clone();
-                            //upload_child_contract(rpc_url, private_key, combined_hex).await;
-                            upload_child_contract(rpc_url, private_key, combined_hex).await?;
+                            let rpc_url = config.get_rpc_url_or_localhost_http()?;
+                            let private_key = self.eth.wallet.raw.private_key.clone()
+                            .ok_or_eyre("Private key not provided")?;
+                            
+                            let tx_hash =upload_child_contract_alloy(rpc_url.as_ref(), private_key, combined_hex).await?;
+                            println!("Transaction sent! Hash: {:?} for child contract {:?}", tx_hash, contract_name);
                         }
                         BytecodeObject::Unlinked(_) => {
-                            println!("    Bytecode: Available (unlinked)");
+                            println!("Bytecode: Available (unlinked)");
                         }
                     }
                 } else {
-                    println!("    Bytecode: Not available or compilation error");
+                    println!("Bytecode: Not available or compilation error");
                 }
-                //println!();
             }
         }
 
