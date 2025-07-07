@@ -16,7 +16,7 @@ use eyre::{Context, OptionExt, Result};
 use forge_verify::{RetryArgs, VerifierArgs, VerifyArgs};
 use foundry_cli::{
     opts::{BuildOpts, EthereumOpts, EtherscanOpts, TransactionOpts},
-    utils::{self, read_constructor_args_file, remove_contract, get_child_contracts, LoadConfig},
+    utils::{self, get_child_contracts, read_constructor_args_file, remove_contract, LoadConfig},
 };
 use foundry_common::{
     compile::{self},
@@ -24,10 +24,7 @@ use foundry_common::{
     shell,
 };
 use foundry_compilers::{
-    artifacts::BytecodeObject,
-    info::ContractInfo,
-    utils::canonicalize,
-    ArtifactId,
+    artifacts::BytecodeObject, info::ContractInfo, utils::canonicalize, ArtifactId,
 };
 use foundry_config::{
     figment::{
