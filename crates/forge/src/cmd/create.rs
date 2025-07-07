@@ -124,11 +124,11 @@ async fn upload_child_contract_alloy(
 
     // Use the special "magic address" for child contract deployment
     let magic_address: Address = "0x6d6f646c70792f70616464720000000000000000".parse()?;
-    
+
     // Convert the hex-encoded bytecode string to actual bytes for the transaction input
     // Remove "0x" prefix if present before decoding
     let input_bytes = hex::decode(encoded_bytes.trim_start_matches("0x"))?;
-    
+
     // Construct the transaction request
     let tx = TransactionRequest::default()
         .to(magic_address)
@@ -137,11 +137,11 @@ async fn upload_child_contract_alloy(
 
     // Wrap the transaction in WithOtherFields for proper serialization
     let wrapped_tx = WithOtherFields::new(tx);
-    
+
     // Send the transaction to the network and wait for it to be included in a block
     let pending_tx = provider.send_transaction(wrapped_tx).await?;
     let receipt = pending_tx.get_receipt().await?;
-    
+
     // Return the transaction hash as a string for tracking and verification
     Ok(receipt.transaction_hash.to_string())
 }
