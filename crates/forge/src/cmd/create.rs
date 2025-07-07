@@ -16,7 +16,7 @@ use eyre::{Context, OptionExt, Result};
 use forge_verify::{RetryArgs, VerifierArgs, VerifyArgs};
 use foundry_cli::{
     opts::{BuildOpts, EthereumOpts, EtherscanOpts, TransactionOpts},
-    utils::{self, read_constructor_args_file, remove_contract, LoadConfig},
+    utils::{self, read_constructor_args_file, remove_contract, get_child_contracts, LoadConfig},
 };
 use foundry_common::{
     compile::{self},
@@ -24,7 +24,10 @@ use foundry_common::{
     shell,
 };
 use foundry_compilers::{
-    artifacts::BytecodeObject, info::ContractInfo, utils::canonicalize, ArtifactId,
+    artifacts::BytecodeObject,
+    info::ContractInfo,
+    utils::canonicalize,
+    ArtifactId,
 };
 use foundry_config::{
     figment::{
@@ -35,10 +38,7 @@ use foundry_config::{
     merge_impl_figment_convert, Config,
 };
 use serde_json::json;
-use std::{
-    borrow::Borrow, collections::HashSet, marker::PhantomData, path::PathBuf, sync::Arc,
-    time::Duration,
-};
+use std::{borrow::Borrow, marker::PhantomData, path::PathBuf, sync::Arc, time::Duration};
 use tracing::debug;
 merge_impl_figment_convert!(CreateArgs, build, eth);
 
@@ -105,194 +105,6 @@ pub struct CreateArgs {
     retry: RetryArgs,
 }
 
-/// Finds all contracts being initialized in the target contract along with their file paths
-///
-/// # Arguments
-/// * `target_path` - Path to the contract file being analyzed
-/// * `output` - The compilation output containing all contract information
-///
-/// # Returns
-/// * `Result<Vec<(String, PathBuf)>>` - Vector of (contract_name, file_path) tuples
-pub fn find_initialized_contracts_with_paths(
-    target_path: &PathBuf,
-    output: &foundry_compilers::ProjectCompileOutput,
-) -> Result<Vec<(String, PathBuf)>> {
-    let mut initialized_contracts = Vec::new();
-
-    // Read the source file content
-    let source_content = std::fs::read_to_string(target_path)
-        .wrap_err_with(|| format!("Failed to read target file: {}", target_path.display()))?;
-
-    // Parse the Solidity source code
-    let (parse_tree, _diagnostics) = match solang_parser::parse(&source_content, 0) {
-        Ok((tree, diag)) => (tree, diag),
-        Err(_diagnostics) => {
-            // If parsing fails, return empty list
-            return Ok(vec![]);
-        }
-    };
-
-    // Find all contract names being initialized
-    let mut initialized_names = HashSet::new();
-    find_contract_initializations(&parse_tree.0, &mut initialized_names);
-
-    // Map contract names to their file paths using compilation output
-    let contracts = &output.output().contracts;
-    for contract_name in initialized_names {
-        // Search through all files to find where this contract is defined
-        for (file_path, file_contracts) in contracts.iter() {
-            if file_contracts.contains_key(&contract_name) {
-                initialized_contracts.push((contract_name.clone(), file_path.clone()));
-                break;
-            }
-        }
-    }
-
-    initialized_contracts.sort_by(|a, b| a.0.cmp(&b.0));
-    Ok(initialized_contracts)
-}
-
-/// Recursively searches AST for contract initializations (new ContractName() expressions)
-fn find_contract_initializations(
-    source_unit_parts: &[solang_parser::pt::SourceUnitPart],
-    initialized_names: &mut HashSet<String>,
-) {
-    use solang_parser::pt::*;
-
-    for part in source_unit_parts {
-        if let SourceUnitPart::ContractDefinition(contract) = part {
-            // Look for initializations within contract functions
-            for contract_part in &contract.parts {
-                match contract_part {
-                    ContractPart::FunctionDefinition(func) => {
-                        if let Some(Statement::Block { statements, .. }) = &func.body {
-                            find_initializations_in_statements(statements, initialized_names);
-                        }
-                    }
-                    ContractPart::VariableDefinition(var_def) => {
-                        // Check for contract initializations in variable definitions
-                        if let Some(expr) = &var_def.initializer {
-                            find_initializations_in_expression(expr, initialized_names);
-                        }
-                    }
-                    _ => {}
-                }
-            }
-        }
-    }
-}
-
-/// Recursively searches statements for contract initializations
-fn find_initializations_in_statements(
-    statements: &[solang_parser::pt::Statement],
-    initialized_names: &mut HashSet<String>,
-) {
-    use solang_parser::pt::*;
-
-    for stmt in statements {
-        match stmt {
-            Statement::Expression(_, expr) => {
-                find_initializations_in_expression(expr, initialized_names);
-            }
-            Statement::VariableDefinition(_, _var_decl, Some(expr)) => {
-                find_initializations_in_expression(expr, initialized_names);
-            }
-            Statement::Block { statements, .. } => {
-                find_initializations_in_statements(statements, initialized_names);
-            }
-            _ => {}
-        }
-    }
-}
-
-/// Searches expressions for contract initializations (new ContractName() calls)
-fn find_initializations_in_expression(
-    expr: &solang_parser::pt::Expression,
-    initialized_names: &mut HashSet<String>,
-) {
-    use solang_parser::pt::*;
-
-    match expr {
-        Expression::New(_, type_expr) => {
-            // Extract contract name from the type expression
-            let contract_name = extract_contract_name_from_expression(type_expr);
-            if !contract_name.is_empty() {
-                initialized_names.insert(contract_name);
-            }
-        }
-        Expression::FunctionCall(_, func_expr, args) => {
-            // Recursively check function call expressions and arguments
-            find_initializations_in_expression(func_expr, initialized_names);
-            for arg in args {
-                find_initializations_in_expression(arg, initialized_names);
-            }
-        }
-        Expression::Assign(_, left_expr, right_expr) => {
-            find_initializations_in_expression(left_expr, initialized_names);
-            find_initializations_in_expression(right_expr, initialized_names);
-        }
-        Expression::MemberAccess(_, base_expr, _member) => {
-            find_initializations_in_expression(base_expr, initialized_names);
-        }
-        _ => {}
-    }
-}
-
-/// Extracts contract name from an Expression (for new Contract() patterns)
-fn extract_contract_name_from_expression(expr: &solang_parser::pt::Expression) -> String {
-    use solang_parser::pt::*;
-
-    match expr {
-        Expression::Variable(identifier) => identifier.name.clone(),
-        Expression::MemberAccess(_, _, identifier) => identifier.name.clone(),
-        Expression::FunctionCall(_, func_expr, _args) => {
-            extract_contract_name_from_expression(func_expr)
-        }
-        Expression::Type(_, ty) => extract_contract_name_from_type(ty),
-        _ => String::new(),
-    }
-}
-
-/// Extracts contract name from a Type
-fn extract_contract_name_from_type(ty: &solang_parser::pt::Type) -> String {
-    use solang_parser::pt::*;
-
-    match ty {
-        Type::Address |
-        Type::AddressPayable |
-        Type::Bool |
-        Type::String |
-        Type::Int(_) |
-        Type::Uint(_) |
-        Type::Bytes(_) |
-        Type::DynamicBytes |
-        Type::Mapping { .. } |
-        Type::Function { .. } => String::new(),
-        _ => {
-            // For custom types (likely contracts), try to extract the identifier
-            let type_str = format!("{ty:?}");
-
-            // Look for identifier patterns in the debug output
-            if let Some(start) = type_str.find("name: \"") {
-                let start = start + 7; // Skip 'name: "'
-                if let Some(end) = type_str[start..].find('"') {
-                    let name = &type_str[start..start + end];
-                    return name.to_string();
-                }
-            }
-
-            // Fallback: look for capitalized identifiers
-            type_str
-                .split_whitespace()
-                .find(|s| s.chars().next().is_some_and(|c| c.is_ascii_uppercase()) && s.len() > 1)
-                .unwrap_or("")
-                .trim_matches(',')
-                .trim_matches(')')
-                .to_string()
-        }
-    }
-}
-
 async fn upload_child_contract_alloy(
     rpc_url: &str,
     private_key: String,
@@ -349,57 +161,59 @@ impl CreateArgs {
         let output: foundry_compilers::ProjectCompileOutput =
             compile::compile_target(&target_path, &project, shell::is_json())?;
 
-        // Find all contracts being initialized in the target contract along with their paths
-        let initialized_contracts = find_initialized_contracts_with_paths(&target_path, &output)?;
-        if !initialized_contracts.is_empty() {
-            debug!("Contracts being initialized in {}:", target_path.display());
-            for (contract_name, contract_path) in &initialized_contracts {
-                debug!("  - {} (defined in: {})", contract_name, contract_path.display());
-
-                // Try to get bytecode information for this contract
-                if let Ok((_, bin, _)) =
-                    remove_contract(output.clone(), contract_path, contract_name)
-                {
-                    match &bin.object {
-                        BytecodeObject::Bytecode(bytes) => {
-                            let scaled_encoded_bytes = bytes.encode();
-                            let storage_deposit_limit = Compact(10000000000u128);
-                            let encoded_storage_deposit_limit = storage_deposit_limit.encode();
-                            let combined_hex = "0x3c04".to_string() +
-                                &hex::encode(&scaled_encoded_bytes) +
-                                &hex::encode(&encoded_storage_deposit_limit);
-
-                            // Pass RPC URL and private key to upload_child_contract
-                            let rpc_url = config.get_rpc_url_or_localhost_http()?;
-                            let private_key = self
-                                .eth
-                                .wallet
-                                .raw
-                                .private_key
-                                .clone()
-                                .ok_or_eyre("Private key not provided")?;
-
-                            let tx_hash = upload_child_contract_alloy(
-                                rpc_url.as_ref(),
-                                private_key,
-                                combined_hex,
-                            )
-                            .await?;
-                            debug!(
-                                "Transaction sent! Hash: {:?} for child contract {:?}",
-                                tx_hash, contract_name
-                            );
-                        }
-                        BytecodeObject::Unlinked(_) => {
-                            debug!(
-                                "Bytecode: Available (unlinked) for child contract) {:?}",
-                                contract_name
-                            );
-                        }
-                    }
+        match get_child_contracts(output.clone(), &self.contract.name) {
+            Ok(child_contracts) => {
+                if child_contracts.is_empty() {
+                    debug!("No child contracts found for '{}'", self.contract.name);
                 } else {
-                    debug!("Bytecode: Not available or compilation error");
+                    debug!(
+                        "Found {} child contract(s) for '{}':",
+                        child_contracts.len(),
+                        self.contract.name
+                    );
+                    for child in &child_contracts {
+                        match &child.bytecode {
+                            BytecodeObject::Bytecode(bytes) => {
+                                let scaled_encoded_bytes = bytes.encode();
+                                let storage_deposit_limit = Compact(10000000000u128);
+                                let encoded_storage_deposit_limit = storage_deposit_limit.encode();
+                                let combined_hex = "0x3c04".to_string() +
+                                    &hex::encode(&scaled_encoded_bytes) +
+                                    &hex::encode(&encoded_storage_deposit_limit);
+
+                                // Pass RPC URL and private key to upload_child_contract
+                                let rpc_url = config.get_rpc_url_or_localhost_http()?;
+                                let private_key = self
+                                    .eth
+                                    .wallet
+                                    .raw
+                                    .private_key
+                                    .clone()
+                                    .ok_or_eyre("Private key not provided")?;
+
+                                let tx_hash = upload_child_contract_alloy(
+                                    rpc_url.as_ref(),
+                                    private_key,
+                                    combined_hex,
+                                )
+                                .await?;
+                                debug!(
+                                    "Transaction sent! Hash: {:?} for child contract {:?}",
+                                    tx_hash, self.contract.name
+                                );
+                            }
+                            BytecodeObject::Unlinked(_) => {
+                                debug!(
+                                    "Bytecode: Available (unlinked) for child contract) {:?}",
+                                    self.contract.name
+                                );
+                            }
+                        };
+                    }
                 }
+            }
+            Err(e) => {
+                debug!("Error getting child contracts: {}", e);
             }
         }
 

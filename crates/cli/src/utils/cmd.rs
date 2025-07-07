@@ -6,7 +6,7 @@ use foundry_common::{
     TestFunctionExt,
 };
 use foundry_compilers::{
-    artifacts::{CompactBytecode, Settings},
+    artifacts::{BytecodeObject, CompactBytecode, ConfigurableContractArtifact, Settings},
     cache::{CacheEntry, CompilerCache},
     utils::read_json_file,
     Artifact, ArtifactId, ProjectCompileOutput,
@@ -71,6 +71,40 @@ pub fn remove_contract(
         .into_owned();
 
     Ok((abi, bin, id))
+}
+
+#[derive(Debug, Clone)]
+pub struct ChildContract {
+    pub name: String,
+    pub bytecode: BytecodeObject,
+}
+
+/// Get child contracts from compiled output
+pub fn get_child_contracts(
+    output: ProjectCompileOutput,
+    parent_contract_name: &str,
+) -> Result<Vec<ChildContract>> {
+    let artifacts: Vec<(ArtifactId, ConfigurableContractArtifact)> =
+        output.into_artifacts().collect();
+    let mut child_contracts = Vec::new();
+
+    // Find all contracts that are not the parent contract
+    for (artifact_id, artifact) in artifacts {
+        let contract_name = &artifact_id.name;
+
+        if contract_name != parent_contract_name {
+            // This is a child contract (different name from parent)
+            if let Some(bytecode) = &artifact.bytecode {
+                let child_contract = ChildContract {
+                    name: contract_name.clone(),
+                    bytecode: bytecode.object.clone(),
+                };
+                child_contracts.push(child_contract);
+            }
+        }
+    }
+
+    Ok(child_contracts)
 }
 
 /// Helper function for finding a contract by ContractName
