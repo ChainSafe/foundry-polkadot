@@ -102,6 +102,7 @@ pub struct CreateArgs {
     retry: RetryArgs,
 }
 
+/// Uploads a child contract to a blockchain network using the Alloy framework.
 async fn upload_child_contract_alloy(
     rpc_url: &str,
     private_key: String,
@@ -115,24 +116,33 @@ async fn upload_child_contract_alloy(
     use foundry_common::provider::ProviderBuilder;
     use std::str::FromStr;
 
-    // 1. Create wallet from private key
+    // This wallet will be used to sign the deployment transaction
     let wallet = PrivateKeySigner::from_str(&private_key)?;
 
-    // 2. Create provider with wallet using the proper Foundry pattern
+    // This establishes the connection to the target network and prepares for transaction signing
     let provider = ProviderBuilder::new(rpc_url).build_with_wallet(EthereumWallet::new(wallet))?;
 
-    // 3. Build transaction
+    // Use the special "magic address" for child contract deployment
     let magic_address: Address = "0x6d6f646c70792f70616464720000000000000000".parse()?;
-    // Convert hex string to bytes for input
+    
+    // Convert the hex-encoded bytecode string to actual bytes for the transaction input
+    // Remove "0x" prefix if present before decoding
     let input_bytes = hex::decode(encoded_bytes.trim_start_matches("0x"))?;
+    
+    // Construct the transaction request
     let tx = TransactionRequest::default()
         .to(magic_address)
         .input(input_bytes.into())
         .value(U256::from(0u64));
-    // 4. Sign and send transaction
+
+    // Wrap the transaction in WithOtherFields for proper serialization
     let wrapped_tx = WithOtherFields::new(tx);
+    
+    // Send the transaction to the network and wait for it to be included in a block
     let pending_tx = provider.send_transaction(wrapped_tx).await?;
     let receipt = pending_tx.get_receipt().await?;
+    
+    // Return the transaction hash as a string for tracking and verification
     Ok(receipt.transaction_hash.to_string())
 }
 
