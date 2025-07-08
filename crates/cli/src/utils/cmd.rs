@@ -112,7 +112,7 @@ pub fn get_child_contracts(
                     child_contracts.push(child_contract);
                 }
             } else {
-                println!("Skipping library: '{}' (not a deployable child contract)", contract_name);
+                tracing::debug!("Skipping library: '{contract_name}' (not a deployable child contract)");
             }
         }
     }
