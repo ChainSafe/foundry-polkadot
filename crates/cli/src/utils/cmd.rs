@@ -80,6 +80,7 @@ pub struct ChildContract {
 }
 
 /// Get child contracts from compiled output
+/// Excludes internal libraries since they are not meant to be deployed separately
 pub fn get_child_contracts(
     output: ProjectCompileOutput,
     parent_contract_name: &str,
@@ -88,18 +89,30 @@ pub fn get_child_contracts(
         output.into_artifacts().collect();
     let mut child_contracts = Vec::new();
 
-    // Find all contracts that are not the parent contract
+    // Find all contracts that are not the parent contract and are not libraries
     for (artifact_id, artifact) in artifacts {
         let contract_name = &artifact_id.name;
 
         if contract_name != parent_contract_name {
-            // This is a child contract (different name from parent)
-            if let Some(bytecode) = &artifact.bytecode {
-                let child_contract = ChildContract {
-                    name: contract_name.clone(),
-                    bytecode: bytecode.object.clone(),
-                };
-                child_contracts.push(child_contract);
+            // Check if this is a library by looking at the ABI
+            let is_library = if let Some(abi) = &artifact.abi {
+                abi.functions().count() == 0
+            } else {
+                // No ABI indicates a library
+                true
+            };
+
+            // Only include non-library contracts as child contracts
+            if !is_library {
+                if let Some(bytecode) = &artifact.bytecode {
+                    let child_contract = ChildContract {
+                        name: contract_name.clone(),
+                        bytecode: bytecode.object.clone(),
+                    };
+                    child_contracts.push(child_contract);
+                }
+            } else {
+                println!("Skipping library: '{}' (not a deployable child contract)", contract_name);
             }
         }
     }
