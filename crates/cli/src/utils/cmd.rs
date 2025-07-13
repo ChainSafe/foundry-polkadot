@@ -6,7 +6,7 @@ use foundry_common::{
     TestFunctionExt,
 };
 use foundry_compilers::{
-    artifacts::{BytecodeObject, CompactBytecode, ConfigurableContractArtifact, Settings},
+    artifacts::{CompactBytecode, Settings},
     cache::{CacheEntry, CompilerCache},
     utils::read_json_file,
     Artifact, ArtifactId, ProjectCompileOutput,
@@ -71,53 +71,6 @@ pub fn remove_contract(
         .into_owned();
 
     Ok((abi, bin, id))
-}
-
-#[derive(Debug, Clone)]
-pub struct ChildContract {
-    pub name: String,
-    pub bytecode: BytecodeObject,
-}
-
-/// Get child contracts from compiled output
-/// Excludes internal libraries since they are not meant to be deployed separately
-pub fn get_child_contracts(
-    output: ProjectCompileOutput,
-    parent_contract_name: &str,
-) -> Result<Vec<ChildContract>> {
-    let artifacts: Vec<(ArtifactId, ConfigurableContractArtifact)> =
-        output.into_artifacts().collect();
-    let mut child_contracts = Vec::new();
-
-    // Find all contracts that are not the parent contract and are not libraries
-    for (artifact_id, artifact) in artifacts {
-        let contract_name = &artifact_id.name;
-
-        if contract_name != parent_contract_name {
-            // Check if this is a library by looking at the ABI
-            let is_library = if let Some(abi) = &artifact.abi {
-                abi.functions().count() == 0
-            } else {
-                // No ABI indicates a library
-                true
-            };
-
-            // Only include non-library contracts as child contracts
-            if !is_library {
-                if let Some(bytecode) = &artifact.bytecode {
-                    let child_contract = ChildContract {
-                        name: contract_name.clone(),
-                        bytecode: bytecode.object.clone(),
-                    };
-                    child_contracts.push(child_contract);
-                }
-            } else {
-                tracing::debug!("Skipping library: '{contract_name}' (not a deployable child contract)");
-            }
-        }
-    }
-
-    Ok(child_contracts)
 }
 
 /// Helper function for finding a contract by ContractName
