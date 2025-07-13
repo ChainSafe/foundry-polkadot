@@ -57,7 +57,7 @@ fn find_contract_by_hash(output: &ProjectCompileOutput, target_hash: &str) -> Op
                 let normalized_calculated = calculated_hash.trim_start_matches("0x");
 
                 if normalized_calculated == normalized_target {
-                    return Some(bytecode_bytes.into());
+                    return Some(bytecode_bytes);
                 }
             }
         }
@@ -82,7 +82,7 @@ async fn handle_factory_dependencies(
 
     for artifact in artifacts.into_iter().map(|(_, artifact)| artifact) {
         // Convert artifact to JSON to access factoryDependencies
-        let artifact_json = serde_json::to_value(&artifact)?;
+        let artifact_json = serde_json::to_value(artifact)?;
         if let Some(factory_deps) = artifact_json.get("factoryDependencies") {
             if let Some(deps_map) = factory_deps.as_object() {
                 for (dep_hash, dep_name) in deps_map {
