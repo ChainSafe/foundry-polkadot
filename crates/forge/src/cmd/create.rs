@@ -81,9 +81,15 @@ async fn handle_factory_dependencies(
     let mut all_dependencies = BTreeMap::new();
 
     for artifact in artifacts.into_iter().map(|(_, artifact)| artifact) {
-        if let Some(factory_deps) = &artifact.factory_dependencies {
-            for (dep_hash, dep_name) in factory_deps {
-                all_dependencies.insert(dep_hash.clone(), dep_name.clone());
+        // Convert artifact to JSON to access factoryDependencies
+        let artifact_json = serde_json::to_value(&artifact)?;
+        if let Some(factory_deps) = artifact_json.get("factoryDependencies") {
+            if let Some(deps_map) = factory_deps.as_object() {
+                for (dep_hash, dep_name) in deps_map {
+                    if let Some(name) = dep_name.as_str() {
+                        all_dependencies.insert(dep_hash.clone(), name.to_string());
+                    }
+                }
             }
         }
     }
@@ -111,9 +117,9 @@ async fn handle_factory_dependencies(
             let scaled_encoded_bytes = bytecode.encode();
             let storage_deposit_limit = Compact(10000000000u128);
             let encoded_storage_deposit_limit = storage_deposit_limit.encode();
-            let combined_hex = "0x3c04".to_string()
-                + &hex::encode(&scaled_encoded_bytes)
-                + &hex::encode(&encoded_storage_deposit_limit);
+            let combined_hex = "0x3c04".to_string() +
+                &hex::encode(&scaled_encoded_bytes) +
+                &hex::encode(&encoded_storage_deposit_limit);
 
             let _tx_hash = upload_child_contract_alloy(
                 rpc_url.as_ref(),
