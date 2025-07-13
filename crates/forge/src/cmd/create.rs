@@ -24,7 +24,8 @@ use foundry_common::{
     shell,
 };
 use foundry_compilers::{
-    artifacts::BytecodeObject, info::ContractInfo, utils::canonicalize, ArtifactId, ProjectCompileOutput, Artifact,
+    artifacts::BytecodeObject, info::ContractInfo, utils::canonicalize, Artifact, ArtifactId,
+    ProjectCompileOutput,
 };
 use foundry_config::{
     figment::{
@@ -35,14 +36,14 @@ use foundry_config::{
     merge_impl_figment_convert, Config,
 };
 use serde_json::json;
-use std::{borrow::Borrow, collections::BTreeMap, marker::PhantomData, path::PathBuf, sync::Arc, time::Duration};
+use std::{
+    borrow::Borrow, collections::BTreeMap, marker::PhantomData, path::PathBuf, sync::Arc,
+    time::Duration,
+};
 merge_impl_figment_convert!(CreateArgs, build, eth);
 
 /// Finds a contract in the artifacts by its bytecode hash
-fn find_contract_by_hash(
-    output: &ProjectCompileOutput,
-    target_hash: &str,
-) -> Option<Bytes> {
+fn find_contract_by_hash(output: &ProjectCompileOutput, target_hash: &str) -> Option<Bytes> {
     for (_contract_name, artifact) in output.artifacts() {
         if let Some(bytecode) = artifact.get_bytecode_bytes() {
             let bytecode_bytes = bytecode.into_owned();
@@ -50,11 +51,11 @@ fn find_contract_by_hash(
                 // Calculate keccak256 hash of the bytecode
                 use alloy_primitives::keccak256;
                 let calculated_hash = hex::encode(keccak256(&bytecode_bytes));
-                
+
                 // Normalize both hashes by removing 0x prefix for comparison
                 let normalized_target = target_hash.trim_start_matches("0x");
                 let normalized_calculated = calculated_hash.trim_start_matches("0x");
-                
+
                 if normalized_calculated == normalized_target {
                     return Some(bytecode_bytes.into());
                 }
@@ -71,14 +72,14 @@ async fn handle_factory_dependencies(
     private_key: &str,
 ) -> Result<()> {
     let artifacts: Vec<_> = output.artifacts().collect();
-    
+
     if artifacts.is_empty() {
         return Ok(());
     }
-    
+
     // Collect all factory dependencies from all contracts
     let mut all_dependencies = BTreeMap::new();
-    
+
     for artifact in artifacts.into_iter().map(|(_, artifact)| artifact) {
         if let Some(factory_deps) = &artifact.factory_dependencies {
             for (dep_hash, dep_name) in factory_deps {
@@ -86,33 +87,33 @@ async fn handle_factory_dependencies(
             }
         }
     }
-    
+
     if all_dependencies.is_empty() {
         return Ok(());
     }
-    
+
     // Get RPC URL for factory dependency uploads
     let rpc_url = config.get_rpc_url_or_localhost_http()?;
-    
+
     // Upload each factory dependency
     for (hash, name) in all_dependencies {
         // Try to find the contract by hash directly (skip name-based lookup)
         let bytecode = find_contract_by_hash(output, &hash);
-        
+
         if let Some(bytecode) = bytecode {
             // Skip child contracts (those with 0x3c04 prefix)
             let bytecode_slice = bytecode.as_ref();
             if bytecode_slice.len() >= 2 && bytecode_slice[0] == 0x3c && bytecode_slice[1] == 0x04 {
                 continue;
             }
-            
+
             // Upload factory dependency using upload_child_contract_alloy
             let scaled_encoded_bytes = bytecode.encode();
             let storage_deposit_limit = Compact(10000000000u128);
             let encoded_storage_deposit_limit = storage_deposit_limit.encode();
-            let combined_hex = "0x3c04".to_string() +
-                &hex::encode(&scaled_encoded_bytes) +
-                &hex::encode(&encoded_storage_deposit_limit);
+            let combined_hex = "0x3c04".to_string()
+                + &hex::encode(&scaled_encoded_bytes)
+                + &hex::encode(&encoded_storage_deposit_limit);
 
             let _tx_hash = upload_child_contract_alloy(
                 rpc_url.as_ref(),
@@ -123,11 +124,12 @@ async fn handle_factory_dependencies(
         } else {
             return Err(eyre::eyre!(
                 "Could not find contract '{}' (hash: {}) in artifacts",
-                name, hash
+                name,
+                hash
             ));
         }
     }
-    
+
     Ok(())
 }
 
@@ -293,13 +295,8 @@ impl CreateArgs {
 
         // Handle factory dependencies before deploying the main contract
         if self.broadcast {
-            let private_key = self
-                .eth
-                .wallet
-                .raw
-                .private_key
-                .clone()
-                .ok_or_eyre("Private key not provided")?;
+            let private_key =
+                self.eth.wallet.raw.private_key.clone().ok_or_eyre("Private key not provided")?;
             handle_factory_dependencies(&output, &config, &private_key).await?;
         }
 
