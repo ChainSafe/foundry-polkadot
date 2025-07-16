@@ -7,6 +7,8 @@ on:
       - "rc"
       - "rc-*"
       - "v*.*.*"
+  schedule:
+    - cron: "0 6 * * *"
   workflow_dispatch:
     inputs:
       is_nightly:
@@ -18,7 +20,7 @@ on:
         description: "stable version for the build"
         type: string
         required: false
-        default: "v0.3.0"
+        default: "v1.1.0"
 
 env:
   CARGO_TERM_COLOR: always
