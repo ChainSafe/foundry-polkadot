@@ -315,6 +315,7 @@ mod tests {
                 .build(MultiCompiler {
                     solidity: SolidityCompiler::Solc(SolcCompiler::Specific(solc)),
                     vyper: None,
+                    extensions: Default::default(),
                 })
                 .unwrap();
 
