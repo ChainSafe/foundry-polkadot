@@ -24,9 +24,14 @@ use foundry_common::{
     shell,
 };
 use foundry_compilers::{
-    artifacts::BytecodeObject, info::ContractInfo, utils::canonicalize, Artifact, ArtifactId,
+    artifacts::BytecodeObject, 
+    info::ContractInfo, 
+    utils::canonicalize, 
+    Artifact, 
+    ArtifactId,
     ProjectCompileOutput,
 };
+use foundry_compilers::artifacts::solc::Extensions;
 use foundry_config::{
     figment::{
         self,
@@ -71,18 +76,14 @@ async fn handle_factory_dependencies(
     config: &Config,
     private_key: &str,
 ) -> Result<()> {
-    let artifacts: Vec<_> = output.artifacts().collect();
-
-    if artifacts.is_empty() {
-        return Ok(());
-    }
-
     // Collect all factory dependencies from all contracts
     let mut all_dependencies = BTreeMap::new();
 
-    for artifact in artifacts.clone().into_iter().map(|(_, artifact)| artifact) {
-        for (dep_hash, dep_name) in &artifact.factory_dependencies {
-            all_dependencies.insert(dep_hash.clone(), dep_name.clone());
+    for (_id, contract) in output.artifact_ids() {
+        if let Extensions::Resolc(extras) = &contract.extensions {
+            for (bytecode_hash, contract_name) in &extras.factory_dependencies {
+                all_dependencies.insert(bytecode_hash.clone(), contract_name.clone());
+            }
         }
     }
 

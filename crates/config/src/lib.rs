@@ -1263,7 +1263,6 @@ impl Config {
                 SolidityCompiler::Solc(self.solc_compiler()?)
             },
             vyper: self.vyper_compiler()?,
-            extensions: Default::default(),
         })
     }
 
