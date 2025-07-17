@@ -23,15 +23,11 @@ use foundry_common::{
     fmt::parse_tokens,
     shell,
 };
+use foundry_compilers::artifacts::solc::Extensions;
 use foundry_compilers::{
-    artifacts::BytecodeObject, 
-    info::ContractInfo, 
-    utils::canonicalize, 
-    Artifact, 
-    ArtifactId,
+    artifacts::BytecodeObject, info::ContractInfo, utils::canonicalize, Artifact, ArtifactId,
     ProjectCompileOutput,
 };
-use foundry_compilers::artifacts::solc::Extensions;
 use foundry_config::{
     figment::{
         self,
@@ -110,9 +106,9 @@ async fn handle_factory_dependencies(
             let scaled_encoded_bytes = bytecode.encode();
             let storage_deposit_limit = Compact(10000000000u128);
             let encoded_storage_deposit_limit = storage_deposit_limit.encode();
-            let combined_hex = "0x3c04".to_string() +
-                &hex::encode(&scaled_encoded_bytes) +
-                &hex::encode(&encoded_storage_deposit_limit);
+            let combined_hex = "0x3c04".to_string()
+                + &hex::encode(&scaled_encoded_bytes)
+                + &hex::encode(&encoded_storage_deposit_limit);
 
             let _tx_hash = upload_child_contract_alloy(
                 rpc_url.as_ref(),
