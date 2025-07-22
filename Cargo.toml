@@ -23,6 +23,7 @@ members = [
     "crates/script-sequence/",
     "crates/macros/",
     "crates/test-utils/",
+    "crates/anvil-polkadot/",
 ]
 resolver = "2"
 
