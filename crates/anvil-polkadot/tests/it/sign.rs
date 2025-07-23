@@ -6,7 +6,7 @@ use alloy_provider::Provider;
 use alloy_rpc_types::TransactionRequest;
 use alloy_serde::WithOtherFields;
 use alloy_signer::Signer;
-use anvil::{spawn, NodeConfig};
+use anvil_polkadot::{spawn, NodeConfig};
 
 #[tokio::test(flavor = "multi_thread")]
 async fn can_sign_typed_data() {

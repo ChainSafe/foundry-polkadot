@@ -52,7 +52,7 @@ impl TaskManager {
     /// ```
     /// use alloy_network::Ethereum;
     /// use alloy_provider::RootProvider;
-    /// use anvil::{spawn, NodeConfig};
+    /// use anvil_polkadot::{spawn, NodeConfig};
     ///
     /// # async fn t() {
     /// let endpoint = "http://....";
@@ -110,7 +110,7 @@ impl TaskManager {
     /// ```
     /// use alloy_network::Ethereum;
     /// use alloy_provider::RootProvider;
-    /// use anvil::{spawn, NodeConfig};
+    /// use anvil_polkadot::{spawn, NodeConfig};
     ///
     /// # async fn t() {
     /// let (api, handle) = spawn(NodeConfig::default().with_eth_rpc_url(Some("http://...."))).await;

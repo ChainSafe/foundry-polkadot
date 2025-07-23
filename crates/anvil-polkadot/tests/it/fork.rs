@@ -15,7 +15,7 @@ use alloy_rpc_types::{
 };
 use alloy_serde::WithOtherFields;
 use alloy_signer_local::PrivateKeySigner;
-use anvil::{eth::EthApi, spawn, NodeConfig, NodeHandle};
+use anvil_polkadot::{eth::EthApi, spawn, NodeConfig, NodeHandle};
 use foundry_common::provider::get_http_provider;
 use foundry_config::Config;
 use foundry_test_utils::rpc::{self, next_http_rpc_endpoint, next_rpc_endpoint};

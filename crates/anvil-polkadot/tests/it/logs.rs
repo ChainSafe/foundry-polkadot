@@ -8,7 +8,7 @@ use alloy_network::EthereumWallet;
 use alloy_primitives::{map::B256HashSet, B256};
 use alloy_provider::Provider;
 use alloy_rpc_types::{BlockNumberOrTag, Filter};
-use anvil::{spawn, NodeConfig};
+use anvil_polkadot::{spawn, NodeConfig};
 use futures::StreamExt;
 
 #[tokio::test(flavor = "multi_thread")]

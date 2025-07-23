@@ -10,7 +10,7 @@ use alloy_rpc_types::{
 };
 use alloy_serde::WithOtherFields;
 use alloy_sol_types::{sol, SolCall, SolError, SolValue};
-use anvil::{spawn, EthereumHardfork, NodeConfig};
+use anvil_polkadot::{spawn, EthereumHardfork, NodeConfig};
 use std::collections::VecDeque;
 
 #[tokio::test(flavor = "multi_thread")]

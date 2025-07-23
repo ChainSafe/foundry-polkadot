@@ -10,7 +10,7 @@ use alloy_rpc_types::{
     AccessList, AccessListItem, BlockId, BlockNumberOrTag, BlockTransactions, TransactionRequest,
 };
 use alloy_serde::WithOtherFields;
-use anvil::{spawn, EthereumHardfork, NodeConfig};
+use anvil_polkadot::{spawn, EthereumHardfork, NodeConfig};
 use eyre::Ok;
 use futures::{future::join_all, FutureExt, StreamExt};
 use std::{str::FromStr, time::Duration};
@@ -237,7 +237,7 @@ async fn can_mine_large_gas_limit() {
     let from = accounts[0].address();
     let to = accounts[1].address();
 
-    let gas_limit = anvil::DEFAULT_GAS_LIMIT as u64;
+    let gas_limit = anvil_polkadot::DEFAULT_GAS_LIMIT as u64;
     let amount = handle.genesis_balance().checked_div(U256::from(3u64)).unwrap();
 
     let tx =

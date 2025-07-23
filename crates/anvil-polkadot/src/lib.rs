@@ -97,10 +97,10 @@ extern crate tracing;
 /// # Examples
 ///
 /// ```no_run
-/// # use anvil::NodeConfig;
+/// # use anvil_polkadot::NodeConfig;
 /// # async fn spawn() -> eyre::Result<()> {
 /// let config = NodeConfig::default();
-/// let (api, handle) = anvil::spawn(config).await;
+/// let (api, handle) = anvil_polkadot::spawn(config).await;
 ///
 /// // use api
 ///
@@ -121,10 +121,10 @@ pub async fn spawn(config: NodeConfig) -> (EthApi, NodeHandle) {
 /// # Examples
 ///
 /// ```no_run
-/// # use anvil::NodeConfig;
+/// # use anvil_polkadot::NodeConfig;
 /// # async fn spawn() -> eyre::Result<()> {
 /// let config = NodeConfig::default();
-/// let (api, handle) = anvil::try_spawn(config).await?;
+/// let (api, handle) = anvil_polkadot::try_spawn(config).await?;
 ///
 /// // use api
 ///
@@ -396,7 +396,7 @@ impl NodeHandle {
     /// Returns the task manager that can be used to spawn new tasks.
     ///
     /// ```
-    /// use anvil::NodeHandle;
+    /// use anvil_polkadot::NodeHandle;
     /// # fn t(handle: NodeHandle) {
     /// let task_manager = handle.task_manager();
     /// let on_shutdown = task_manager.on_shutdown();

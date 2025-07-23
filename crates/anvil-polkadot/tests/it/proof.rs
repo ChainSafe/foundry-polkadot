@@ -1,7 +1,7 @@
 //! tests for `eth_getProof`
 
 use alloy_primitives::{address, fixed_bytes, Address, Bytes, B256, U256};
-use anvil::{eth::EthApi, spawn, NodeConfig};
+use anvil_polkadot::{eth::EthApi, spawn, NodeConfig};
 use std::{collections::BTreeMap, str::FromStr};
 
 async fn verify_account_proof(

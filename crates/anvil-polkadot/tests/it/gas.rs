@@ -6,7 +6,7 @@ use alloy_primitives::{uint, Address, U256, U64};
 use alloy_provider::Provider;
 use alloy_rpc_types::{BlockId, TransactionRequest};
 use alloy_serde::WithOtherFields;
-use anvil::{eth::fees::INITIAL_BASE_FEE, spawn, NodeConfig};
+use anvil_polkadot::{eth::fees::INITIAL_BASE_FEE, spawn, NodeConfig};
 
 const GAS_TRANSFER: u128 = 21_000;
 

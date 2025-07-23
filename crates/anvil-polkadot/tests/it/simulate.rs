@@ -7,7 +7,7 @@ use alloy_rpc_types::{
     state::{AccountOverride, StateOverridesBuilder},
     BlockOverrides,
 };
-use anvil::{spawn, NodeConfig};
+use anvil_polkadot::{spawn, NodeConfig};
 use foundry_test_utils::rpc;
 
 #[tokio::test(flavor = "multi_thread")]

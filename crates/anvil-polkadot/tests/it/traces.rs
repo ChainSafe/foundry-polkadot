@@ -27,7 +27,7 @@ use alloy_rpc_types::{
 };
 use alloy_serde::WithOtherFields;
 use alloy_sol_types::sol;
-use anvil::{spawn, EthereumHardfork, NodeConfig};
+use anvil_polkadot::{spawn, EthereumHardfork, NodeConfig};
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_get_transfer_parity_traces() {

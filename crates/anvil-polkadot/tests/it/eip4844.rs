@@ -9,7 +9,7 @@ use alloy_primitives::{b256, Address, U256};
 use alloy_provider::Provider;
 use alloy_rpc_types::{BlockId, TransactionRequest};
 use alloy_serde::WithOtherFields;
-use anvil::{spawn, EthereumHardfork, NodeConfig};
+use anvil_polkadot::{spawn, EthereumHardfork, NodeConfig};
 
 #[tokio::test(flavor = "multi_thread")]
 async fn can_send_eip4844_transaction() {

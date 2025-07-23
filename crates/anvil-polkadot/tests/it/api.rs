@@ -15,7 +15,7 @@ use alloy_rpc_types::{
     BlockTransactions,
 };
 use alloy_serde::WithOtherFields;
-use anvil::{eth::api::CLIENT_VERSION, spawn, NodeConfig, CHAIN_ID};
+use anvil_polkadot::{eth::api::CLIENT_VERSION, spawn, NodeConfig, CHAIN_ID};
 use futures::join;
 use std::time::Duration;
 

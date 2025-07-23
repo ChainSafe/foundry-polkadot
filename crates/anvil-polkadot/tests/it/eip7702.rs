@@ -6,7 +6,7 @@ use alloy_provider::{PendingTransactionConfig, Provider};
 use alloy_rpc_types::{Authorization, TransactionRequest};
 use alloy_serde::WithOtherFields;
 use alloy_signer::SignerSync;
-use anvil::{spawn, EthereumHardfork, NodeConfig};
+use anvil_polkadot::{spawn, EthereumHardfork, NodeConfig};
 
 #[tokio::test(flavor = "multi_thread")]
 async fn can_send_eip7702_tx() {
