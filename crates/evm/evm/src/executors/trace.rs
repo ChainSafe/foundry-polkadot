@@ -25,7 +25,7 @@ impl TracingExecutor {
         create2_deployer: Address,
     ) -> eyre::Result<Self> {
         let db =
-            Backend::spawn(strategy.runner.new_backend_strategy(strategy.context.as_ref()), fork);
+            Backend::spawn(strategy.runner.new_backend_strategy(strategy.context.as_ref()), fork)?;
         Ok(Self {
             // configures a bare version of the evm executor: no cheatcode inspector is enabled,
             // tracing will be enabled only for the targeted transaction

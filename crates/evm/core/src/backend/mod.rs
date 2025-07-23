@@ -482,7 +482,11 @@ impl Backend {
     /// database.
     ///
     /// Prefer using [`spawn`](Self::spawn) instead.
-    pub fn new(strategy: BackendStrategy, forks: MultiFork, fork: Option<CreateFork>) -> eyre::Result<Self> {
+    pub fn new(
+        strategy: BackendStrategy,
+        forks: MultiFork,
+        fork: Option<CreateFork>,
+    ) -> eyre::Result<Self> {
         trace!(target: "backend", forking_mode=?fork.is_some(), "creating executor backend");
         // Note: this will take of registering the `fork`
         let inner = BackendInner {
@@ -1906,7 +1910,7 @@ fn commit_transaction(
         let fork = fork.clone();
         let journaled_state = journaled_state.clone();
         let depth = journaled_state.depth;
-        let mut db = Backend::new_with_fork(strategy.clone(), fork_id, fork, journaled_state);
+        let mut db = Backend::new_with_fork(strategy.clone(), fork_id, fork, journaled_state)?;
 
         let mut evm = crate::utils::new_evm_with_inspector(&mut db as _, env, inspector);
         // Adjust inner EVM depth to ensure that inspectors receive accurate data.
@@ -1992,7 +1996,7 @@ mod tests {
             evm_opts,
         };
 
-        let backend = Backend::spawn(BackendStrategy::new_evm(), Some(fork));
+        let backend = Backend::spawn(BackendStrategy::new_evm(), Some(fork)).unwrap();
 
         // some rng contract from etherscan
         let address: Address = "63091244180ae240c87d1f528f5f269134cb07b3".parse().unwrap();

@@ -179,7 +179,7 @@ impl MultiContractRunner {
         let db = Backend::spawn(
             self.strategy.runner.new_backend_strategy(self.strategy.context.as_ref()),
             self.fork.take(),
-        );
+        )?;
 
         let find_timer = Instant::now();
         let contracts = self.matching_contracts(filter).collect::<Vec<_>>();

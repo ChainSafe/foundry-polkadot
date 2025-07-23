@@ -21,12 +21,12 @@ use crate::{
     Vm::{self, AccountAccess},
 };
 use alloy_consensus::BlobTransactionSidecar;
-use alloy_network::TransactionBuilder4844;
 use alloy_primitives::{
     hex,
     map::{AddressHashMap, HashMap, HashSet},
     Address, Bytes, Log, TxKind, B256, U256,
 };
+use alloy_rpc_types::AccessList;
 use alloy_sol_types::{SolCall, SolInterface, SolValue};
 use foundry_common::{evm::Breakpoints, TransactionMaybeSigned, SELECTOR_LEN};
 use foundry_evm_core::{
@@ -55,7 +55,6 @@ use revm::{
 };
 use serde_json::Value;
 use std::{
-    cmp::max,
     collections::{BTreeMap, VecDeque},
     fs::File,
     io::BufReader,

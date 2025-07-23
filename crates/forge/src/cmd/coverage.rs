@@ -13,7 +13,7 @@ use alloy_primitives::{map::HashMap, Address, Bytes, U256};
 use clap::{Parser, ValueEnum, ValueHint};
 use eyre::{Context, Result};
 use foundry_cli::utils::{self, LoadConfig, STATIC_FUZZ_SEED};
-use foundry_common::{compile::ProjectCompiler, fs};
+use foundry_common::compile::ProjectCompiler;
 use foundry_compilers::{
     artifacts::{
         sourcemap::SourceMap, CompactBytecode, CompactDeployedBytecode, SolcLanguage, Source,

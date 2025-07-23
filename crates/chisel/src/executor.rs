@@ -325,7 +325,7 @@ impl SessionSource {
                 let backend = Backend::spawn(
                     strategy.runner.new_backend_strategy(strategy.context.as_ref()),
                     fork,
-                );
+                )?;
                 self.config.backend = Some(backend.clone());
                 backend
             }
