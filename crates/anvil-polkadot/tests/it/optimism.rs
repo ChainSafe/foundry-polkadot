@@ -7,8 +7,8 @@ use alloy_primitives::{b256, Address, TxHash, TxKind, U256};
 use alloy_provider::Provider;
 use alloy_rpc_types::TransactionRequest;
 use alloy_serde::WithOtherFields;
-use anvil_polkadot::{spawn, EthereumHardfork, NodeConfig};
 use anvil_core::eth::transaction::optimism::DepositTransaction;
+use anvil_polkadot::{spawn, EthereumHardfork, NodeConfig};
 use op_alloy_rpc_types::OpTransactionFields;
 
 #[tokio::test(flavor = "multi_thread")]

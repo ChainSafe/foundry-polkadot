@@ -1380,7 +1380,7 @@ async fn derive_block_and_transactions(
         ForkChoice::Block(block_number) => {
             let block_number = *block_number;
             if block_number >= 0 {
-                return Ok((block_number as u64, None))
+                return Ok((block_number as u64, None));
             }
             // subtract from latest block number
             let latest = provider.get_block_number().await?;

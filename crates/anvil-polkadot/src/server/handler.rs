@@ -71,7 +71,7 @@ impl PubSubEthRpcHandler {
                         if raw_params.is_bool() {
                             return ResponseResult::Error(RpcError::invalid_params(
                                 "Expected params for logs subscription",
-                            ))
+                            ));
                         }
 
                         trace!(target: "rpc::ws", "received logs subscription {:?}", params);
