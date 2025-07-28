@@ -8,6 +8,7 @@ use crate::{
         DealRecord, GasRecord, RecordAccess,
     },
     script::{Broadcast, Wallets},
+    strategy::CheatcodesStrategy,
     test::{
         assume::AssumeNoRevert,
         expect::{
@@ -17,7 +18,7 @@ use crate::{
         revert_handlers,
     },
     utils::IgnoredTraces,
-    CheatcodesStrategy, CheatsConfig, CheatsCtxt, DynCheatcode, Error, Result,
+    CheatsConfig, CheatsCtxt, DynCheatcode, Error, Result,
     Vm::{self, AccountAccess},
 };
 use alloy_consensus::BlobTransactionSidecar;
@@ -55,12 +56,7 @@ use revm::{
 };
 use serde_json::Value;
 use std::{
-    collections::{BTreeMap, VecDeque},
-    fs::File,
-    io::BufReader,
-    ops::Range,
-    path::PathBuf,
-    sync::Arc,
+    cmp::max, collections::{BTreeMap, VecDeque}, fs::File, io::BufReader, ops::Range, path::PathBuf, sync::Arc
 };
 
 mod utils;
@@ -1276,6 +1272,11 @@ impl Inspector<&mut dyn DatabaseExt> for Cheatcodes {
         // Record gas for current frame.
         if self.gas_metering.paused {
             self.gas_metering.paused_frames.push(interpreter.gas);
+        }
+
+        // `expectRevert`: track the max call depth during `expectRevert`
+        if let Some(expected) = &mut self.expected_revert {
+            expected.max_depth = max(ecx.journaled_state.depth(), expected.max_depth);
         }
 
         self.strategy.runner.post_initialize_interp(

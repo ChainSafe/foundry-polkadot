@@ -1976,8 +1976,8 @@ mod tests {
     const ENDPOINT: Option<&str> = option_env!("ETH_RPC_URL");
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn can_read_write_cache() {
-        let Some(endpoint) = ENDPOINT else { return };
+    async fn can_read_write_cache() -> eyre::Result<()> {
+        let Some(endpoint) = ENDPOINT else { return Ok(()) };
 
         let provider = get_http_provider(endpoint);
 
@@ -1996,7 +1996,7 @@ mod tests {
             evm_opts,
         };
 
-        let backend = Backend::spawn(BackendStrategy::new_evm(), Some(fork)).unwrap();
+        let backend = Backend::spawn(BackendStrategy::new_evm(), Some(fork))?;
 
         // some rng contract from etherscan
         let address: Address = "63091244180ae240c87d1f528f5f269134cb07b3".parse().unwrap();
@@ -2022,5 +2022,6 @@ mod tests {
         assert!(db.accounts().read().contains_key(&address));
         assert!(db.storage().read().contains_key(&address));
         assert_eq!(db.storage().read().get(&address).unwrap().len(), num_slots as usize);
+        Ok(())
     }
 }
