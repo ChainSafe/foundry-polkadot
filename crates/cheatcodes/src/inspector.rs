@@ -56,7 +56,13 @@ use revm::{
 };
 use serde_json::Value;
 use std::{
-    cmp::max, collections::{BTreeMap, VecDeque}, fs::File, io::BufReader, ops::Range, path::PathBuf, sync::Arc
+    cmp::max,
+    collections::{BTreeMap, VecDeque},
+    fs::File,
+    io::BufReader,
+    ops::Range,
+    path::PathBuf,
+    sync::Arc,
 };
 
 mod utils;
