@@ -1,5 +1,5 @@
 [package]
-name = "anvil"
+name = "anvil-polkadot"
 description = "Local ethereum node"
 
 version.workspace = true
@@ -14,28 +14,21 @@ repository.workspace = true
 workspace = true
 
 [[bin]]
-name = "anvil"
+name = "anvil-polkadot"
 path = "bin/main.rs"
 required-features = ["cli"]
 
 [dependencies]
 # foundry internal
-anvil-core = { path = "core" }
-anvil-rpc = { path = "rpc" }
-anvil-server = { path = "server" }
+anvil-polkadot-server = { path = "server" }
+substrate-runtime = { path = "runtime"}
+anvil-core.workspace = true
+anvil-rpc.workspace = true
 foundry-cli.workspace = true
 foundry-common.workspace = true
 foundry-config.workspace = true
 foundry-evm.workspace = true
 
-# evm support
-revm = { workspace = true, features = [
-    "std",
-    "serde",
-    "memory_limit",
-    "c-kzg",
-] }
-revm-inspectors.workspace = true
 alloy-primitives = { workspace = true, features = ["serde"] }
 alloy-consensus = { workspace = true, features = ["k256", "kzg"] }
 alloy-contract = { workspace = true, features = ["pubsub"] }
@@ -119,6 +112,6 @@ cmd = [
     "clap_complete",
     "dep:fdlimit",
     "dep:ctrlc",
-    "anvil-server/clap",
+    "anvil-polkadot-server/clap",
     "tokio/signal",
 ]

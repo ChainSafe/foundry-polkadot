@@ -1,6 +1,9 @@
 [workspace]
 members = [
     "crates/anvil/",
+    "crates/anvil-polkadot",
+    "crates/anvil-polkadot/server",
+    "crates/anvil-polkadot/runtime",
     "crates/anvil/core/",
     "crates/anvil/rpc/",
     "crates/anvil/server/",
@@ -159,6 +162,9 @@ trezor-client.opt-level = "z"
 
 [workspace.dependencies]
 anvil = { path = "crates/anvil" }
+anvil-core = { path = "crates/anvil/core" }
+anvil-rpc = { path = "crates/anvil/rpc" }
+substrate-runtime = { path = "crates/anvil-polkadot/runtime" }
 cast = { path = "crates/cast" }
 chisel = { path = "crates/chisel" }
 forge = { path = "crates/forge" }
@@ -299,7 +305,7 @@ reqwest = { version = "0.12", default-features = false, features = [
 rustls = "0.23"
 semver = "1"
 serde = { version = "1.0", features = ["derive"] }
-serde_json = { version = "1.0", features = ["arbitrary_precision"] }
+serde_json = { version = "1.0", features = ["arbitrary_precision"], default-features = false }
 similar-asserts = "1.6"
 soldeer-commands = "=0.5.4"
 soldeer-core = { version = "=0.5.4", features = ["serde"] }
@@ -323,6 +329,9 @@ serial_test = "2.0"
 # by the `url` crate.
 # See the `idna_adapter` README.md for more details: https://docs.rs/crate/idna_adapter/latest
 idna_adapter = "=1.1.0"
+
+## polkadot
+polkadot-sdk = { version = "2506.0.0", default-features = false }
 
 [patch.crates-io]
 ## alloy-core

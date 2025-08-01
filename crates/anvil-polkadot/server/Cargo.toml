@@ -1,5 +1,5 @@
 [package]
-name = "anvil-server"
+name = "anvil-polkadot-server"
 description = "Customizable RPC server"
 
 version.workspace = true
@@ -14,7 +14,7 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
-anvil-rpc = { path = "../rpc" }
+anvil-rpc.workspace = true
 
 # axum related
 axum = { workspace = true, features = ["ws"] }
