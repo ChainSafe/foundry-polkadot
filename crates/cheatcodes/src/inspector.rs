@@ -8,7 +8,7 @@ use crate::{
         DealRecord, GasRecord, RecordAccess,
     },
     script::{Broadcast, Wallets},
-    strategy::CheatcodesStrategy,
+    strategy::CheatcodeInspectorStrategy,
     test::{
         assume::AssumeNoRevert,
         expect::{
@@ -513,7 +513,7 @@ pub struct Cheatcodes {
     pub wallets: Option<Wallets>,
 
     /// Cheatcode inspector behavior.
-    pub strategy: CheatcodesStrategy,
+    pub strategy: CheatcodeInspectorStrategy,
 }
 
 // This is not derived because calling this in `fn new` with `..Default::default()` creates a second
