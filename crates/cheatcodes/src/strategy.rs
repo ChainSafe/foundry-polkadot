@@ -1,6 +1,6 @@
 use std::{any::Any, fmt::Debug, sync::Arc};
 
-use alloy_primitives::{Address, Bytes, TxKind, B256, U256};
+use alloy_primitives::TxKind;
 use alloy_rpc_types::{TransactionInput, TransactionRequest};
 use revm::{
     interpreter::{CallInputs, Interpreter},
@@ -51,63 +51,8 @@ pub struct PvmCheatcodeInspectorStrategyContext {
     /// Whether we're using PVM instead of EVM
     pub using_pvm: bool,
 
-    /// PVM-specific environment data
-    pub pvm_env: Option<PvmEnvironment>,
-
     /// Any PVM-specific state that needs to be tracked
     pub pvm_state: PvmState,
-
-    /// Track if we need to switch to PVM mode
-    pub pvm_startup_migration: PvmStartupMigration,
-
-    /// Addresses that should be executed in EVM mode even when in PVM mode
-    pub skip_pvm_addresses: std::collections::HashSet<Address>,
-
-    /// Whether to record the next create address for skip_pvm_addresses
-    pub record_next_create_address: bool,
-}
-
-/// PVM startup migration status
-#[derive(Debug, Default, Clone)]
-pub enum PvmStartupMigration {
-    #[default]
-    Defer,
-    Allowed,
-    Done,
-}
-
-impl PvmStartupMigration {
-    pub fn allow(&mut self) {
-        *self = Self::Allowed;
-    }
-
-    pub fn done(&mut self) {
-        *self = Self::Done;
-    }
-
-    pub fn is_allowed(&self) -> bool {
-        matches!(self, Self::Allowed)
-    }
-}
-
-/// PVM environment configuration
-#[derive(Debug, Default, Clone)]
-pub struct PvmEnvironment {
-    /// Memory configuration for PVM
-    pub memory_config: PvmMemoryConfig,
-
-    /// Debug information flag
-    pub debug_information: bool,
-}
-
-/// PVM memory configuration
-#[derive(Debug, Default, Clone)]
-pub struct PvmMemoryConfig {
-    /// Heap size for PVM
-    pub heap_size: u32,
-
-    /// Stack size for PVM
-    pub stack_size: u32,
 }
 
 /// PVM-specific state tracking
@@ -115,60 +60,17 @@ pub struct PvmMemoryConfig {
 pub struct PvmState {
     /// Any PVM-specific state that needs to be tracked
     pub custom_state: std::collections::HashMap<String, String>,
-
-    /// PVM-specific storage mappings
-    pub pvm_storage: std::collections::HashMap<Address, std::collections::HashMap<U256, U256>>,
-
-    /// PVM-specific account info
-    pub pvm_accounts: std::collections::HashMap<Address, PvmAccountInfo>,
-}
-
-/// PVM account information
-#[derive(Debug, Default, Clone)]
-pub struct PvmAccountInfo {
-    pub balance: U256,
-    pub nonce: u64,
-    pub code_hash: B256,
-    pub code: Option<Bytes>,
 }
 
 impl PvmCheatcodeInspectorStrategyContext {
-    pub fn new(pvm_env: Option<PvmEnvironment>) -> Self {
+    pub fn new() -> Self {
         Self {
             using_pvm: false, // Start in EVM mode by default
-            pvm_env,
             pvm_state: PvmState::default(),
-            pvm_startup_migration: PvmStartupMigration::Defer,
-            skip_pvm_addresses: std::collections::HashSet::new(),
-            record_next_create_address: false,
         }
     }
 
-    /// Switch to PVM mode
-    pub fn switch_to_pvm(&mut self) {
-        if !self.using_pvm {
-            tracing::info!("switching to PVM mode");
-            self.using_pvm = true;
-        }
-    }
 
-    /// Switch to EVM mode
-    pub fn switch_to_evm(&mut self) {
-        if self.using_pvm {
-            tracing::info!("switching to EVM mode");
-            self.using_pvm = false;
-        }
-    }
-
-    /// Check if an address should be executed in EVM mode
-    pub fn should_skip_pvm(&self, address: Address) -> bool {
-        self.skip_pvm_addresses.contains(&address)
-    }
-
-    /// Add an address to skip PVM execution
-    pub fn add_skip_pvm_address(&mut self, address: Address) {
-        self.skip_pvm_addresses.insert(address);
-    }
 }
 
 impl CheatcodeInspectorStrategyContext for PvmCheatcodeInspectorStrategyContext {
@@ -255,24 +157,6 @@ pub trait CheatcodeInspectorStrategyRunner: Debug + Send + Sync {
     }
 }
 
-/// PVM-specific strategy extensions
-pub trait CheatcodeInspectorStrategyExt: CheatcodeInspectorStrategyRunner {
-    /// Switch to PVM mode
-    fn pvm_switch_to_pvm(&self, _ctx: &mut dyn CheatcodeInspectorStrategyContext, _ecx: Ecx) {}
-
-    /// Switch to EVM mode  
-    fn pvm_switch_to_evm(&self, _ctx: &mut dyn CheatcodeInspectorStrategyContext, _ecx: Ecx) {}
-
-    /// Handle PVM-specific operations
-    fn pvm_handle_operation(
-        &self,
-        _ctx: &mut dyn CheatcodeInspectorStrategyContext,
-        _ecx: Ecx,
-    ) -> bool {
-        false
-    }
-}
-
 /// Implements [CheatcodeInspectorStrategyRunner] for EVM.
 #[derive(Debug, Default, Clone)]
 pub struct EvmCheatcodeInspectorStrategyRunner;
@@ -349,10 +233,8 @@ impl CheatcodeInspectorStrategyRunner for EvmCheatcodeInspectorStrategyRunner {
 pub struct PvmCheatcodeInspectorStrategyRunner;
 
 impl CheatcodeInspectorStrategyRunner for PvmCheatcodeInspectorStrategyRunner {
-    fn base_contract_deployed(&self, ctx: &mut dyn CheatcodeInspectorStrategyContext) {
-        let ctx = get_pvm_context(ctx);
-        debug!("allowing startup PVM migration");
-        ctx.pvm_startup_migration.allow();
+    fn base_contract_deployed(&self, _ctx: &mut dyn CheatcodeInspectorStrategyContext) {
+        debug!("PVM base contract deployed");
     }
 
     fn record_broadcastable_create_transactions(
@@ -464,17 +346,11 @@ impl CheatcodeInspectorStrategyRunner for PvmCheatcodeInspectorStrategyRunner {
 
     fn post_initialize_interp(
         &self,
-        ctx: &mut dyn CheatcodeInspectorStrategyContext,
+        _ctx: &mut dyn CheatcodeInspectorStrategyContext,
         _interpreter: &mut Interpreter,
-        ecx: Ecx,
+        _ecx: Ecx,
     ) {
-        let ctx = get_pvm_context(ctx);
-
-        if ctx.pvm_startup_migration.is_allowed() && !ctx.using_pvm {
-            self.select_pvm(ctx, ecx);
-            ctx.pvm_startup_migration.done();
-            debug!("startup PVM migration completed");
-        }
+        // PVM-specific initialization if needed
     }
 
     /// Returns true if handled.
@@ -484,77 +360,51 @@ impl CheatcodeInspectorStrategyRunner for PvmCheatcodeInspectorStrategyRunner {
         _interpreter: &mut Interpreter,
         _ecx: Ecx,
     ) -> bool {
-        let ctx = get_pvm_context(ctx);
-
-        if !ctx.using_pvm {
-            return false;
-        }
-
-        // PVM-specific opcode handling would go here
-        // For now, just return false to let EVM handle it
-        false
-    }
-}
-
-impl PvmCheatcodeInspectorStrategyRunner {
-    /// Select PVM mode for execution
-    pub fn select_pvm(&self, ctx: &mut PvmCheatcodeInspectorStrategyContext, _ecx: Ecx) {
-        if !ctx.using_pvm {
-            tracing::info!("switching to PVM mode");
-            ctx.using_pvm = true;
-
-            // TODO: Implement PVM-specific state migration
-            // This would involve:
-            // - Converting EVM state to PVM state
-            // - Setting up PVM-specific storage mappings
-            // - Initializing PVM account information
-        }
-    }
-
-    /// Select EVM mode for execution
-    pub fn select_evm(&self, ctx: &mut PvmCheatcodeInspectorStrategyContext, _ecx: Ecx) {
-        if ctx.using_pvm {
-            tracing::info!("switching to EVM mode");
-            ctx.using_pvm = false;
-
-            // TODO: Implement EVM state migration
-            // This would involve:
-            // - Converting PVM state back to EVM state
-            // - Restoring EVM storage mappings
-            // - Updating EVM account information
-        }
-    }
-}
-
-impl CheatcodeInspectorStrategyExt for PvmCheatcodeInspectorStrategyRunner {
-    fn pvm_switch_to_pvm(&self, ctx: &mut dyn CheatcodeInspectorStrategyContext, ecx: Ecx) {
-        let ctx_pvm = get_pvm_context(ctx);
-        self.select_pvm(ctx_pvm, ecx);
-    }
-
-    fn pvm_switch_to_evm(&self, ctx: &mut dyn CheatcodeInspectorStrategyContext, ecx: Ecx) {
-        let ctx_pvm = get_pvm_context(ctx);
-        self.select_evm(ctx_pvm, ecx);
-    }
-
-    fn pvm_handle_operation(
-        &self,
-        ctx: &mut dyn CheatcodeInspectorStrategyContext,
-        _ecx: Ecx,
-    ) -> bool {
         let ctx_pvm = get_pvm_context(ctx);
 
         if !ctx_pvm.using_pvm {
             return false;
         }
 
-        // TODO: Implement PVM-specific operation handling
-        // This could include:
-        // - PVM-specific opcode overrides
-        // - PVM-specific cheatcode handling
-        // - PVM-specific state management
+        // Mock PVM-specific opcode handling
+        // For now, just track that we're in PVM mode and let EVM handle operations
+        self.mock_pvm_operation(ctx_pvm, "pvm_step");
+        debug!("mock PVM step handled");
+        false // Let EVM handle the actual operation
+    }
+}
 
-        false
+impl PvmCheatcodeInspectorStrategyRunner {
+    /// Mock PVM-specific operation handling
+    pub fn mock_pvm_operation(&self, ctx: &mut PvmCheatcodeInspectorStrategyContext, operation: &str) -> bool {
+        if !ctx.using_pvm {
+            return false;
+        }
+        
+        // Mock: Handle PVM-specific operations
+        match operation {
+            "pvm_balance" => {
+                ctx.pvm_state.custom_state.insert("last_operation".to_string(), "pvm_balance".to_string());
+                true
+            }
+            "pvm_storage" => {
+                ctx.pvm_state.custom_state.insert("last_operation".to_string(), "pvm_storage".to_string());
+                true
+            }
+            "pvm_call" => {
+                ctx.pvm_state.custom_state.insert("last_operation".to_string(), "pvm_call".to_string());
+                true
+            }
+            "pvm_step" => {
+                ctx.pvm_state.custom_state.insert("last_operation".to_string(), "pvm_step".to_string());
+                true
+            }
+            "pvm_operation" => {
+                ctx.pvm_state.custom_state.insert("last_operation".to_string(), "pvm_operation".to_string());
+                true
+            }
+            _ => false
+        }
     }
 }
 
@@ -574,10 +424,10 @@ impl CheatcodeInspectorStrategy {
     }
 
     /// Creates a new PVM strategy for the [super::Cheatcodes].
-    pub fn new_pvm(pvm_env: Option<PvmEnvironment>) -> Self {
+    pub fn new_pvm() -> Self {
         Self {
             runner: &PvmCheatcodeInspectorStrategyRunner,
-            context: Box::new(PvmCheatcodeInspectorStrategyContext::new(pvm_env)),
+            context: Box::new(PvmCheatcodeInspectorStrategyContext::new()),
         }
     }
 }

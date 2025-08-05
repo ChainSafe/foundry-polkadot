@@ -1263,9 +1263,7 @@ impl Cheatcode for pvmCall {
         
         // Switch the strategy based on PVM setting
         if *enabled {
-            // Create PVM environment if not already set
-            let pvm_env = state.config.pvm_env.clone().unwrap_or_default();
-            state.strategy = CheatcodeInspectorStrategy::new_pvm(Some(pvm_env));
+            state.strategy = CheatcodeInspectorStrategy::new_pvm();
             tracing::info!("PVM mode enabled");
         } else {
             // Switch back to EVM strategy
@@ -1274,5 +1272,24 @@ impl Cheatcode for pvmCall {
         }
         
         Ok(Default::default())
+    }
+}
+
+impl Cheatcode for getPvmInfoCall {
+    fn apply(&self, state: &mut Cheatcodes) -> Result {
+        // Get PVM context from strategy
+        let ctx = state.strategy.context.as_any_ref().downcast_ref::<crate::strategy::PvmCheatcodeInspectorStrategyContext>();
+        
+        if let Some(ctx) = ctx {
+            let info = format!(
+                "PVM Mode: {}\nVM Mode: {}\nLast Operation: {}",
+                ctx.using_pvm,
+                ctx.pvm_state.custom_state.get("vm_mode").unwrap_or(&"unknown".to_string()),
+                ctx.pvm_state.custom_state.get("last_operation").unwrap_or(&"none".to_string())
+            );
+            Ok(info.abi_encode())
+        } else {
+            Ok("PVM context not available".to_string().abi_encode())
+        }
     }
 }

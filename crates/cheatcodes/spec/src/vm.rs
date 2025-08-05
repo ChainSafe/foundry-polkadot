@@ -2885,6 +2885,13 @@ interface Vm {
     /// vm.pvm(false); // Disable PVM mode (use EVM)
     #[cheatcode(group = Utilities)]
     function pvm(bool enabled) external;
+
+    /// Gets PVM-specific information for the current execution context.
+    /// Returns information about PVM state and mode.
+    /// Example usage:
+    /// string memory info = vm.getPvmInfo();
+    #[cheatcode(group = Utilities)]
+    function getPvmInfo() external view returns (string memory);
 }
 }
 
