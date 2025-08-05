@@ -1,4 +1,5 @@
 use crate::{
+    init_tracing,
     opts::{Anvil, AnvilSubcommand},
     spawn_main, substrate_node,
 };
@@ -56,17 +57,23 @@ pub fn run_command(args: Anvil) -> Result<()> {
     let _ = fdlimit::raise_fd_limit();
 
     let (anvil_config, substrate_config) = args.node.clone().into_node_config()?;
+    let logger = if anvil_config.enable_tracing { init_tracing() } else { Default::default() };
+    logger.set_enabled(!anvil_config.silent);
+
     let runner = args.create_runner(&substrate_config)?;
 
     Ok(runner.run_node_until_exit(|config| async move {
-        let service = substrate_node::service::new::<Litep2pNetworkBackend>(&anvil_config, config)
-            .map_err(sc_cli::Error::Service)?;
+        // Spawn the substrate node.
+        let substrate_service =
+            substrate_node::service::new::<Litep2pNetworkBackend>(&anvil_config, config)
+                .map_err(sc_cli::Error::Service)?;
 
-        spawn_main(anvil_config, &service)
+        // Spawn the other tasks.
+        spawn_main(anvil_config, &substrate_service)
             .await
             .map_err(|err| sc_cli::Error::Application(err.into()))?;
 
-        Ok::<TaskManager, sc_cli::Error>(service.task_manager)
+        Ok::<TaskManager, sc_cli::Error>(substrate_service.task_manager)
     })?)
 }
 

@@ -4,19 +4,25 @@ use alloy_rpc_types::{
     FilteredParams,
 };
 use anvil_core::eth::{subscription::SubscriptionId, EthPubSub, EthRequest, EthRpcCall};
-use anvil_polkadot_server::{PubSubContext, PubSubRpcHandler, RpcHandler};
 use anvil_rpc::{error::RpcError, response::ResponseResult};
+use anvil_server::{PubSubContext, PubSubRpcHandler, RpcHandler};
+use futures::{channel::oneshot, SinkExt};
 
-use crate::pubsub::EthSubscription;
+use crate::{
+    pubsub::EthSubscription,
+    responder::{ApiRequest, ResponderHandle},
+};
 
 /// A `RpcHandler` that expects `EthRequest` rpc calls via http
 #[derive(Clone)]
-pub struct HttpEthRpcHandler {}
+pub struct HttpEthRpcHandler {
+    responder_handle: ResponderHandle,
+}
 
 impl HttpEthRpcHandler {
     /// Creates a new instance of the handler using the given `EthApi`
-    pub fn new() -> Self {
-        Self {}
+    pub fn new(responder_handle: ResponderHandle) -> Self {
+        Self { responder_handle }
     }
 }
 
@@ -25,18 +31,27 @@ impl RpcHandler for HttpEthRpcHandler {
     type Request = EthRequest;
 
     async fn on_request(&self, request: Self::Request) -> ResponseResult {
-        return ResponseResult::Error(RpcError::invalid_params("Not implemented"))
+        let (tx, rx) = oneshot::channel();
+        self.responder_handle
+            .clone()
+            .send(ApiRequest { req: request, resp_sender: tx })
+            .await
+            .expect("Dropped receiver?");
+
+        rx.await.expect("Dropped sender?")
     }
 }
 
 /// A `RpcHandler` that expects `EthRequest` rpc calls and `EthPubSub` via pubsub connection
 #[derive(Clone)]
-pub struct PubSubEthRpcHandler {}
+pub struct PubSubEthRpcHandler {
+    responder_handle: ResponderHandle,
+}
 
 impl PubSubEthRpcHandler {
     /// Creates a new instance of the handler using the given `EthApi`
-    pub fn new() -> Self {
-        Self {}
+    pub fn new(responder_handle: ResponderHandle) -> Self {
+        Self { responder_handle }
     }
 
     /// Invoked for an ethereum pubsub rpc call
@@ -127,7 +142,14 @@ impl PubSubRpcHandler for PubSubEthRpcHandler {
         trace!(target: "rpc", "received pubsub request {:?}", request);
         match request {
             EthRpcCall::Request(request) => {
-                ResponseResult::Error(RpcError::invalid_params("Not implemented"))
+                let (tx, rx) = oneshot::channel();
+                self.responder_handle
+                    .clone()
+                    .send(ApiRequest { req: *request, resp_sender: tx })
+                    .await
+                    .expect("Dropped receiver?");
+
+                rx.await.expect("Dropped sender?")
             }
             EthRpcCall::PubSub(pubsub) => self.on_pub_sub(pubsub, cx).await,
         }

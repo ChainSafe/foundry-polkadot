@@ -24,6 +24,8 @@ pub mod pubsub;
 /// axum RPC server implementations
 pub mod server;
 
+mod responder;
+
 /// contains cli command
 #[cfg(feature = "cmd")]
 pub mod cmd;
@@ -40,86 +42,12 @@ extern crate foundry_common;
 #[macro_use]
 extern crate tracing;
 
-/// Creates the node and runs the server.
-///
-/// Returns the [EthApi] that can be used to interact with the node and the [JoinHandle] of the
-/// task.
-///
-/// # Panics
-///
-/// Panics if any error occurs. For a non-panicking version, use [`try_spawn`].
-///
-///
-/// # Examples
-///
-/// ```no_run
-/// # use anvil::NodeConfig;
-/// # async fn spawn() -> eyre::Result<()> {
-/// let config = NodeConfig::default();
-/// let (api, handle) = anvil::spawn(config).await;
-///
-/// // use api
-///
-/// // wait forever
-/// handle.await.unwrap().unwrap();
-/// # Ok(())
-/// # }
-/// ```
-// pub async fn spawn(config: NodeConfig) -> (EthApi, NodeHandle) {
-//     try_spawn(config).await.expect("failed to spawn node")
-// }
-
-/// Creates the node and runs the server
-///
-/// Returns the [EthApi] that can be used to interact with the node and the [JoinHandle] of the
-/// task.
-///
-/// # Examples
-///
-/// ```no_run
-/// # use anvil::NodeConfig;
-/// # async fn spawn() -> eyre::Result<()> {
-/// let config = NodeConfig::default();
-/// let (api, handle) = anvil::try_spawn(config).await?;
-///
-/// // use api
-///
-/// // wait forever
-/// handle.await??;
-/// # Ok(())
-/// # }
-/// ```
 pub async fn spawn_main(anvil_config: AnvilNodeConfig, service: &Service) -> Result<()> {
     let logger = if anvil_config.enable_tracing { init_tracing() } else { Default::default() };
     logger.set_enabled(!anvil_config.silent);
-
-    // We need a service that forwards requests from the ethereum json rpc to the substrate node.
-    // For later: Can we reuse the revive rpc logic?
-
-    // let dev_signer: Box<dyn EthSigner> = Box::new(DevSigner::new(signer_accounts));
-    // let mut signers = vec![dev_signer];
-    // if let Some(genesis) = genesis {
-    //     let genesis_signers = genesis
-    //         .alloc
-    //         .values()
-    //         .filter_map(|acc| acc.private_key)
-    //         .flat_map(|k| PrivateKeySigner::from_bytes(&k))
-    //         .collect::<Vec<_>>();
-    //     if !genesis_signers.is_empty() {
-    //         signers.push(Box::new(DevSigner::new(genesis_signers)));
-    //     }
-    // }
-
-    // let dump_state = self.dump_state_path();
-    //     let dump_interval =
-    //         self.state_interval.map(Duration::from_secs).unwrap_or(DEFAULT_DUMP_INTERVAL);
-    //     let preserve_historical_states = self.preserve_historical_states;
-    //     let mut state_dumper =
-    //         PeriodicStateDumper::new(dump_state, dump_interval, preserve_historical_states);
-
-    // TODO: SPAWN ALL TASKS.
-
     let mut addresses = Vec::with_capacity(anvil_config.host.len());
+
+    let responder_handle = responder::spawn(&service);
 
     for addr in &anvil_config.host {
         let sock_addr = SocketAddr::new(*addr, anvil_config.port);
@@ -129,7 +57,11 @@ pub async fn spawn_main(anvil_config: AnvilNodeConfig, service: &Service) -> Res
         addresses.push(tcp_listener.local_addr()?);
 
         // Spawn the server future on a new task.
-        let srv = server::serve_on(tcp_listener, anvil_config.server_config.clone());
+        let srv = server::serve_on(
+            tcp_listener,
+            anvil_config.server_config.clone(),
+            responder_handle.clone(),
+        );
         let spawn_handle = service.task_manager.spawn_handle();
         spawn_handle.spawn(
             "anvil",
@@ -140,7 +72,7 @@ pub async fn spawn_main(anvil_config: AnvilNodeConfig, service: &Service) -> Res
 
     anvil_config
         .get_ipc_path()
-        .map(|path| try_spawn_ipc(&service.task_manager, path))
+        .map(|path| try_spawn_ipc(&service.task_manager, path, responder_handle))
         .transpose()?;
 
     // handle.print()?;
