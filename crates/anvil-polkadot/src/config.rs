@@ -1,32 +1,23 @@
 use crate::cmd::{SerializableState, TransactionOrder};
-use alloy_consensus::BlockHeader;
 use alloy_genesis::Genesis;
-use alloy_network::{AnyNetwork, TransactionResponse};
 use alloy_primitives::{hex, map::HashMap, utils::Unit, BlockNumber, TxHash, U256};
-use alloy_provider::Provider;
-use alloy_rpc_types::{Block, BlockNumberOrTag};
 use alloy_signer::Signer;
 use alloy_signer_local::{
     coins_bip39::{English, Mnemonic},
     MnemonicBuilder, PrivateKeySigner,
 };
-use alloy_transport::TransportError;
 use anvil_polkadot_server::ServerConfig;
 use eyre::{Context, Result};
-use foundry_common::{
-    duration_since_unix_epoch,
-    provider::{ProviderBuilder, RetryProvider},
-    ALCHEMY_FREE_TIER_CUPS, NON_ARCHIVE_NODE_WARNING, REQUEST_TIMEOUT,
-};
+use foundry_common::duration_since_unix_epoch;
 use foundry_config::Config;
-use foundry_evm::{
-    backend::{BlockchainDb, BlockchainDbMeta, SharedBackend},
-    constants::DEFAULT_CREATE2_DEPLOYER,
-    revm::primitives::{BlockEnv, CfgEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, SpecId, TxEnv},
-    utils::apply_chain_and_block_specific_env_changes,
+use polkadot_sdk::{
+    sc_cli::{
+        self, CliConfiguration as SubstrateCliConfiguration, Cors, RPC_DEFAULT_MAX_CONNECTIONS,
+        RPC_DEFAULT_MAX_REQUEST_SIZE_MB, RPC_DEFAULT_MAX_RESPONSE_SIZE_MB,
+        RPC_DEFAULT_MAX_SUBS_PER_CONN, RPC_DEFAULT_MESSAGE_CAPACITY_PER_CONN,
+    },
+    sc_service,
 };
-use itertools::Itertools;
-use parking_lot::RwLock;
 use rand::thread_rng;
 use serde_json::{json, Value};
 use std::{
@@ -34,11 +25,11 @@ use std::{
     fs::File,
     io,
     net::{IpAddr, Ipv4Addr},
+    num::NonZeroU32,
     path::PathBuf,
     sync::Arc,
     time::Duration,
 };
-use tokio::sync::RwLock as TokioRwLock;
 use yansi::Paint;
 
 pub use foundry_common::version::SHORT_VERSION as VERSION_MESSAGE;
@@ -73,7 +64,7 @@ const BANNER: &str = r"
 
 /// Configurations of the EVM node
 #[derive(Clone, Debug)]
-pub struct NodeConfig {
+pub struct AnvilNodeConfig {
     /// Chain ID of the EVM chain
     pub chain_id: Option<u64>,
     /// Default gas limit for all txs
@@ -154,180 +145,348 @@ pub struct NodeConfig {
     pub cache_path: Option<PathBuf>,
 }
 
-impl NodeConfig {
-    fn as_string(&self) -> String {
-        let mut s: String = String::new();
-        let _ = write!(s, "\n{}", BANNER.green());
-        let _ = write!(s, "\n    {VERSION_MESSAGE}");
-        let _ = write!(s, "\n    {}", "https://github.com/foundry-rs/foundry".green());
+#[derive(Clone, Debug)]
+pub struct SubstrateNodeConfig {
+    shared_params: sc_cli::SharedParams,
+    rpc_params: sc_cli::RpcParams,
+}
 
-        let _ = write!(
-            s,
-            r#"
-
-Available Accounts
-==================
-"#
-        );
-        let balance = alloy_primitives::utils::format_ether(self.genesis_balance);
-        for (idx, wallet) in self.genesis_accounts.iter().enumerate() {
-            write!(s, "\n({idx}) {} ({balance} ETH)", wallet.address()).unwrap();
-        }
-
-        let _ = write!(
-            s,
-            r#"
-
-Private Keys
-==================
-"#
-        );
-
-        for (idx, wallet) in self.genesis_accounts.iter().enumerate() {
-            let hex = hex::encode(wallet.credential().to_bytes());
-            let _ = write!(s, "\n({idx}) 0x{hex}");
-        }
-
-        if let Some(ref gen) = self.account_generator {
-            let _ = write!(
-                s,
-                r#"
-
-Wallet
-==================
-Mnemonic:          {}
-Derivation path:   {}
-"#,
-                gen.phrase,
-                gen.get_derivation_path()
-            );
-        }
-
-        let _ = write!(
-            s,
-            r#"
-
-Chain ID
-==================
-
-{}
-"#,
-            self.get_chain_id().green()
-        );
-
-        let _ = write!(
-            s,
-            r#"
-Base Fee
-==================
-
-{}
-"#,
-            self.get_base_fee().green()
-        );
-
-        let _ = write!(
-            s,
-            r#"
-Gas Limit
-==================
-
-{}
-"#,
-            {
-                if self.disable_block_gas_limit {
-                    "Disabled".to_string()
-                } else {
-                    self.gas_limit
-                        .map(|l| l.to_string())
-                        .unwrap_or_else(|| DEFAULT_GAS_LIMIT.to_string())
-                }
-            }
-            .green()
-        );
-
-        let _ = write!(
-            s,
-            r#"
-Genesis Timestamp
-==================
-
-{}
-"#,
-            self.get_genesis_timestamp().green()
-        );
-
-        let _ = write!(
-            s,
-            r#"
-Genesis Number
-==================
-
-{}
-"#,
-            self.get_genesis_number().green()
-        );
-
-        s
-    }
-
-    fn as_json(&self) -> Value {
-        let mut wallet_description = HashMap::new();
-        let mut available_accounts = Vec::with_capacity(self.genesis_accounts.len());
-        let mut private_keys = Vec::with_capacity(self.genesis_accounts.len());
-
-        for wallet in &self.genesis_accounts {
-            available_accounts.push(format!("{:?}", wallet.address()));
-            private_keys.push(format!("0x{}", hex::encode(wallet.credential().to_bytes())));
-        }
-
-        if let Some(ref gen) = self.account_generator {
-            let phrase = gen.get_phrase().to_string();
-            let derivation_path = gen.get_derivation_path().to_string();
-
-            wallet_description.insert("derivation_path".to_string(), derivation_path);
-            wallet_description.insert("mnemonic".to_string(), phrase);
+impl SubstrateNodeConfig {
+    pub fn new(_anvil_config: &AnvilNodeConfig) -> Self {
+        let shared_params = sc_cli::SharedParams {
+            chain: None,
+            dev: true,
+            base_path: None,
+            log: vec![],
+            detailed_log_output: true,
+            disable_log_color: false,
+            enable_log_reloading: false,
+            tracing_targets: None,
+            tracing_receiver: sc_cli::TracingReceiver::Log,
         };
 
-        let gas_limit = match self.gas_limit {
-            // if we have a disabled flag we should max out the limit
-            Some(_) | None if self.disable_block_gas_limit => Some(u64::MAX.to_string()),
-            Some(limit) => Some(limit.to_string()),
-            _ => None,
+        let rpc_params = sc_cli::RpcParams {
+            rpc_external: false,
+            unsafe_rpc_external: false,
+            rpc_methods: sc_cli::RpcMethods::Auto,
+            rpc_rate_limit: None,
+            rpc_rate_limit_whitelisted_ips: vec![],
+            rpc_rate_limit_trust_proxy_headers: false,
+            rpc_max_request_size: RPC_DEFAULT_MAX_REQUEST_SIZE_MB,
+            rpc_max_response_size: RPC_DEFAULT_MAX_RESPONSE_SIZE_MB,
+            rpc_max_subscriptions_per_connection: RPC_DEFAULT_MAX_SUBS_PER_CONN,
+            rpc_port: None,
+            experimental_rpc_endpoint: vec![],
+            rpc_max_connections: RPC_DEFAULT_MAX_CONNECTIONS,
+            rpc_message_buffer_capacity_per_connection: RPC_DEFAULT_MESSAGE_CAPACITY_PER_CONN,
+            rpc_disable_batch_requests: false,
+            rpc_max_batch_request_len: None,
+            rpc_cors: None,
         };
 
-        json!({
-          "available_accounts": available_accounts,
-          "private_keys": private_keys,
-          "wallet": wallet_description,
-          "base_fee": format!("{}", self.get_base_fee()),
-          "gas_price": format!("{}", self.get_gas_price()),
-          "gas_limit": gas_limit,
-          "genesis_timestamp": format!("{}", self.get_genesis_timestamp()),
-        })
+        SubstrateNodeConfig { shared_params, rpc_params }
     }
 }
 
-impl NodeConfig {
-    /// Returns a new config intended to be used in tests, which does not print and binds to a
-    /// random, free port by setting it to `0`
-    #[doc(hidden)]
-    pub fn test() -> Self {
-        Self { enable_tracing: true, port: 0, silent: true, ..Default::default() }
+impl SubstrateCliConfiguration for SubstrateNodeConfig {
+    fn shared_params(&self) -> &sc_cli::SharedParams {
+        &self.shared_params
     }
 
-    /// Returns a new config which does not initialize any accounts on node startup.
-    pub fn empty_state() -> Self {
-        Self {
-            genesis_accounts: vec![],
-            signer_accounts: vec![],
-            disable_default_create2_deployer: true,
-            ..Default::default()
-        }
+    fn import_params(&self) -> Option<&sc_cli::ImportParams> {
+        None
+    }
+
+    fn network_params(&self) -> Option<&sc_cli::NetworkParams> {
+        None
+    }
+
+    fn keystore_params(&self) -> Option<&sc_cli::KeystoreParams> {
+        None
+    }
+
+    fn offchain_worker_params(&self) -> Option<&sc_cli::OffchainWorkerParams> {
+        None
+    }
+
+    fn node_name(&self) -> sc_cli::Result<String> {
+        Ok("anvil-substrate".to_string())
+    }
+
+    fn dev_key_seed(&self, _is_dev: bool) -> sc_cli::Result<Option<String>> {
+        Ok(Some("//Alice".into()))
+    }
+
+    fn telemetry_endpoints(
+        &self,
+        _chain_spec: &Box<dyn sc_service::ChainSpec>,
+    ) -> sc_cli::Result<Option<sc_service::config::TelemetryEndpoints>> {
+        Ok(None)
+    }
+
+    fn role(&self, _is_dev: bool) -> sc_cli::Result<sc_service::Role> {
+        Ok(sc_service::Role::Authority)
+    }
+
+    fn force_authoring(&self) -> sc_cli::Result<bool> {
+        Ok(true)
+    }
+
+    fn prometheus_config(
+        &self,
+        _default_listen_port: u16,
+        _chain_spec: &Box<dyn sc_service::ChainSpec>,
+    ) -> sc_cli::Result<Option<sc_service::config::PrometheusConfig>> {
+        Ok(None)
+    }
+
+    fn disable_grandpa(&self) -> sc_cli::Result<bool> {
+        Ok(true)
+    }
+
+    fn rpc_max_connections(&self) -> sc_cli::Result<u32> {
+        Ok(100)
+    }
+
+    fn rpc_cors(&self, _is_dev: bool) -> sc_cli::Result<Option<Vec<String>>> {
+        Ok(Cors::All.into())
+    }
+
+    fn rpc_addr(
+        &self,
+        default_listen_port: u16,
+    ) -> sc_cli::Result<Option<Vec<sc_cli::RpcEndpoint>>> {
+        self.rpc_params.rpc_addr(true, true, default_listen_port)
+    }
+
+    fn rpc_methods(&self) -> sc_cli::Result<sc_service::RpcMethods> {
+        Ok(self.rpc_params.rpc_methods.into())
+    }
+
+    fn rpc_max_request_size(&self) -> sc_cli::Result<u32> {
+        Ok(self.rpc_params.rpc_max_request_size)
+    }
+
+    fn rpc_max_response_size(&self) -> sc_cli::Result<u32> {
+        Ok(self.rpc_params.rpc_max_response_size)
+    }
+
+    fn rpc_max_subscriptions_per_connection(&self) -> sc_cli::Result<u32> {
+        Ok(self.rpc_params.rpc_max_subscriptions_per_connection)
+    }
+
+    fn rpc_buffer_capacity_per_connection(&self) -> sc_cli::Result<u32> {
+        Ok(self.rpc_params.rpc_message_buffer_capacity_per_connection)
+    }
+
+    fn rpc_batch_config(&self) -> sc_cli::Result<sc_service::config::RpcBatchRequestConfig> {
+        self.rpc_params.rpc_batch_config()
+    }
+
+    fn rpc_rate_limit(&self) -> sc_cli::Result<Option<NonZeroU32>> {
+        Ok(self.rpc_params.rpc_rate_limit)
+    }
+
+    fn rpc_rate_limit_whitelisted_ips(&self) -> sc_cli::Result<Vec<sc_service::config::IpNetwork>> {
+        Ok(self.rpc_params.rpc_rate_limit_whitelisted_ips.clone())
+    }
+
+    fn rpc_rate_limit_trust_proxy_headers(&self) -> sc_cli::Result<bool> {
+        Ok(self.rpc_params.rpc_rate_limit_trust_proxy_headers)
+    }
+
+    fn transaction_pool(
+        &self,
+        _is_dev: bool,
+    ) -> sc_cli::Result<sc_service::TransactionPoolOptions> {
+        Ok(sc_service::TransactionPoolOptions::new_with_params(
+            8192,
+            20480 * 1024,
+            None,
+            sc_cli::TransactionPoolType::ForkAware.into(),
+            true,
+        ))
+    }
+
+    fn base_path(&self) -> sc_cli::Result<Option<sc_service::BasePath>> {
+        self.shared_params().base_path()
     }
 }
 
-impl Default for NodeConfig {
+// impl NodeConfig {
+//     fn as_string(&self) -> String {
+//         let mut s: String = String::new();
+//         let _ = write!(s, "\n{}", BANNER.green());
+//         let _ = write!(s, "\n    {VERSION_MESSAGE}");
+//         let _ = write!(s, "\n    {}", "https://github.com/foundry-rs/foundry".green());
+
+//         let _ = write!(
+//             s,
+//             r#"
+
+// Available Accounts
+// ==================
+// "#
+//         );
+//         let balance = alloy_primitives::utils::format_ether(self.genesis_balance);
+//         for (idx, wallet) in self.genesis_accounts.iter().enumerate() {
+//             write!(s, "\n({idx}) {} ({balance} ETH)", wallet.address()).unwrap();
+//         }
+
+//         let _ = write!(
+//             s,
+//             r#"
+
+// Private Keys
+// ==================
+// "#
+//         );
+
+//         for (idx, wallet) in self.genesis_accounts.iter().enumerate() {
+//             let hex = hex::encode(wallet.credential().to_bytes());
+//             let _ = write!(s, "\n({idx}) 0x{hex}");
+//         }
+
+//         if let Some(ref gen) = self.account_generator {
+//             let _ = write!(
+//                 s,
+//                 r#"
+
+// Wallet
+// ==================
+// Mnemonic:          {}
+// Derivation path:   {}
+// "#,
+//                 gen.phrase,
+//                 gen.get_derivation_path()
+//             );
+//         }
+
+//         let _ = write!(
+//             s,
+//             r#"
+
+// Chain ID
+// ==================
+
+// {}
+// "#,
+//             self.get_chain_id().green()
+//         );
+
+//         let _ = write!(
+//             s,
+//             r#"
+// Base Fee
+// ==================
+
+// {}
+// "#,
+//             self.get_base_fee().green()
+//         );
+
+//         let _ = write!(
+//             s,
+//             r#"
+// Gas Limit
+// ==================
+
+// {}
+// "#,
+//             {
+//                 if self.disable_block_gas_limit {
+//                     "Disabled".to_string()
+//                 } else {
+//                     self.gas_limit
+//                         .map(|l| l.to_string())
+//                         .unwrap_or_else(|| DEFAULT_GAS_LIMIT.to_string())
+//                 }
+//             }
+//             .green()
+//         );
+
+//         let _ = write!(
+//             s,
+//             r#"
+// Genesis Timestamp
+// ==================
+
+// {}
+// "#,
+//             self.get_genesis_timestamp().green()
+//         );
+
+//         let _ = write!(
+//             s,
+//             r#"
+// Genesis Number
+// ==================
+
+// {}
+// "#,
+//             self.get_genesis_number().green()
+//         );
+
+//         s
+//     }
+
+//     fn as_json(&self) -> Value {
+//         let mut wallet_description = HashMap::new();
+//         let mut available_accounts = Vec::with_capacity(self.genesis_accounts.len());
+//         let mut private_keys = Vec::with_capacity(self.genesis_accounts.len());
+
+//         for wallet in &self.genesis_accounts {
+//             available_accounts.push(format!("{:?}", wallet.address()));
+//             private_keys.push(format!("0x{}", hex::encode(wallet.credential().to_bytes())));
+//         }
+
+//         if let Some(ref gen) = self.account_generator {
+//             let phrase = gen.get_phrase().to_string();
+//             let derivation_path = gen.get_derivation_path().to_string();
+
+//             wallet_description.insert("derivation_path".to_string(), derivation_path);
+//             wallet_description.insert("mnemonic".to_string(), phrase);
+//         };
+
+//         let gas_limit = match self.gas_limit {
+//             // if we have a disabled flag we should max out the limit
+//             Some(_) | None if self.disable_block_gas_limit => Some(u64::MAX.to_string()),
+//             Some(limit) => Some(limit.to_string()),
+//             _ => None,
+//         };
+
+//         json!({
+//           "available_accounts": available_accounts,
+//           "private_keys": private_keys,
+//           "wallet": wallet_description,
+//           "base_fee": format!("{}", self.get_base_fee()),
+//           "gas_price": format!("{}", self.get_gas_price()),
+//           "gas_limit": gas_limit,
+//           "genesis_timestamp": format!("{}", self.get_genesis_timestamp()),
+//         })
+//     }
+// }
+
+// impl NodeConfig {
+// /// Returns a new config intended to be used in tests, which does not print and binds to a
+// /// random, free port by setting it to `0`
+// #[doc(hidden)]
+// pub fn test() -> Self {
+//     Self { enable_tracing: true, port: 0, silent: true, ..Default::default() }
+// }
+
+// /// Returns a new config which does not initialize any accounts on node startup.
+// pub fn empty_state() -> Self {
+//     Self {
+//         genesis_accounts: vec![],
+//         signer_accounts: vec![],
+//         disable_default_create2_deployer: true,
+//         ..Default::default()
+//     }
+// }
+// }
+
+impl Default for AnvilNodeConfig {
     fn default() -> Self {
         // generate some random wallets
         let genesis_accounts =
@@ -377,7 +536,7 @@ impl Default for NodeConfig {
     }
 }
 
-impl NodeConfig {
+impl AnvilNodeConfig {
     /// Returns the memory limit of the node
     #[must_use]
     pub fn with_memory_limit(mut self, mems_value: Option<u64>) -> Self {
@@ -705,19 +864,19 @@ impl NodeConfig {
     }
 
     /// Prints the config info
-    pub fn print(&self) -> Result<()> {
-        if let Some(path) = &self.config_out {
-            let file = io::BufWriter::new(
-                File::create(path).wrap_err("unable to create anvil config description file")?,
-            );
-            let value = self.as_json();
-            serde_json::to_writer(file, &value).wrap_err("failed writing JSON")?;
-        }
-        if !self.silent {
-            sh_println!("{}", self.as_string())?;
-        }
-        Ok(())
-    }
+    // pub fn print(&self) -> Result<()> {
+    //     if let Some(path) = &self.config_out {
+    //         let file = io::BufWriter::new(
+    //             File::create(path).wrap_err("unable to create anvil config description file")?,
+    //         );
+    //         let value = self.as_json();
+    //         serde_json::to_writer(file, &value).wrap_err("failed writing JSON")?;
+    //     }
+    //     if !self.silent {
+    //         sh_println!("{}", self.as_string())?;
+    //     }
+    //     Ok(())
+    // }
 
     /// Sets whether to disable the default create2 deployer
     #[must_use]

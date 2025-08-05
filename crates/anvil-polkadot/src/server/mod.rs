@@ -1,10 +1,10 @@
 //! Contains the code to launch an Ethereum RPC server.
 
-use crate::IpcTask;
 use anvil_polkadot_server::{ipc::IpcEndpoint, ServerConfig};
 use axum::Router;
 use futures::StreamExt;
 use handler::{HttpEthRpcHandler, PubSubEthRpcHandler};
+use polkadot_sdk::sc_service::TaskManager;
 use std::{future::Future, io, net::SocketAddr, pin::pin};
 use tokio::net::TcpListener;
 
@@ -41,23 +41,26 @@ pub fn router(config: ServerConfig) -> Router {
 ///
 /// Panics if setting up the IPC connection was unsuccessful.
 #[track_caller]
-pub fn spawn_ipc(path: String) -> IpcTask {
-    try_spawn_ipc(path).expect("failed to establish ipc connection")
+pub fn spawn_ipc(task_manager: &TaskManager, path: String) {
+    try_spawn_ipc(task_manager, path).expect("failed to establish ipc connection")
 }
 
 /// Launches an ipc server at the given path in a new task.
-pub fn try_spawn_ipc(path: String) -> io::Result<IpcTask> {
+pub fn try_spawn_ipc(task_manager: &TaskManager, path: String) -> io::Result<()> {
     let handler = PubSubEthRpcHandler::new();
     let ipc = IpcEndpoint::new(handler, path);
     let incoming = ipc.incoming()?;
 
-    let task = tokio::task::spawn(async move {
+    let spawn_handle = task_manager.spawn_handle();
+    let inner_spawn_handle = spawn_handle.clone();
+
+    spawn_handle.spawn("ipc", "anvil", async move {
         let mut incoming = pin!(incoming);
         while let Some(stream) = incoming.next().await {
             trace!(target: "ipc", "new ipc connection");
-            tokio::task::spawn(stream);
+            inner_spawn_handle.spawn("ipc-connection", "anvil", stream);
         }
     });
 
-    Ok(task)
+    Ok(())
 }

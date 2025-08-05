@@ -1,12 +1,14 @@
-use crate::{config::DEFAULT_MNEMONIC, AccountGenerator, NodeConfig, CHAIN_ID};
+use crate::{
+    config::{AnvilNodeConfig, SubstrateNodeConfig, DEFAULT_MNEMONIC},
+    AccountGenerator, CHAIN_ID,
+};
 use alloy_genesis::Genesis;
 use alloy_primitives::{utils::Unit, B256, U256};
 use alloy_signer_local::coins_bip39::{English, Mnemonic};
 use anvil_polkadot_server::ServerConfig;
 use clap::Parser;
-use core::fmt;
 use foundry_common::shell;
-use foundry_config::{Chain, Config, FigmentProviders};
+use foundry_config::Chain;
 use futures::FutureExt;
 use rand::{rngs::StdRng, SeedableRng};
 use serde::{Deserialize, Serialize};
@@ -16,10 +18,6 @@ use std::{
     path::{Path, PathBuf},
     pin::Pin,
     str::FromStr,
-    sync::{
-        atomic::{AtomicUsize, Ordering},
-        Arc,
-    },
     task::{Context, Poll},
     time::Duration,
 };
@@ -248,10 +246,10 @@ const IPC_HELP: &str = "Launch an ipc server at the given path or default path =
 const DEFAULT_DUMP_INTERVAL: Duration = Duration::from_secs(60);
 
 impl NodeArgs {
-    pub fn into_node_config(self) -> eyre::Result<NodeConfig> {
+    pub fn into_node_config(self) -> eyre::Result<(AnvilNodeConfig, SubstrateNodeConfig)> {
         let genesis_balance = Unit::ETHER.wei().saturating_mul(U256::from(self.balance));
 
-        Ok(NodeConfig::default()
+        let anvil_config = AnvilNodeConfig::default()
             .with_gas_limit(self.evm.gas_limit)
             .disable_block_gas_limit(self.evm.disable_block_gas_limit)
             .with_gas_price(self.evm.gas_price)
@@ -286,7 +284,11 @@ impl NodeArgs {
             .with_disable_default_create2_deployer(self.evm.disable_default_create2_deployer)
             .with_slots_in_an_epoch(self.slots_in_an_epoch)
             .with_memory_limit(self.evm.memory_limit)
-            .with_cache_path(self.cache_path))
+            .with_cache_path(self.cache_path);
+
+        let substrate_node_config = SubstrateNodeConfig::new(&anvil_config);
+
+        Ok((anvil_config, substrate_node_config))
     }
 
     fn account_generator(&self) -> AccountGenerator {
@@ -316,76 +318,6 @@ impl NodeArgs {
     /// Returns the location where to dump the state to.
     fn dump_state_path(&self) -> Option<PathBuf> {
         self.dump_state.as_ref().or_else(|| self.state.as_ref().map(|s| &s.path)).cloned()
-    }
-
-    /// Starts the node
-    ///
-    /// See also [crate::spawn()]
-    pub async fn run(self) -> eyre::Result<()> {
-        let dump_state = self.dump_state_path();
-        let dump_interval =
-            self.state_interval.map(Duration::from_secs).unwrap_or(DEFAULT_DUMP_INTERVAL);
-        let preserve_historical_states = self.preserve_historical_states;
-
-        let mut handle = crate::try_spawn(self.into_node_config()?).await?;
-
-        // sets the signal handler to gracefully shutdown.
-        let running = Arc::new(AtomicUsize::new(0));
-
-        // handle for the currently running rt, this must be obtained before setting the crtlc
-        // handler, See [Handle::current]
-        let mut signal = handle.shutdown_signal_mut().take();
-
-        let task_manager = handle.task_manager();
-        let mut on_shutdown = task_manager.on_shutdown();
-
-        let mut state_dumper =
-            PeriodicStateDumper::new(dump_state, dump_interval, preserve_historical_states);
-
-        task_manager.spawn(async move {
-            // wait for the SIGTERM signal on unix systems
-            #[cfg(unix)]
-            let mut sigterm = Box::pin(async {
-                if let Ok(mut stream) =
-                    tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-                {
-                    stream.recv().await;
-                } else {
-                    futures::future::pending::<()>().await;
-                }
-            });
-
-            // On windows, this will never fire.
-            #[cfg(not(unix))]
-            let mut sigterm = Box::pin(futures::future::pending::<()>());
-
-            // await shutdown signal but also periodically flush state. TODO: I don't think the
-            // flush state works
-            tokio::select! {
-                 _ = &mut sigterm => {
-                    trace!("received sigterm signal, shutting down");
-                }
-                _ = &mut on_shutdown => {}
-                _ = &mut state_dumper => {}
-            }
-
-            // shutdown received
-            state_dumper.dump().await;
-
-            std::process::exit(0);
-        });
-
-        ctrlc::set_handler(move || {
-            let prev = running.fetch_add(1, Ordering::SeqCst);
-            if prev == 0 {
-                trace!("received shutdown signal, shutting down");
-                let _ = signal.take();
-            }
-        })
-        .expect("Error setting Ctrl-C handler");
-
-        // Add a run_to_completion so that we can easily use an infinite loop with a select!
-        Ok(handle.await??)
     }
 }
 

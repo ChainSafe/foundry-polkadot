@@ -1,13 +1,21 @@
-use crate::opts::{Anvil, AnvilSubcommand};
+use crate::{
+    opts::{Anvil, AnvilSubcommand},
+    spawn_main, substrate_node,
+};
 use clap::{CommandFactory, Parser};
 use eyre::Result;
 use foundry_cli::{handler, utils};
+use polkadot_sdk::{
+    sc_cli::{self, SubstrateCli},
+    sc_network::Litep2pNetworkBackend,
+    sc_service::TaskManager,
+};
 
 /// Run the `anvil` command line interface.
 pub fn run() -> Result<()> {
     setup()?;
 
-    let mut args = Anvil::parse();
+    let args = Anvil::parse();
     args.global.init()?;
 
     run_command(args)
@@ -46,7 +54,20 @@ pub fn run_command(args: Anvil) -> Result<()> {
     }
 
     let _ = fdlimit::raise_fd_limit();
-    tokio::runtime::Builder::new_multi_thread().enable_all().build()?.block_on(args.node.run())
+
+    let (anvil_config, substrate_config) = args.node.clone().into_node_config()?;
+    let runner = args.create_runner(&substrate_config)?;
+
+    Ok(runner.run_node_until_exit(|config| async move {
+        let service = substrate_node::service::new::<Litep2pNetworkBackend>(&anvil_config, config)
+            .map_err(sc_cli::Error::Service)?;
+
+        spawn_main(anvil_config, &service)
+            .await
+            .map_err(|err| sc_cli::Error::Application(err.into()))?;
+
+        Ok::<TaskManager, sc_cli::Error>(service.task_manager)
+    })?)
 }
 
 #[cfg(test)]
