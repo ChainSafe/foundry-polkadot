@@ -1,10 +1,10 @@
 //! This module provides an externalities builder for setting an environment with the Revive
 //! runtime.
 //!
-//! It is heavily inspired from here: https://github.com/paritytech/revive/blob/56aadce0a9554e68a08feb35cffb65574d7a618b/crates/runner/src/lib.rs#L69
+//! It is heavily inspired from here: <https://github.com/paritytech/revive/blob/56aadce0a9554e68a08feb35cffb65574d7a618b/crates/runner/src/lib.rs#L69>
 //!
 //! THIS IS WORK IN PROGRESS. It is not yet complete and may change in the future.
-
+#![allow(clippy::disallowed_macros)]
 use polkadot_sdk::{
     frame_system, pallet_balances,
     pallet_revive::AddressMapper,
@@ -59,7 +59,6 @@ impl ExtBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use polkadot_sdk::frame_support::assert_ok;
 
     #[test]
     fn test_externalities_works() {

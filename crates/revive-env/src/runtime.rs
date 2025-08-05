@@ -49,7 +49,7 @@ impl frame_system::Config for Runtime {
     type Block = Block;
     type BlockWeights = BlockWeights;
     type AccountId = AccountId32;
-    type AccountData = pallet_balances::AccountData<<Runtime as pallet_balances::Config>::Balance>;
+    type AccountData = pallet_balances::AccountData<<Self as pallet_balances::Config>::Balance>;
 }
 
 #[derive_impl(pallet_balances::config_preludes::TestDefaultConfig)]
@@ -90,8 +90,8 @@ impl pallet_revive::Config for Runtime {
     type FindAuthor = Self;
 }
 
-impl FindAuthor<<Runtime as frame_system::Config>::AccountId> for Runtime {
-    fn find_author<'a, I>(_digests: I) -> Option<<Runtime as frame_system::Config>::AccountId>
+impl FindAuthor<<Self as frame_system::Config>::AccountId> for Runtime {
+    fn find_author<'a, I>(_digests: I) -> Option<<Self as frame_system::Config>::AccountId>
     where
         I: 'a + IntoIterator<Item = (frame_support::ConsensusEngineId, &'a [u8])>,
     {
