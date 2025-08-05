@@ -22,6 +22,7 @@ required-features = ["cli"]
 # foundry internal
 anvil-polkadot-server = { path = "server" }
 substrate-runtime = { path = "runtime"}
+polkadot-sdk = { workspace = true, features = ["node"] }
 anvil-core.workspace = true
 anvil-rpc.workspace = true
 foundry-cli.workspace = true
@@ -67,6 +68,7 @@ tokio = { workspace = true, features = ["time"] }
 parking_lot.workspace = true
 futures.workspace = true
 async-trait.workspace = true
+futures-timer = { version = "3.0.3" }
 
 # misc
 flate2 = "1.0"
