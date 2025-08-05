@@ -1233,8 +1233,8 @@ dependencies = [
  "alloy-transport",
  "alloy-trie",
  "anvil-core",
- "anvil-polkadot-server",
  "anvil-rpc",
+ "anvil-server",
  "async-trait",
  "axum",
  "chrono",
@@ -1269,27 +1269,6 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "yansi",
-]
-
-[[package]]
-name = "anvil-polkadot-server"
-version = "1.2.3"
-dependencies = [
- "anvil-rpc",
- "async-trait",
- "axum",
- "bytes",
- "clap",
- "futures",
- "interprocess",
- "parking_lot 0.12.3",
- "pin-project 1.1.10",
- "serde",
- "serde_json",
- "thiserror 2.0.12",
- "tokio-util",
- "tower-http 0.6.2",
- "tracing",
 ]
 
 [[package]]

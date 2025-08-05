@@ -2,7 +2,6 @@
 members = [
     "crates/anvil/",
     "crates/anvil-polkadot",
-    "crates/anvil-polkadot/server",
     "crates/anvil-polkadot/runtime",
     "crates/anvil/core/",
     "crates/anvil/rpc/",
@@ -164,6 +163,7 @@ trezor-client.opt-level = "z"
 anvil = { path = "crates/anvil" }
 anvil-core = { path = "crates/anvil/core" }
 anvil-rpc = { path = "crates/anvil/rpc" }
+anvil-server = { path = "crates/anvil/server" }
 substrate-runtime = { path = "crates/anvil-polkadot/runtime" }
 cast = { path = "crates/cast" }
 chisel = { path = "crates/chisel" }

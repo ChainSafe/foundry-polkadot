@@ -6,7 +6,7 @@ use alloy_signer_local::{
     coins_bip39::{English, Mnemonic},
     MnemonicBuilder, PrivateKeySigner,
 };
-use anvil_polkadot_server::ServerConfig;
+use anvil_server::ServerConfig;
 use eyre::{Context, Result};
 use foundry_common::duration_since_unix_epoch;
 use foundry_config::Config;
@@ -511,7 +511,7 @@ impl Default for AnvilNodeConfig {
             account_generator: None,
             base_fee: None,
             disable_min_priority_fee: false,
-            enable_tracing: true,
+            enable_tracing: false,
             enable_steps_tracing: false,
             print_logs: true,
             print_traces: false,

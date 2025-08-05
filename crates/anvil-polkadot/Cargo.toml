@@ -20,10 +20,10 @@ required-features = ["cli"]
 
 [dependencies]
 # foundry internal
-anvil-polkadot-server = { path = "server" }
 substrate-runtime = { path = "runtime"}
 polkadot-sdk = { workspace = true, features = ["node"] }
 anvil-core.workspace = true
+anvil-server.workspace = true
 anvil-rpc.workspace = true
 foundry-cli.workspace = true
 foundry-common.workspace = true
@@ -114,6 +114,6 @@ cmd = [
     "clap_complete",
     "dep:fdlimit",
     "dep:ctrlc",
-    "anvil-polkadot-server/clap",
+    "anvil-server/clap",
     "tokio/signal",
 ]

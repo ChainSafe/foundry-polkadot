@@ -5,7 +5,7 @@ use crate::{
 use alloy_genesis::Genesis;
 use alloy_primitives::{utils::Unit, B256, U256};
 use alloy_signer_local::coins_bip39::{English, Mnemonic};
-use anvil_polkadot_server::ServerConfig;
+use anvil_server::ServerConfig;
 use clap::Parser;
 use foundry_common::shell;
 use foundry_config::Chain;
