@@ -4,11 +4,9 @@ use foundry_cli::opts::GlobalArgs;
 use foundry_common::version::{LONG_VERSION, SHORT_VERSION};
 use polkadot_sdk::{sc_cli::SubstrateCli, sc_service};
 
-/// A fast local Ethereum development node.
 #[derive(Parser)]
-#[command(name = "anvil", version = SHORT_VERSION, long_version = LONG_VERSION, next_display_order = None)]
+#[command(name = "anvil-polkadot", version = SHORT_VERSION, long_version = LONG_VERSION, next_display_order = None)]
 pub struct Anvil {
-    /// Include the global arguments.
     #[command(flatten)]
     pub global: GlobalArgs,
 
@@ -33,25 +31,26 @@ pub enum AnvilSubcommand {
     GenerateFigSpec,
 }
 
+// Implementation of the SubstrateCli, which enables us to launch an in-process substrate node.
 impl SubstrateCli for Anvil {
     fn impl_name() -> String {
-        "Anvil Polkadot".into()
+        "Anvil Substrate Node".into()
     }
 
     fn impl_version() -> String {
-        "V1".into()
+        SHORT_VERSION.into()
     }
 
     fn description() -> String {
-        "Description".into()
+        "Anvil Substrate Node".into()
     }
 
     fn author() -> String {
-        "Authors".into()
+        "Anvil Polkadot Developers".into()
     }
 
     fn support_url() -> String {
-        "URL".into()
+        "https://github.com/paritytech/foundry-polkadot/issues".into()
     }
 
     fn copyright_start_year() -> i32 {

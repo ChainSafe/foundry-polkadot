@@ -1,6 +1,6 @@
 [package]
 name = "anvil-polkadot"
-description = "Local ethereum node"
+description = "Local ethereum-compatible node based on polkadot-sdk"
 
 version.workspace = true
 edition.workspace = true
@@ -20,7 +20,7 @@ required-features = ["cli"]
 
 [dependencies]
 # foundry internal
-substrate-runtime = { path = "runtime"}
+substrate-runtime = { path = "substrate-runtime"}
 polkadot-sdk = { workspace = true, features = ["node"] }
 anvil-core.workspace = true
 anvil-server.workspace = true

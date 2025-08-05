@@ -1,6 +1,4 @@
-use futures::FutureExt;
 use polkadot_sdk::{
-    polkadot_service::Backend as TBackend,
     sc_basic_authorship, sc_consensus, sc_consensus_manual_seal,
     sc_executor::WasmExecutor,
     sc_network,
@@ -8,21 +6,21 @@ use polkadot_sdk::{
     sc_transaction_pool, sp_io,
     sp_runtime::traits::Block as BlockT,
     sp_timestamp,
-    substrate_frame_rpc_system::{System as SystemRpc, SystemApiServer},
+    substrate_frame_rpc_system::SystemApiServer,
 };
 use std::sync::Arc;
 use substrate_runtime::{OpaqueBlock as Block, RuntimeApi};
 
 use crate::AnvilNodeConfig;
 
-type HostFunctions = sp_io::SubstrateHostFunctions;
+pub type FullClient =
+    sc_service::TFullClient<Block, RuntimeApi, WasmExecutor<sp_io::SubstrateHostFunctions>>;
 
-pub(crate) type FullClient =
-    sc_service::TFullClient<Block, RuntimeApi, WasmExecutor<HostFunctions>>;
+pub type Backend = sc_service::TFullBackend<Block>;
 
-type Backend = sc_service::TFullBackend<Block>;
+pub type TransactionPoolHandle = sc_transaction_pool::TransactionPoolHandle<Block, FullClient>;
+
 type SelectChain = sc_consensus::LongestChain<Backend, Block>;
-type TransactionPoolHandle = sc_transaction_pool::TransactionPoolHandle<Block, FullClient>;
 
 pub struct Service {
     pub task_manager: TaskManager,
@@ -34,7 +32,7 @@ pub struct Service {
 
 /// Builds a new service for a full client.
 pub fn new<Network: sc_network::NetworkBackend<Block, <Block as BlockT>::Hash>>(
-    anvil_config: &AnvilNodeConfig,
+    _anvil_config: &AnvilNodeConfig,
     config: Configuration,
 ) -> Result<Service, ServiceError> {
     let (client, backend, keystore_container, mut task_manager) =
@@ -115,10 +113,11 @@ pub fn new<Network: sc_network::NetworkBackend<Block, <Block as BlockT>::Hash>>(
         None,
     );
 
+    // Implement a dummy block production mechanism for now, just build an instantly finalized block
+    // every 6 seconds. This will have to change.
     let default_block_time = 6000;
-
     let (mut sink, commands_stream) = futures::channel::mpsc::channel(1024);
-    task_manager.spawn_handle().spawn("block_authoring", None, async move {
+    task_manager.spawn_handle().spawn("block_authoring", "anvil-polkadot", async move {
         loop {
             futures_timer::Delay::new(std::time::Duration::from_millis(default_block_time)).await;
             sink.try_send(sc_consensus_manual_seal::EngineCommand::SealNewBlock {
@@ -136,7 +135,7 @@ pub fn new<Network: sc_network::NetworkBackend<Block, <Block as BlockT>::Hash>>(
         env: proposer,
         client: client.clone(),
         pool: transaction_pool.clone(),
-        select_chain: sc_consensus::LongestChain::new(backend.clone()),
+        select_chain: SelectChain::new(backend.clone()),
         commands_stream: Box::pin(commands_stream),
         consensus_data_provider: None,
         create_inherent_data_providers: move |_, ()| async move {
@@ -145,7 +144,11 @@ pub fn new<Network: sc_network::NetworkBackend<Block, <Block as BlockT>::Hash>>(
     };
     let authorship_future = sc_consensus_manual_seal::run_manual_seal(params);
 
-    task_manager.spawn_essential_handle().spawn_blocking("manual-seal", None, authorship_future);
+    task_manager.spawn_essential_handle().spawn_blocking(
+        "manual-seal",
+        "substrate",
+        authorship_future,
+    );
 
     Ok(Service { task_manager, client, backend, tx_pool: transaction_pool, rpc_handlers })
 }

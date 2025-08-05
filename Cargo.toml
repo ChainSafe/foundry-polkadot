@@ -2,7 +2,7 @@
 members = [
     "crates/anvil/",
     "crates/anvil-polkadot",
-    "crates/anvil-polkadot/runtime",
+    "crates/anvil-polkadot/substrate-runtime",
     "crates/anvil/core/",
     "crates/anvil/rpc/",
     "crates/anvil/server/",
@@ -164,7 +164,7 @@ anvil = { path = "crates/anvil" }
 anvil-core = { path = "crates/anvil/core" }
 anvil-rpc = { path = "crates/anvil/rpc" }
 anvil-server = { path = "crates/anvil/server" }
-substrate-runtime = { path = "crates/anvil-polkadot/runtime" }
+substrate-runtime = { path = "crates/anvil-polkadot/substrate-runtime" }
 cast = { path = "crates/cast" }
 chisel = { path = "crates/chisel" }
 forge = { path = "crates/forge" }

@@ -1,9 +1,8 @@
-use crate::{
-    config::{AnvilNodeConfig, SubstrateNodeConfig, DEFAULT_MNEMONIC},
-    AccountGenerator, CHAIN_ID,
+use crate::config::{
+    AccountGenerator, AnvilNodeConfig, SubstrateNodeConfig, CHAIN_ID, DEFAULT_MNEMONIC,
 };
 use alloy_genesis::Genesis;
-use alloy_primitives::{utils::Unit, B256, U256};
+use alloy_primitives::{utils::Unit, U256};
 use alloy_signer_local::coins_bip39::{English, Mnemonic};
 use anvil_server::ServerConfig;
 use clap::Parser;
@@ -398,81 +397,6 @@ pub struct AnvilEvmArgs {
     /// The memory limit per EVM execution in bytes.
     #[arg(long)]
     pub memory_limit: Option<u64>,
-}
-
-/// Helper type to periodically dump the state of the chain to disk
-struct PeriodicStateDumper {
-    in_progress_dump: Option<Pin<Box<dyn Future<Output = ()> + Send + Sync + 'static>>>,
-    dump_state: Option<PathBuf>,
-    preserve_historical_states: bool,
-    interval: Interval,
-}
-
-impl PeriodicStateDumper {
-    fn new(
-        dump_state: Option<PathBuf>,
-        interval: Duration,
-        preserve_historical_states: bool,
-    ) -> Self {
-        let dump_state = dump_state.map(|mut dump_state| {
-            if dump_state.is_dir() {
-                dump_state = dump_state.join("state.json");
-            }
-            dump_state
-        });
-
-        // periodically flush the state
-        let interval = tokio::time::interval_at(Instant::now() + interval, interval);
-        Self { in_progress_dump: None, dump_state, preserve_historical_states, interval }
-    }
-
-    async fn dump(&self) {
-        if let Some(state) = self.dump_state.clone() {
-            Self::dump_state(state, self.preserve_historical_states).await
-        }
-    }
-
-    /// Infallible state dump
-    async fn dump_state(dump_state: PathBuf, preserve_historical_states: bool) {
-        // TODO
-        trace!(path=?dump_state, "Dumping state. NOOP for now");
-    }
-}
-
-// An endless future that periodically dumps the state to disk if configured.
-impl Future for PeriodicStateDumper {
-    type Output = ();
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let this = self.get_mut();
-        if this.dump_state.is_none() {
-            return Poll::Pending
-        }
-
-        loop {
-            if let Some(mut flush) = this.in_progress_dump.take() {
-                match flush.poll_unpin(cx) {
-                    Poll::Ready(_) => {
-                        this.interval.reset();
-                    }
-                    Poll::Pending => {
-                        this.in_progress_dump = Some(flush);
-                        return Poll::Pending
-                    }
-                }
-            }
-
-            if this.interval.poll_tick(cx).is_ready() {
-                let path = this.dump_state.clone().expect("exists; see above");
-                this.in_progress_dump =
-                    Some(Box::pin(Self::dump_state(path, this.preserve_historical_states)));
-            } else {
-                break
-            }
-        }
-
-        Poll::Pending
-    }
 }
 
 /// Represents the --state flag and where to load from, or dump the state to

@@ -1,28 +1,24 @@
 //! Contains RPC handlers
-use alloy_rpc_types::{
-    pubsub::{Params, SubscriptionKind},
-    FilteredParams,
-};
 use anvil_core::eth::{subscription::SubscriptionId, EthPubSub, EthRequest, EthRpcCall};
 use anvil_rpc::{error::RpcError, response::ResponseResult};
 use anvil_server::{PubSubContext, PubSubRpcHandler, RpcHandler};
 use futures::{channel::oneshot, SinkExt};
 
 use crate::{
+    api_server::{ApiHandle, ApiRequest},
     pubsub::EthSubscription,
-    responder::{ApiRequest, ResponderHandle},
 };
 
 /// A `RpcHandler` that expects `EthRequest` rpc calls via http
 #[derive(Clone)]
 pub struct HttpEthRpcHandler {
-    responder_handle: ResponderHandle,
+    api_handle: ApiHandle,
 }
 
 impl HttpEthRpcHandler {
-    /// Creates a new instance of the handler using the given `EthApi`
-    pub fn new(responder_handle: ResponderHandle) -> Self {
-        Self { responder_handle }
+    /// Creates a new instance of the handler using the given `ApiHandle`
+    pub fn new(api_handle: ApiHandle) -> Self {
+        Self { api_handle }
     }
 }
 
@@ -32,103 +28,31 @@ impl RpcHandler for HttpEthRpcHandler {
 
     async fn on_request(&self, request: Self::Request) -> ResponseResult {
         let (tx, rx) = oneshot::channel();
-        self.responder_handle
+        self.api_handle
             .clone()
             .send(ApiRequest { req: request, resp_sender: tx })
             .await
-            .expect("Dropped receiver?");
+            .expect("Dropped receiver");
 
-        rx.await.expect("Dropped sender?")
+        rx.await.expect("Dropped sender")
     }
 }
 
 /// A `RpcHandler` that expects `EthRequest` rpc calls and `EthPubSub` via pubsub connection
 #[derive(Clone)]
 pub struct PubSubEthRpcHandler {
-    responder_handle: ResponderHandle,
+    api_handle: ApiHandle,
 }
 
 impl PubSubEthRpcHandler {
-    /// Creates a new instance of the handler using the given `EthApi`
-    pub fn new(responder_handle: ResponderHandle) -> Self {
-        Self { responder_handle }
+    /// Creates a new instance of the handler using the given `ApiHandle`
+    pub fn new(api_handle: ApiHandle) -> Self {
+        Self { api_handle }
     }
 
     /// Invoked for an ethereum pubsub rpc call
-    async fn on_pub_sub(&self, pubsub: EthPubSub, cx: PubSubContext<Self>) -> ResponseResult {
+    async fn on_pub_sub(&self, _pubsub: EthPubSub, _cx: PubSubContext<Self>) -> ResponseResult {
         return ResponseResult::Error(RpcError::invalid_params("Not implemented"))
-        // let id = SubscriptionId::random_hex();
-        // trace!(target: "rpc::ws", "received pubsub request {:?}", pubsub);
-        // match pubsub {
-        //     EthPubSub::EthUnSubscribe(id) => {
-        //         trace!(target: "rpc::ws", "canceling subscription {:?}", id);
-        //         let canceled = cx.remove_subscription(&id).is_some();
-        //         ResponseResult::Success(canceled.into())
-        //     }
-        //     EthPubSub::EthSubscribe(kind, raw_params) => {
-        //         let filter = match &*raw_params {
-        //             Params::None => None,
-        //             Params::Logs(filter) => Some(filter.clone()),
-        //             Params::Bool(_) => None,
-        //         };
-        //         let params = FilteredParams::new(filter.map(|b| *b));
-
-        //         let subscription = match kind {
-        //             SubscriptionKind::Logs => {
-        //                 if raw_params.is_bool() {
-        //                     return ResponseResult::Error(RpcError::invalid_params(
-        //                         "Expected params for logs subscription",
-        //                     ))
-        //                 }
-
-        //                 trace!(target: "rpc::ws", "received logs subscription {:?}", params);
-        //                 let blocks = self.api.new_block_notifications();
-        //                 let storage = self.api.storage_info();
-        //                 EthSubscription::Logs(Box::new(LogsSubscription {
-        //                     blocks,
-        //                     storage,
-        //                     filter: params,
-        //                     queued: Default::default(),
-        //                     id: id.clone(),
-        //                 }))
-        //             }
-        //             SubscriptionKind::NewHeads => {
-        //                 trace!(target: "rpc::ws", "received header subscription");
-        //                 let blocks = self.api.new_block_notifications();
-        //                 let storage = self.api.storage_info();
-        //                 EthSubscription::Header(blocks, storage, id.clone())
-        //             }
-        //             SubscriptionKind::NewPendingTransactions => {
-        //                 trace!(target: "rpc::ws", "received pending transactions subscription");
-        //                 match *raw_params {
-        //                     Params::Bool(true) => EthSubscription::FullPendingTransactions(
-        //                         self.api.full_pending_transactions(),
-        //                         id.clone(),
-        //                     ),
-        //                     Params::Bool(false) | Params::None => {
-        //                         EthSubscription::PendingTransactions(
-        //                             self.api.new_ready_transactions(),
-        //                             id.clone(),
-        //                         )
-        //                     }
-        //                     _ => {
-        //                         return ResponseResult::Error(RpcError::invalid_params(
-        //                             "Expected boolean parameter for newPendingTransactions",
-        //                         ))
-        //                     }
-        //                 }
-        //             }
-        //             SubscriptionKind::Syncing => {
-        //                 return RpcError::internal_error_with("Not implemented").into()
-        //             }
-        //         };
-
-        //         cx.add_subscription(id.clone(), subscription);
-
-        //         trace!(target: "rpc::ws", "created new subscription: {:?}", id);
-        //         to_rpc_result(id)
-        //     }
-        // }
     }
 }
 
@@ -143,13 +67,13 @@ impl PubSubRpcHandler for PubSubEthRpcHandler {
         match request {
             EthRpcCall::Request(request) => {
                 let (tx, rx) = oneshot::channel();
-                self.responder_handle
+                self.api_handle
                     .clone()
                     .send(ApiRequest { req: *request, resp_sender: tx })
                     .await
-                    .expect("Dropped receiver?");
+                    .expect("Dropped receiver");
 
-                rx.await.expect("Dropped sender?")
+                rx.await.expect("Dropped sender")
             }
             EthRpcCall::PubSub(pubsub) => self.on_pub_sub(pubsub, cx).await,
         }

@@ -1,9 +1,8 @@
-//! The `anvil` CLI: a fast local Ethereum development node, akin to Hardhat Network, Tenderly.
-
-use anvil_polkadot::args::run;
+//! The `anvil-polkadot` CLI: a fast local ethereum-compatible development node, based on
+//! polkadot-sdk.
 
 fn main() {
-    if let Err(err) = run() {
+    if let Err(err) = anvil_polkadot::run() {
         let _ = foundry_common::sh_err!("{err:?}");
         std::process::exit(1);
     }
