@@ -1260,7 +1260,7 @@ fn set_cold_slot(ccx: &mut CheatsCtxt, target: Address, slot: U256, cold: bool) 
 impl Cheatcode for pvmCall {
     fn apply(&self, state: &mut Cheatcodes) -> Result {
         let Self { enabled } = self;
-        
+
         // Switch the strategy based on PVM setting
         if *enabled {
             state.strategy = CheatcodeInspectorStrategy::new_pvm();
@@ -1270,7 +1270,7 @@ impl Cheatcode for pvmCall {
             state.strategy = CheatcodeInspectorStrategy::new_evm();
             tracing::info!("PVM mode disabled, using EVM");
         }
-        
+
         Ok(Default::default())
     }
 }
@@ -1278,8 +1278,12 @@ impl Cheatcode for pvmCall {
 impl Cheatcode for getPvmInfoCall {
     fn apply(&self, state: &mut Cheatcodes) -> Result {
         // Get PVM context from strategy
-        let ctx = state.strategy.context.as_any_ref().downcast_ref::<crate::strategy::PvmCheatcodeInspectorStrategyContext>();
-        
+        let ctx = state
+            .strategy
+            .context
+            .as_any_ref()
+            .downcast_ref::<crate::strategy::PvmCheatcodeInspectorStrategyContext>();
+
         if let Some(ctx) = ctx {
             let info = format!(
                 "PVM Mode: {}\nVM Mode: {}\nLast Operation: {}",

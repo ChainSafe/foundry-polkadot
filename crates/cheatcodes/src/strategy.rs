@@ -69,8 +69,6 @@ impl PvmCheatcodeInspectorStrategyContext {
             pvm_state: PvmState::default(),
         }
     }
-
-
 }
 
 impl CheatcodeInspectorStrategyContext for PvmCheatcodeInspectorStrategyContext {
@@ -376,34 +374,48 @@ impl CheatcodeInspectorStrategyRunner for PvmCheatcodeInspectorStrategyRunner {
 
 impl PvmCheatcodeInspectorStrategyRunner {
     /// Mock PVM-specific operation handling
-    pub fn mock_pvm_operation(&self, ctx: &mut PvmCheatcodeInspectorStrategyContext, operation: &str) -> bool {
+    pub fn mock_pvm_operation(
+        &self,
+        ctx: &mut PvmCheatcodeInspectorStrategyContext,
+        operation: &str,
+    ) -> bool {
         if !ctx.using_pvm {
             return false;
         }
-        
+
         // Mock: Handle PVM-specific operations
         match operation {
             "pvm_balance" => {
-                ctx.pvm_state.custom_state.insert("last_operation".to_string(), "pvm_balance".to_string());
+                ctx.pvm_state
+                    .custom_state
+                    .insert("last_operation".to_string(), "pvm_balance".to_string());
                 true
             }
             "pvm_storage" => {
-                ctx.pvm_state.custom_state.insert("last_operation".to_string(), "pvm_storage".to_string());
+                ctx.pvm_state
+                    .custom_state
+                    .insert("last_operation".to_string(), "pvm_storage".to_string());
                 true
             }
             "pvm_call" => {
-                ctx.pvm_state.custom_state.insert("last_operation".to_string(), "pvm_call".to_string());
+                ctx.pvm_state
+                    .custom_state
+                    .insert("last_operation".to_string(), "pvm_call".to_string());
                 true
             }
             "pvm_step" => {
-                ctx.pvm_state.custom_state.insert("last_operation".to_string(), "pvm_step".to_string());
+                ctx.pvm_state
+                    .custom_state
+                    .insert("last_operation".to_string(), "pvm_step".to_string());
                 true
             }
             "pvm_operation" => {
-                ctx.pvm_state.custom_state.insert("last_operation".to_string(), "pvm_operation".to_string());
+                ctx.pvm_state
+                    .custom_state
+                    .insert("last_operation".to_string(), "pvm_operation".to_string());
                 true
             }
-            _ => false
+            _ => false,
         }
     }
 }
