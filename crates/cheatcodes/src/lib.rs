@@ -55,7 +55,8 @@ pub use script::{Wallets, WalletsInner};
 
 mod strategy;
 pub use strategy::{
-    CheatcodesStrategy, CheatcodeInspectorStrategy, CheatcodeInspectorStrategyContext, CheatcodeInspectorStrategyRunner,
+    CheatcodeInspectorStrategy, CheatcodeInspectorStrategyContext,
+    CheatcodeInspectorStrategyRunner, CheatcodesStrategy,
 };
 
 mod string;
