@@ -63,6 +63,10 @@ pub struct CheatsConfig {
     pub chain_id_to_alias: HashMap<u64, String>,
     /// Cheatcode inspector behavior.
     pub strategy: CheatcodesStrategy,
+    /// Whether to use PVM mode instead of EVM
+    pub pvm_enabled: bool,
+    /// PVM environment configuration
+    pub pvm_env: Option<crate::strategy::PvmEnvironment>,
 }
 
 /// Chain data for getChain cheatcodes
@@ -115,6 +119,8 @@ impl CheatsConfig {
             chains: HashMap::new(),
             chain_id_to_alias: HashMap::new(),
             strategy,
+            pvm_enabled: false,
+            pvm_env: None,
         }
     }
 
@@ -325,6 +331,8 @@ impl Default for CheatsConfig {
             chains: HashMap::new(),
             chain_id_to_alias: HashMap::new(),
             strategy: CheatcodesStrategy::new_evm(),
+            pvm_enabled: false,
+            pvm_env: None,
         }
     }
 }
