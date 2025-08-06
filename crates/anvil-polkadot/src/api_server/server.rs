@@ -2,6 +2,7 @@ use super::ApiRequest;
 use crate::substrate_node::service::Service;
 use anvil_core::eth::EthRequest;
 use anvil_rpc::{error::RpcError, response::ResponseResult};
+use foundry_common::sh_println;
 use futures::{channel::mpsc, StreamExt};
 
 pub struct ApiServer {
@@ -15,7 +16,7 @@ impl ApiServer {
 
     pub async fn run(mut self) {
         while let Some(msg) = self.req_receiver.next().await {
-            println!("GOT REQUEST: {:?}", msg.req);
+            sh_println!("GOT REQUEST: {:?}", msg.req).unwrap();
 
             let resp = self.execute(msg.req).await;
 

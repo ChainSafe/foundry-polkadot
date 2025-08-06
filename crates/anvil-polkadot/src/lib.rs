@@ -120,7 +120,7 @@ pub async fn spawn_anvil_tasks(anvil_config: AnvilNodeConfig, service: &Service)
     let mut addresses = Vec::with_capacity(anvil_config.host.len());
 
     // Spawn the api server.
-    let api_handle = api_server::spawn(&service);
+    let api_handle = api_server::spawn(service);
 
     // Spawn the network servers.
     for addr in &anvil_config.host {

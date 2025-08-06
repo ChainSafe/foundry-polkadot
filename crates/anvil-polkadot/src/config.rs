@@ -100,7 +100,7 @@ impl SubstrateNodeConfig {
             rpc_cors: None,
         };
 
-        SubstrateNodeConfig { shared_params, rpc_params }
+        Self { shared_params, rpc_params }
     }
 }
 

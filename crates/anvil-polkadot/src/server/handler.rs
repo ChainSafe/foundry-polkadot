@@ -52,7 +52,7 @@ impl PubSubEthRpcHandler {
 
     /// Invoked for an ethereum pubsub rpc call
     async fn on_pub_sub(&self, _pubsub: EthPubSub, _cx: PubSubContext<Self>) -> ResponseResult {
-        return ResponseResult::Error(RpcError::invalid_params("Not implemented"))
+        ResponseResult::Error(RpcError::invalid_params("Not implemented"))
     }
 }
 
