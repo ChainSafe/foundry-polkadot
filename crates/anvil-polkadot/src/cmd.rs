@@ -8,19 +8,14 @@ use anvil_server::ServerConfig;
 use clap::Parser;
 use foundry_common::shell;
 use foundry_config::Chain;
-use futures::FutureExt;
 use rand::{rngs::StdRng, SeedableRng};
 use serde::{Deserialize, Serialize};
 use std::{
-    future::Future,
     net::IpAddr,
     path::{Path, PathBuf},
-    pin::Pin,
     str::FromStr,
-    task::{Context, Poll},
     time::Duration,
 };
-use tokio::time::{Instant, Interval};
 
 /// Modes that determine the transaction ordering of the mempool
 ///
@@ -57,7 +52,7 @@ pub struct SerializableState {}
 impl SerializableState {
     /// This is used as the clap `value_parser` implementation
     #[allow(dead_code)]
-    pub(crate) fn parse(path: &str) -> Result<Self, String> {
+    pub(crate) fn parse(_path: &str) -> Result<Self, String> {
         Ok(Self {})
     }
 }
@@ -222,7 +217,6 @@ pub struct NodeArgs {
     pub transaction_block_keeper: Option<usize>,
 
     #[command(flatten)]
-    /// TODO: we'll most likely need to heavily trim this.
     pub evm: AnvilEvmArgs,
 
     #[command(flatten)]
@@ -240,9 +234,6 @@ const IPC_HELP: &str =
 /// The default IPC endpoint
 #[cfg(not(windows))]
 const IPC_HELP: &str = "Launch an ipc server at the given path or default path = `/tmp/anvil.ipc`";
-
-/// Default interval for periodically dumping the state.
-const DEFAULT_DUMP_INTERVAL: Duration = Duration::from_secs(60);
 
 impl NodeArgs {
     pub fn into_node_config(self) -> eyre::Result<(AnvilNodeConfig, SubstrateNodeConfig)> {
@@ -312,11 +303,6 @@ impl NodeArgs {
             gen = gen.derivation_path(derivation);
         }
         gen
-    }
-
-    /// Returns the location where to dump the state to.
-    fn dump_state_path(&self) -> Option<PathBuf> {
-        self.dump_state.as_ref().or_else(|| self.state.as_ref().map(|s| &s.path)).cloned()
     }
 }
 

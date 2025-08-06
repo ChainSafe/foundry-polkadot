@@ -1,6 +1,6 @@
 use crate::cmd::{SerializableState, TransactionOrder};
 use alloy_genesis::Genesis;
-use alloy_primitives::{hex, map::HashMap, utils::Unit, BlockNumber, TxHash, U256};
+use alloy_primitives::{hex, map::HashMap, utils::Unit, U256};
 use alloy_signer::Signer;
 use alloy_signer_local::{
     coins_bip39::{English, Mnemonic},
@@ -8,7 +8,7 @@ use alloy_signer_local::{
 };
 use anvil_server::ServerConfig;
 use eyre::{Context, Result};
-use foundry_common::duration_since_unix_epoch;
+use foundry_common::{duration_since_unix_epoch, sh_println};
 use foundry_config::Config;
 use polkadot_sdk::{
     sc_cli::{
@@ -27,7 +27,6 @@ use std::{
     net::{IpAddr, Ipv4Addr},
     num::NonZeroU32,
     path::PathBuf,
-    sync::Arc,
     time::Duration,
 };
 use yansi::Paint;
@@ -61,89 +60,6 @@ const BANNER: &str = r"
     | (_| | | | | |  \ V /  | | | |
      \__,_| |_| |_|   \_/   |_| |_|
 ";
-
-/// Configurations of the EVM node
-#[derive(Clone, Debug)]
-pub struct AnvilNodeConfig {
-    /// Chain ID of the EVM chain
-    pub chain_id: Option<u64>,
-    /// Default gas limit for all txs
-    pub gas_limit: Option<u128>,
-    /// If set to `true`, disables the block gas limit
-    pub disable_block_gas_limit: bool,
-    /// Default gas price for all txs
-    pub gas_price: Option<u128>,
-    /// Default base fee
-    pub base_fee: Option<u64>,
-    /// If set to `true`, disables the enforcement of a minimum suggested priority fee
-    pub disable_min_priority_fee: bool,
-    /// Signer accounts that will be initialised with `genesis_balance` in the genesis block
-    pub genesis_accounts: Vec<PrivateKeySigner>,
-    /// Native token balance of every genesis account in the genesis block
-    pub genesis_balance: U256,
-    /// Genesis block timestamp
-    pub genesis_timestamp: Option<u64>,
-    /// Genesis block number
-    pub genesis_block_number: Option<u64>,
-    /// Signer accounts that can sign messages/transactions from the EVM node
-    pub signer_accounts: Vec<PrivateKeySigner>,
-    /// Configured block time for the EVM chain. Use `None` to mine a new block for every tx
-    pub block_time: Option<Duration>,
-    /// Disable auto, interval mining mode uns use `MiningMode::None` instead
-    pub no_mining: bool,
-    /// Enables auto and interval mining mode
-    pub mixed_mining: bool,
-    /// port to use for the server
-    pub port: u16,
-    /// maximum number of transactions in a block
-    pub max_transactions: usize,
-    /// The generator used to generate the dev accounts
-    pub account_generator: Option<AccountGenerator>,
-    /// whether to enable tracing
-    pub enable_tracing: bool,
-    /// How to configure the server
-    pub server_config: ServerConfig,
-    /// The host the server will listen on
-    pub host: Vec<IpAddr>,
-    /// How transactions are sorted in the mempool
-    pub transaction_order: TransactionOrder,
-    /// Filename to write anvil output as json
-    pub config_out: Option<PathBuf>,
-    /// The genesis to use to initialize the node
-    pub genesis: Option<Genesis>,
-    /// The ipc path
-    pub ipc_path: Option<Option<String>>,
-    /// Enable transaction/call steps tracing for debug calls returning geth-style traces
-    pub enable_steps_tracing: bool,
-    /// Enable printing of `console.log` invocations.
-    pub print_logs: bool,
-    /// Enable printing of traces.
-    pub print_traces: bool,
-    /// Enable auto impersonation of accounts on startup
-    pub enable_auto_impersonate: bool,
-    /// Configure the code size limit
-    pub code_size_limit: Option<usize>,
-    /// Configures how to remove historic state.
-    ///
-    /// If set to `Some(num)` keep latest num state in memory only.
-    pub prune_history: PruneStateHistoryConfig,
-    /// Max number of states cached on disk.
-    pub max_persisted_states: Option<usize>,
-    /// The file where to load the state from
-    pub init_state: Option<SerializableState>,
-    /// max number of blocks with transactions in memory
-    pub transaction_block_keeper: Option<usize>,
-    /// Disable the default CREATE2 deployer
-    pub disable_default_create2_deployer: bool,
-    /// Slots in an epoch
-    pub slots_in_an_epoch: u64,
-    /// The memory limit per EVM execution in bytes.
-    pub memory_limit: Option<u64>,
-    /// Do not print log messages.
-    pub silent: bool,
-    /// The path where states are cached.
-    pub cache_path: Option<PathBuf>,
-}
 
 #[derive(Clone, Debug)]
 pub struct SubstrateNodeConfig {
@@ -313,178 +229,242 @@ impl SubstrateCliConfiguration for SubstrateNodeConfig {
     }
 }
 
-// impl NodeConfig {
-//     fn as_string(&self) -> String {
-//         let mut s: String = String::new();
-//         let _ = write!(s, "\n{}", BANNER.green());
-//         let _ = write!(s, "\n    {VERSION_MESSAGE}");
-//         let _ = write!(s, "\n    {}", "https://github.com/foundry-rs/foundry".green());
+/// Configurations of the EVM node
+#[derive(Clone, Debug)]
+pub struct AnvilNodeConfig {
+    /// Chain ID of the EVM chain
+    pub chain_id: Option<u64>,
+    /// Default gas limit for all txs
+    pub gas_limit: Option<u128>,
+    /// If set to `true`, disables the block gas limit
+    pub disable_block_gas_limit: bool,
+    /// Default gas price for all txs
+    pub gas_price: Option<u128>,
+    /// Default base fee
+    pub base_fee: Option<u64>,
+    /// If set to `true`, disables the enforcement of a minimum suggested priority fee
+    pub disable_min_priority_fee: bool,
+    /// Signer accounts that will be initialised with `genesis_balance` in the genesis block
+    pub genesis_accounts: Vec<PrivateKeySigner>,
+    /// Native token balance of every genesis account in the genesis block
+    pub genesis_balance: U256,
+    /// Genesis block timestamp
+    pub genesis_timestamp: Option<u64>,
+    /// Genesis block number
+    pub genesis_block_number: Option<u64>,
+    /// Signer accounts that can sign messages/transactions from the EVM node
+    pub signer_accounts: Vec<PrivateKeySigner>,
+    /// Configured block time for the EVM chain. Use `None` to mine a new block for every tx
+    pub block_time: Option<Duration>,
+    /// Disable auto, interval mining mode uns use `MiningMode::None` instead
+    pub no_mining: bool,
+    /// Enables auto and interval mining mode
+    pub mixed_mining: bool,
+    /// port to use for the server
+    pub port: u16,
+    /// maximum number of transactions in a block
+    pub max_transactions: usize,
+    /// The generator used to generate the dev accounts
+    pub account_generator: Option<AccountGenerator>,
+    /// whether to enable tracing
+    pub enable_tracing: bool,
+    /// How to configure the server
+    pub server_config: ServerConfig,
+    /// The host the server will listen on
+    pub host: Vec<IpAddr>,
+    /// How transactions are sorted in the mempool
+    pub transaction_order: TransactionOrder,
+    /// Filename to write anvil output as json
+    pub config_out: Option<PathBuf>,
+    /// The genesis to use to initialize the node
+    pub genesis: Option<Genesis>,
+    /// The ipc path
+    pub ipc_path: Option<Option<String>>,
+    /// Enable transaction/call steps tracing for debug calls returning geth-style traces
+    pub enable_steps_tracing: bool,
+    /// Enable printing of `console.log` invocations.
+    pub print_logs: bool,
+    /// Enable printing of traces.
+    pub print_traces: bool,
+    /// Enable auto impersonation of accounts on startup
+    pub enable_auto_impersonate: bool,
+    /// Configure the code size limit
+    pub code_size_limit: Option<usize>,
+    /// Configures how to remove historic state.
+    ///
+    /// If set to `Some(num)` keep latest num state in memory only.
+    pub prune_history: PruneStateHistoryConfig,
+    /// Max number of states cached on disk.
+    pub max_persisted_states: Option<usize>,
+    /// The file where to load the state from
+    pub init_state: Option<SerializableState>,
+    /// max number of blocks with transactions in memory
+    pub transaction_block_keeper: Option<usize>,
+    /// Disable the default CREATE2 deployer
+    pub disable_default_create2_deployer: bool,
+    /// Slots in an epoch
+    pub slots_in_an_epoch: u64,
+    /// The memory limit per EVM execution in bytes.
+    pub memory_limit: Option<u64>,
+    /// Do not print log messages.
+    pub silent: bool,
+    /// The path where states are cached.
+    pub cache_path: Option<PathBuf>,
+}
 
-//         let _ = write!(
-//             s,
-//             r#"
+impl AnvilNodeConfig {
+    fn as_string(&self) -> String {
+        let mut s: String = String::new();
+        let _ = write!(s, "\n{}", BANNER.green());
+        let _ = write!(s, "\n    {VERSION_MESSAGE}");
+        let _ = write!(s, "\n    {}", "https://github.com/paritytech/foundry-polkadot".green());
 
-// Available Accounts
-// ==================
-// "#
-//         );
-//         let balance = alloy_primitives::utils::format_ether(self.genesis_balance);
-//         for (idx, wallet) in self.genesis_accounts.iter().enumerate() {
-//             write!(s, "\n({idx}) {} ({balance} ETH)", wallet.address()).unwrap();
-//         }
+        let _ = write!(
+            s,
+            r#"
 
-//         let _ = write!(
-//             s,
-//             r#"
+Available Accounts
+==================
+"#
+        );
+        let balance = alloy_primitives::utils::format_ether(self.genesis_balance);
+        for (idx, wallet) in self.genesis_accounts.iter().enumerate() {
+            write!(s, "\n({idx}) {} ({balance} ETH)", wallet.address()).unwrap();
+        }
 
-// Private Keys
-// ==================
-// "#
-//         );
+        let _ = write!(
+            s,
+            r#"
 
-//         for (idx, wallet) in self.genesis_accounts.iter().enumerate() {
-//             let hex = hex::encode(wallet.credential().to_bytes());
-//             let _ = write!(s, "\n({idx}) 0x{hex}");
-//         }
+Private Keys
+==================
+"#
+        );
 
-//         if let Some(ref gen) = self.account_generator {
-//             let _ = write!(
-//                 s,
-//                 r#"
+        for (idx, wallet) in self.genesis_accounts.iter().enumerate() {
+            let hex = hex::encode(wallet.credential().to_bytes());
+            let _ = write!(s, "\n({idx}) 0x{hex}");
+        }
 
-// Wallet
-// ==================
-// Mnemonic:          {}
-// Derivation path:   {}
-// "#,
-//                 gen.phrase,
-//                 gen.get_derivation_path()
-//             );
-//         }
+        if let Some(ref gen) = self.account_generator {
+            let _ = write!(
+                s,
+                r#"
 
-//         let _ = write!(
-//             s,
-//             r#"
+Wallet
+==================
+Mnemonic:          {}
+Derivation path:   {}
+"#,
+                gen.phrase,
+                gen.get_derivation_path()
+            );
+        }
 
-// Chain ID
-// ==================
+        let _ = write!(
+            s,
+            r#"
 
-// {}
-// "#,
-//             self.get_chain_id().green()
-//         );
+Chain ID
+==================
 
-//         let _ = write!(
-//             s,
-//             r#"
-// Base Fee
-// ==================
+{}
+"#,
+            self.get_chain_id().green()
+        );
 
-// {}
-// "#,
-//             self.get_base_fee().green()
-//         );
+        let _ = write!(
+            s,
+            r#"
+Base Fee
+==================
 
-//         let _ = write!(
-//             s,
-//             r#"
-// Gas Limit
-// ==================
+{}
+"#,
+            self.get_base_fee().green()
+        );
 
-// {}
-// "#,
-//             {
-//                 if self.disable_block_gas_limit {
-//                     "Disabled".to_string()
-//                 } else {
-//                     self.gas_limit
-//                         .map(|l| l.to_string())
-//                         .unwrap_or_else(|| DEFAULT_GAS_LIMIT.to_string())
-//                 }
-//             }
-//             .green()
-//         );
+        let _ = write!(
+            s,
+            r#"
+Gas Limit
+==================
 
-//         let _ = write!(
-//             s,
-//             r#"
-// Genesis Timestamp
-// ==================
+{}
+"#,
+            {
+                if self.disable_block_gas_limit {
+                    "Disabled".to_string()
+                } else {
+                    self.gas_limit
+                        .map(|l| l.to_string())
+                        .unwrap_or_else(|| DEFAULT_GAS_LIMIT.to_string())
+                }
+            }
+            .green()
+        );
 
-// {}
-// "#,
-//             self.get_genesis_timestamp().green()
-//         );
+        let _ = write!(
+            s,
+            r#"
+Genesis Timestamp
+==================
 
-//         let _ = write!(
-//             s,
-//             r#"
-// Genesis Number
-// ==================
+{}
+"#,
+            self.get_genesis_timestamp().green()
+        );
 
-// {}
-// "#,
-//             self.get_genesis_number().green()
-//         );
+        let _ = write!(
+            s,
+            r#"
+Genesis Number
+==================
 
-//         s
-//     }
+{}
+"#,
+            self.get_genesis_number().green()
+        );
 
-//     fn as_json(&self) -> Value {
-//         let mut wallet_description = HashMap::new();
-//         let mut available_accounts = Vec::with_capacity(self.genesis_accounts.len());
-//         let mut private_keys = Vec::with_capacity(self.genesis_accounts.len());
+        s
+    }
 
-//         for wallet in &self.genesis_accounts {
-//             available_accounts.push(format!("{:?}", wallet.address()));
-//             private_keys.push(format!("0x{}", hex::encode(wallet.credential().to_bytes())));
-//         }
+    fn as_json(&self) -> Value {
+        let mut wallet_description = HashMap::new();
+        let mut available_accounts = Vec::with_capacity(self.genesis_accounts.len());
+        let mut private_keys = Vec::with_capacity(self.genesis_accounts.len());
 
-//         if let Some(ref gen) = self.account_generator {
-//             let phrase = gen.get_phrase().to_string();
-//             let derivation_path = gen.get_derivation_path().to_string();
+        for wallet in &self.genesis_accounts {
+            available_accounts.push(format!("{:?}", wallet.address()));
+            private_keys.push(format!("0x{}", hex::encode(wallet.credential().to_bytes())));
+        }
 
-//             wallet_description.insert("derivation_path".to_string(), derivation_path);
-//             wallet_description.insert("mnemonic".to_string(), phrase);
-//         };
+        if let Some(ref gen) = self.account_generator {
+            let phrase = gen.get_phrase().to_string();
+            let derivation_path = gen.get_derivation_path().to_string();
 
-//         let gas_limit = match self.gas_limit {
-//             // if we have a disabled flag we should max out the limit
-//             Some(_) | None if self.disable_block_gas_limit => Some(u64::MAX.to_string()),
-//             Some(limit) => Some(limit.to_string()),
-//             _ => None,
-//         };
+            wallet_description.insert("derivation_path".to_string(), derivation_path);
+            wallet_description.insert("mnemonic".to_string(), phrase);
+        };
 
-//         json!({
-//           "available_accounts": available_accounts,
-//           "private_keys": private_keys,
-//           "wallet": wallet_description,
-//           "base_fee": format!("{}", self.get_base_fee()),
-//           "gas_price": format!("{}", self.get_gas_price()),
-//           "gas_limit": gas_limit,
-//           "genesis_timestamp": format!("{}", self.get_genesis_timestamp()),
-//         })
-//     }
-// }
+        let gas_limit = match self.gas_limit {
+            // if we have a disabled flag we should max out the limit
+            Some(_) | None if self.disable_block_gas_limit => Some(u64::MAX.to_string()),
+            Some(limit) => Some(limit.to_string()),
+            _ => None,
+        };
 
-// impl NodeConfig {
-// /// Returns a new config intended to be used in tests, which does not print and binds to a
-// /// random, free port by setting it to `0`
-// #[doc(hidden)]
-// pub fn test() -> Self {
-//     Self { enable_tracing: true, port: 0, silent: true, ..Default::default() }
-// }
-
-// /// Returns a new config which does not initialize any accounts on node startup.
-// pub fn empty_state() -> Self {
-//     Self {
-//         genesis_accounts: vec![],
-//         signer_accounts: vec![],
-//         disable_default_create2_deployer: true,
-//         ..Default::default()
-//     }
-// }
-// }
+        json!({
+          "available_accounts": available_accounts,
+          "private_keys": private_keys,
+          "wallet": wallet_description,
+          "base_fee": format!("{}", self.get_base_fee()),
+          "gas_price": format!("{}", self.get_gas_price()),
+          "gas_limit": gas_limit,
+          "genesis_timestamp": format!("{}", self.get_genesis_timestamp()),
+        })
+    }
+}
 
 impl Default for AnvilNodeConfig {
     fn default() -> Self {
@@ -865,19 +845,19 @@ impl AnvilNodeConfig {
     }
 
     /// Prints the config info
-    // pub fn print(&self) -> Result<()> {
-    //     if let Some(path) = &self.config_out {
-    //         let file = io::BufWriter::new(
-    //             File::create(path).wrap_err("unable to create anvil config description file")?,
-    //         );
-    //         let value = self.as_json();
-    //         serde_json::to_writer(file, &value).wrap_err("failed writing JSON")?;
-    //     }
-    //     if !self.silent {
-    //         sh_println!("{}", self.as_string())?;
-    //     }
-    //     Ok(())
-    // }
+    pub fn print(&self) -> Result<()> {
+        if let Some(path) = &self.config_out {
+            let file = io::BufWriter::new(
+                File::create(path).wrap_err("unable to create anvil config description file")?,
+            );
+            let value = self.as_json();
+            serde_json::to_writer(file, &value).wrap_err("failed writing JSON")?;
+        }
+        if !self.silent {
+            sh_println!("{}", self.as_string())?;
+        }
+        Ok(())
+    }
 
     /// Sets whether to disable the default create2 deployer
     #[must_use]
@@ -908,7 +888,7 @@ impl AnvilNodeConfig {
     /// Returns the gas limit for a non forked anvil instance
     ///
     /// Checks the config for the `disable_block_gas_limit` flag
-    pub(crate) fn gas_limit(&self) -> u128 {
+    pub(crate) fn _gas_limit(&self) -> u128 {
         if self.disable_block_gas_limit {
             return u64::MAX as u128;
         }
@@ -1008,13 +988,13 @@ impl AccountGenerator {
 }
 
 /// Returns the path to anvil dir `~/.foundry/anvil`
-pub fn anvil_dir() -> Option<PathBuf> {
+pub fn _anvil_dir() -> Option<PathBuf> {
     Config::foundry_dir().map(|p| p.join("anvil"))
 }
 
 /// Returns the root path to anvil's temporary storage `~/.foundry/anvil/`
-pub fn anvil_tmp_dir() -> Option<PathBuf> {
-    anvil_dir().map(|p| p.join("tmp"))
+pub fn _anvil_tmp_dir() -> Option<PathBuf> {
+    _anvil_dir().map(|p| p.join("tmp"))
 }
 
 #[cfg(test)]

@@ -38,9 +38,6 @@ pub mod cmd;
 pub mod opts;
 
 #[macro_use]
-extern crate foundry_common;
-
-#[macro_use]
 extern crate tracing;
 
 use clap::{CommandFactory, Parser};
@@ -150,7 +147,7 @@ pub async fn spawn_anvil_tasks(anvil_config: AnvilNodeConfig, service: &Service)
         .map(|path| try_spawn_ipc(&service.task_manager, path, api_handle))
         .transpose()?;
 
-    // TODO: there was a print here.
+    anvil_config.print()?;
 
     Ok(())
 }
