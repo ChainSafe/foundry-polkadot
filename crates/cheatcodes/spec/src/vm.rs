@@ -2877,6 +2877,21 @@ interface Vm {
     /// catch (bytes memory interceptedInitcode) { initcode = interceptedInitcode; }
     #[cheatcode(group = Utilities, safety = Unsafe)]
     function interceptInitcode() external;
+
+    /// Enables or disables PVM (PolkaVM) mode for contract execution.
+    /// When enabled, contracts will be executed using the PVM runtime instead of EVM.
+    /// Example usage:
+    /// vm.pvm(true);  // Enable PVM mode
+    /// vm.pvm(false); // Disable PVM mode (use EVM)
+    #[cheatcode(group = Utilities)]
+    function pvm(bool enabled) external;
+
+    /// Gets PVM-specific information for the current execution context.
+    /// Returns information about PVM state and mode.
+    /// Example usage:
+    /// string memory info = vm.getPvmInfo();
+    #[cheatcode(group = Utilities)]
+    function getPvmInfo() external view returns (string memory);
 }
 }
 

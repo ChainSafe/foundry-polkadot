@@ -2,6 +2,7 @@
 
 use crate::{
     inspector::{InnerEcx, RecordDebugStepInfo},
+    strategy::CheatcodeInspectorStrategy,
     BroadcastableTransaction, Cheatcode, Cheatcodes, CheatcodesExecutor, CheatsCtxt, Error, Result,
     Vm::*,
 };
@@ -1252,6 +1253,47 @@ fn set_cold_slot(ccx: &mut CheatsCtxt, target: Address, slot: U256, cold: bool) 
     if let Some(account) = ccx.ecx.journaled_state.state.get_mut(&target) {
         if let Some(storage_slot) = account.storage.get_mut(&slot) {
             storage_slot.is_cold = cold;
+        }
+    }
+}
+
+impl Cheatcode for pvmCall {
+    fn apply(&self, state: &mut Cheatcodes) -> Result {
+        let Self { enabled } = self;
+
+        // Switch the strategy based on PVM setting
+        if *enabled {
+            state.strategy = CheatcodeInspectorStrategy::new_pvm();
+            tracing::info!("PVM mode enabled");
+        } else {
+            // Switch back to EVM strategy
+            state.strategy = CheatcodeInspectorStrategy::new_evm();
+            tracing::info!("PVM mode disabled, using EVM");
+        }
+
+        Ok(Default::default())
+    }
+}
+
+impl Cheatcode for getPvmInfoCall {
+    fn apply(&self, state: &mut Cheatcodes) -> Result {
+        // Get PVM context from strategy
+        let ctx = state
+            .strategy
+            .context
+            .as_any_ref()
+            .downcast_ref::<crate::strategy::PvmCheatcodeInspectorStrategyContext>();
+
+        if let Some(ctx) = ctx {
+            let info = format!(
+                "PVM Mode: {}\nVM Mode: {}\nLast Operation: {}",
+                ctx.using_pvm,
+                ctx.pvm_state.custom_state.get("vm_mode").unwrap_or(&"unknown".to_string()),
+                ctx.pvm_state.custom_state.get("last_operation").unwrap_or(&"none".to_string())
+            );
+            Ok(info.abi_encode())
+        } else {
+            Ok("PVM context not available".to_string().abi_encode())
         }
     }
 }

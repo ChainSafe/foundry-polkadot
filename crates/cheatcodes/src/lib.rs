@@ -53,6 +53,12 @@ mod json;
 mod script;
 pub use script::{Wallets, WalletsInner};
 
+mod strategy;
+pub use strategy::{
+    CheatcodeInspectorStrategy, CheatcodeInspectorStrategyContext,
+    CheatcodeInspectorStrategyRunner, CheatcodesStrategy,
+};
+
 mod string;
 
 mod test;
@@ -90,7 +96,7 @@ pub(crate) trait Cheatcode: CheatcodeDef + DynCheatcode {
     }
 }
 
-pub(crate) trait DynCheatcode: 'static {
+pub trait DynCheatcode: 'static {
     fn cheatcode(&self) -> &'static spec::Cheatcode<'static>;
 
     fn as_debug(&self) -> &dyn std::fmt::Debug;
