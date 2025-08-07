@@ -11,6 +11,10 @@ ignore = [
     "RUSTSEC-2024-0437",
     # https://rustsec.org/advisories/RUSTSEC-2025-0021 gitoxide uses SHA-1 hash implementations without any collision detection, leaving it vulnerable to hash collision attacks.
     "RUSTSEC-2025-0021",
+    # https://rustsec.org/advisories/RUSTSEC-2022-0061 parity-wasm is unmaintained
+    "RUSTSEC-2022-0061",
+    # https://rustsec.org/advisories/RUSTSEC-2024-0370  proc-macro-error is unmaintained
+    "RUSTSEC-2024-0370"
 ]
 
 # This section is considered when running `cargo deny check bans`.
@@ -69,6 +73,24 @@ exceptions = [
     { allow = ["CC0-1.0"], name = "notify" },
     { allow = ["CC0-1.0"], name = "dunce" },
     { allow = ["CC0-1.0"], name = "aurora-engine-modexp" },
+    { allow = ["CC0-1.0"], name = "secp256k1-sys" },
+    { allow = ["CC0-1.0"], name = "secp256k1" },
+    { allow = ["CC0-1.0"], name = "bip39" },
+    { allow = ["CC0-1.0"], name = "bitcoin-internals" },
+    { allow = ["CC0-1.0"], name = "hex-conservative" },
+    { allow = ["CC0-1.0"], name = "parity-bip39" },
+    { allow = ["CC0-1.0"], name = "bitcoin_hashes" },
+    { allow = ["GPL-3.0"], name = "polkadot-core-primitives" },
+    { allow = ["GPL-3.0"], name = "polkadot-parachain-primitives" },
+    { allow = ["GPL-3.0"], name = "polkadot-primitives" },
+    { allow = ["GPL-3.0"], name = "polkadot-runtime-common" },
+    { allow = ["GPL-3.0"], name = "polkadot-runtime-parachains" },
+    { allow = ["GPL-3.0"], name = "polkadot-runtime-metrics" },
+    { allow = ["GPL-3.0"], name = "slot-range-helper" },
+    { allow = ["GPL-3.0"], name = "staging-xcm" },
+    { allow = ["GPL-3.0"], name = "staging-xcm-builder" },
+    { allow = ["GPL-3.0"], name = "staging-xcm-executor" },
+    { allow = ["GPL-3.0"], name = "xcm-procedural" },
 ]
 #copyleft = "deny"
 
