@@ -8159,7 +8159,7 @@
     {
       "func": {
         "id": "pvm",
-        "description": "Enables or disables PVM (PolkaVM) mode for contract execution.\nWhen enabled, contracts will be executed using the PVM runtime instead of EVM.\nExample usage:\nvm.pvm(true);  // Enable PVM mode\nvm.pvm(false); // Disable PVM mode (use EVM)",
+        "description": "Enables or disables PVM (PolkaVM) mode for contract execution.\nWhen enabled, only PVM-specific calls are intercepted; all other operations run on EVM.\nExample usage:\nvm.pvm(true);  // Enable PVM mode\nvm.pvm(false); // Disable PVM mode (use EVM)",
         "declaration": "function pvm(bool enabled) external;",
         "visibility": "external",
         "mutability": "",
