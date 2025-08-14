@@ -120,7 +120,7 @@ pub fn get_provider_builder(config: &Config) -> Result<ProviderBuilder> {
 /// Return an [ExecutorStrategy] via the config.
 pub fn get_executor_strategy(_config: &Config) -> ExecutorStrategy {
     info!("using revive strategy");
-    // todo!(): This should be dynamic.
+    // TODO: This should be dynamic.
     ExecutorStrategy::new_revive()
 }
 

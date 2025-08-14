@@ -38,7 +38,7 @@ impl BackendStrategyRunner for ReviveBackendStrategyRunner {
         inspector: &mut dyn foundry_evm::InspectorExt,
         inspect_ctx: Box<dyn std::any::Any>,
     ) -> eyre::Result<revm::primitives::ResultAndState> {
-        // todo!(): Need to decide the context switching here
+        // TODO: Need to decide the context switching here
         EvmBackendStrategyRunner.inspect(backend, env, inspector, inspect_ctx)
     }
 
@@ -79,7 +79,7 @@ impl BackendStrategyRunner for ReviveBackendStrategyRunner {
 #[derive(Debug, Clone)]
 pub struct ReviveBackendStrategyContext {
     pub revive_test_externalities: Arc<Mutex<sp_io::TestExternalities>>,
-    // todo!() add things necessary for the backend strategy.
+    // TODO: add things necessary for the backend strategy.
 }
 
 impl ReviveBackendStrategyContext {

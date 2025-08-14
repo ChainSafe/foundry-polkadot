@@ -39,7 +39,7 @@ impl ExecutorStrategyRunner for ReviveExecutorStrategyRunner {
         ctx: &dyn foundry_evm::executors::ExecutorStrategyContext,
     ) -> foundry_cheatcodes::CheatcodesStrategy {
         let _ctx = get_context_ref(ctx);
-        // todo!("Context should be used to configure the cheatcodes strategy");
+        // TODO: Context should be used to configure the cheatcodes strategy
         CheatcodeInspectorStrategy::new_pvm()
     }
 
@@ -144,7 +144,7 @@ impl ExecutorStrategyRunner for ReviveExecutorStrategyRunner {
         executor_env: &EnvWithHandlerCfg,
         inspector: &mut foundry_evm::inspectors::InspectorStack,
     ) -> eyre::Result<ResultAndState> {
-        // todo!(): Needs to decide if it should use revive depending on the context.
+        // TODO: Needs to decide if it should use revive depending on the context.
         EvmExecutorStrategyRunner.call(ctx, backend, env, executor_env, inspector)
     }
 
@@ -156,7 +156,7 @@ impl ExecutorStrategyRunner for ReviveExecutorStrategyRunner {
         executor_env: &EnvWithHandlerCfg,
         inspector: &mut foundry_evm::inspectors::InspectorStack,
     ) -> eyre::Result<ResultAndState> {
-        // todo!(): Needs to decide if it should use revive depending on the context.
+        // TODO: Needs to decide if it should use revive depending on the context.
         EvmExecutorStrategyRunner.transact(ctx, backend, env, executor_env, inspector)
     }
 }
