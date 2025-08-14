@@ -43,23 +43,26 @@ impl ExecutorStrategyRunner for ReviveExecutorStrategyRunner {
         CheatcodeInspectorStrategy::new_pvm()
     }
 
+    /// Sets the balance of an account.
+    ///
+    /// Ammount should be in the range of [0, u128::MAX] despite the type
+    /// because Ethereum balances are u256 while Polkadot balances are u128.
     fn set_balance(
         &self,
         executor: &mut foundry_evm::executors::Executor,
         address: Address,
         amount: U256,
     ) -> foundry_evm::backend::BackendResult<()> {
-        // todo!(): This should be done in client places, this is just a workaround for now, because
-        // ethereum supports U256::MAX while polkadot does not.
-        let amount = if amount == U256::MAX { U256::from(u128::MAX) } else { amount };
-        EvmExecutorStrategyRunner.set_balance(executor, address, amount)?;
+        let amount_pvm = U256ToBalance::convert(amount);
+        let amount_evm = U256::from(amount_pvm);
+        assert_eq!(
+            amount, amount_evm,
+            "Amount mismatch {amount} != {amount_evm}, Polkadot balances are u128"
+        );
+        EvmExecutorStrategyRunner.set_balance(executor, address, amount_evm)?;
 
         let backend = get_backend_ref(executor.backend().strategy.context.as_ref());
         let mut ext = backend.revive_test_externalities.lock().unwrap();
-
-        // todo!(), not sure this is the right call, with the right conversion
-        let amount = sp_core::U256::from_little_endian(&amount.as_le_bytes());
-        let amount = U256ToBalance::convert(amount);
         ext.execute_with(|| {
             pallet_balances::Pallet::<Runtime>::set_balance(
                 &address_to_account_id(address),
