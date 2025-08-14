@@ -1263,6 +1263,7 @@ impl Cheatcode for pvmCall {
 
         // Switch the strategy based on PVM setting
         if *enabled {
+            // TODO: is it a right place to create a new strategy?
             state.strategy = CheatcodeInspectorStrategy::new_pvm();
             tracing::info!("PVM mode enabled");
         } else {

@@ -2,9 +2,7 @@ use foundry_evm::executors::ExecutorStrategyContext;
 
 /// Defines the context for [ReviveExecutorStrategyRunner].
 #[derive(Debug, Default, Clone)]
-pub struct ReviveExecutorStrategyContext {
-    // TODO:
-}
+pub struct ReviveExecutorStrategyContext;
 
 impl ExecutorStrategyContext for ReviveExecutorStrategyContext {
     fn new_cloned(&self) -> Box<dyn ExecutorStrategyContext> {
