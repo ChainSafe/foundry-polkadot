@@ -62,8 +62,8 @@ impl ExecutorStrategyRunner for ReviveExecutorStrategyRunner {
         let amount = U256ToBalance::convert(amount);
         ext.execute_with(|| {
             pallet_balances::Pallet::<Runtime>::set_balance(
-                &AccountId::to_fallback_account_id(&H160::from_slice(address.as_slice())),
-                amount,
+                &address_to_account_id(address),
+                amount_pvm,
             );
         });
         Ok(())
@@ -79,9 +79,7 @@ impl ExecutorStrategyRunner for ReviveExecutorStrategyRunner {
         let backend = get_backend_ref(executor.backend().strategy.context.as_ref());
         let mut ext = backend.revive_test_externalities.lock().unwrap();
         let balance = ext.execute_with(|| {
-            pallet_balances::Pallet::<Runtime>::free_balance(AccountId::to_fallback_account_id(
-                &H160::from_slice(address.as_slice()),
-            ))
+            pallet_balances::Pallet::<Runtime>::free_balance(address_to_account_id(address))
         });
         assert_eq!(evm_balance, U256::from(balance));
         Ok(evm_balance)
@@ -97,22 +95,16 @@ impl ExecutorStrategyRunner for ReviveExecutorStrategyRunner {
         let backend = get_backend_ref(executor.backend().strategy.context.as_ref());
         let mut ext = backend.revive_test_externalities.lock().unwrap();
         ext.execute_with(|| {
-            let current_nonce = System::account_nonce(&AccountId::to_fallback_account_id(
-                &H160::from_slice(address.as_slice()),
-            ));
+            let account_id = address_to_account_id(address);
+            let current_nonce = System::account_nonce(&account_id);
 
-            if current_nonce as u64 > nonce {
-                todo!("Cannot set nonce lower than current nonce");
-            }
+            assert!(
+                current_nonce as u64 <= nonce,
+                "Cannot set nonce lower than current nonce: {current_nonce} > {nonce}"
+            );
 
-            while (System::account_nonce(&AccountId::to_fallback_account_id(&H160::from_slice(
-                address.as_slice(),
-            ))) as u64) <
-                nonce
-            {
-                System::inc_account_nonce(&AccountId::to_fallback_account_id(&H160::from_slice(
-                    address.as_slice(),
-                )));
+            while (System::account_nonce(&account_id) as u64) < nonce {
+                System::inc_account_nonce(&account_id);
             }
         });
         Ok(())
@@ -126,13 +118,10 @@ impl ExecutorStrategyRunner for ReviveExecutorStrategyRunner {
         let evm_nonce = EvmExecutorStrategyRunner.get_nonce(executor, address)?;
         let backend = get_backend_ref(executor.backend().strategy.context.as_ref());
         let mut ext = backend.revive_test_externalities.lock().unwrap();
-        let revive_nonce = ext.execute_with(|| {
-            System::account_nonce(&AccountId::to_fallback_account_id(&H160::from_slice(
-                address.as_slice(),
-            )))
-        });
+        let revive_nonce =
+            ext.execute_with(|| System::account_nonce(&address_to_account_id(address)));
 
-        assert_eq!(evm_nonce, revive_nonce as u64,);
+        assert_eq!(evm_nonce, revive_nonce as u64);
         Ok(evm_nonce)
     }
 
@@ -163,4 +152,8 @@ impl ExecutorStrategyRunner for ReviveExecutorStrategyRunner {
 
 fn get_context_ref(ctx: &dyn ExecutorStrategyContext) -> &ReviveExecutorStrategyContext {
     ctx.as_any_ref().downcast_ref().expect("expected ReviveExecutorStrategyContext")
+}
+
+fn address_to_account_id(address: Address) -> AccountId {
+    AccountId::to_fallback_account_id(&H160::from_slice(address.as_slice()))
 }
