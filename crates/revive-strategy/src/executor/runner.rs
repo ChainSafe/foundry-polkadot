@@ -121,7 +121,7 @@ impl ExecutorStrategyRunner for ReviveExecutorStrategyRunner {
         let backend = get_backend_ref(executor.backend().strategy.context.as_ref());
         let mut ext = backend.revive_test_externalities.lock().unwrap();
         let revive_nonce = ext.execute_with(|| {
-            System::account_nonce(&AccountId::to_fallback_account_id(&H160::from_slice(
+            System::account_nonce(AccountId::to_fallback_account_id(&H160::from_slice(
                 address.as_slice(),
             )))
         });

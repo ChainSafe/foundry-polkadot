@@ -3,7 +3,6 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use foundry_common::sh_err;
 use foundry_evm::backend::{
     BackendStrategy, BackendStrategyContext, BackendStrategyRunner, EvmBackendStrategyRunner,
     ForkDB,
@@ -87,7 +86,7 @@ pub struct ReviveBackendStrategyContext {
 
 impl ReviveBackendStrategyContext {
     fn new() -> Self {
-        ReviveBackendStrategyContext {
+        Self {
             revive_test_externalities: Arc::new(Mutex::new(
                 ExtBuilder::default()
                     .balance_genesis_config(vec![(H160::from_low_u64_be(1), 1000)])
