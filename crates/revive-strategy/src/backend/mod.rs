@@ -110,3 +110,6 @@ impl BackendStrategyContext for ReviveBackendStrategyContext {
 pub fn get_backend_ref(ctx: &dyn BackendStrategyContext) -> &ReviveBackendStrategyContext {
     ctx.as_any_ref().downcast_ref().expect("expected ReviveExecutorStrategyContext")
 }
+
+#[derive(Clone, Debug, Default)]
+pub(crate) struct ReviveInspectContext;

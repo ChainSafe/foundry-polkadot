@@ -18,7 +18,7 @@ use revive_env::{AccountId, Runtime, System};
 use revm::primitives::{EnvWithHandlerCfg, ResultAndState};
 
 use crate::{
-    backend::{get_backend_ref, ReviveBackendStrategyBuilder},
+    backend::{get_backend_ref, ReviveBackendStrategyBuilder, ReviveInspectContext},
     executor::context::ReviveExecutorStrategyContext,
 };
 
@@ -27,16 +27,13 @@ use crate::{
 pub struct ReviveExecutorStrategyRunner;
 
 impl ExecutorStrategyRunner for ReviveExecutorStrategyRunner {
-    fn new_backend_strategy(
-        &self,
-        _ctx: &dyn foundry_evm::executors::ExecutorStrategyContext,
-    ) -> foundry_evm::backend::BackendStrategy {
+    fn new_backend_strategy(&self, _ctx: &dyn ExecutorStrategyContext) -> BackendStrategy {
         BackendStrategy::new_revive()
     }
 
     fn new_cheatcodes_strategy(
         &self,
-        ctx: &dyn foundry_evm::executors::ExecutorStrategyContext,
+        ctx: &dyn ExecutorStrategyContext,
     ) -> foundry_cheatcodes::CheatcodesStrategy {
         let _ctx = get_context_ref(ctx);
         // TODO: Context should be used to configure the cheatcodes strategy
@@ -130,26 +127,34 @@ impl ExecutorStrategyRunner for ReviveExecutorStrategyRunner {
 
     fn call(
         &self,
-        ctx: &dyn foundry_evm::executors::ExecutorStrategyContext,
+        ctx: &dyn ExecutorStrategyContext,
         backend: &mut foundry_evm::backend::CowBackend<'_>,
         env: &mut EnvWithHandlerCfg,
         executor_env: &EnvWithHandlerCfg,
         inspector: &mut foundry_evm::inspectors::InspectorStack,
     ) -> eyre::Result<ResultAndState> {
-        // TODO: Needs to decide if it should use revive depending on the context.
-        EvmExecutorStrategyRunner.call(ctx, backend, env, executor_env, inspector)
+        let ctx = get_context_ref(ctx);
+        if ctx.wip_in_pvm {
+            backend.inspect(env, inspector, Box::new(ReviveInspectContext))
+        } else {
+            EvmExecutorStrategyRunner.call(ctx, backend, env, executor_env, inspector)
+        }
     }
 
     fn transact(
         &self,
-        ctx: &mut dyn foundry_evm::executors::ExecutorStrategyContext,
+        ctx: &mut dyn ExecutorStrategyContext,
         backend: &mut foundry_evm::backend::Backend,
         env: &mut EnvWithHandlerCfg,
         executor_env: &EnvWithHandlerCfg,
         inspector: &mut foundry_evm::inspectors::InspectorStack,
     ) -> eyre::Result<ResultAndState> {
-        // TODO: Needs to decide if it should use revive depending on the context.
-        EvmExecutorStrategyRunner.transact(ctx, backend, env, executor_env, inspector)
+        let ctx = get_context_ref(ctx);
+        if ctx.wip_in_pvm {
+            backend.inspect(env, inspector, Box::new(ReviveInspectContext))
+        } else {
+            EvmExecutorStrategyRunner.transact(ctx, backend, env, executor_env, inspector)
+        }
     }
 }
 
