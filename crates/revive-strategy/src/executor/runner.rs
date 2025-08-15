@@ -40,7 +40,7 @@ impl ExecutorStrategyRunner for ReviveExecutorStrategyRunner {
 
     /// Sets the balance of an account.
     ///
-    /// Ammount should be in the range of [0, u128::MAX] despite the type
+    /// Amount should be in the range of [0, u128::MAX] despite the type
     /// because Ethereum balances are u256 while Polkadot balances are u128.
     fn set_balance(
         &self,
