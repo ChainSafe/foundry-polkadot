@@ -43,11 +43,7 @@ impl BackendStrategyRunner for ReviveBackendStrategyRunner {
             return EvmBackendStrategyRunner.inspect(backend, env, inspector, inspect_ctx);
         }
 
-        let _ = sh_err!(
-            "Revive backend strategy is not implemented yet, using EVM backend strategy instead."
-        );
-
-        EvmBackendStrategyRunner.inspect(backend, env, inspector, inspect_ctx)
+        todo!()
     }
 
     fn update_fork_db(

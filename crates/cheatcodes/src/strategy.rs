@@ -207,6 +207,7 @@ impl CheatcodeInspectorStrategy {
         Self { runner: &EvmCheatcodeInspectorStrategyRunner, context: Box::new(()) }
     }
 
+    /// Creates a new PVM strategy for the [super::Cheatcodes].
     pub fn new_pvm() -> Self {
         Self {
             runner: &crate::pvm::PvmCheatcodeInspectorStrategyRunner,
