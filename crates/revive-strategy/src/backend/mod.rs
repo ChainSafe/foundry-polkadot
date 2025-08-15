@@ -3,6 +3,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+use foundry_common::sh_err;
 use foundry_evm::backend::{
     BackendStrategy, BackendStrategyContext, BackendStrategyRunner, EvmBackendStrategyRunner,
     ForkDB,
@@ -38,7 +39,14 @@ impl BackendStrategyRunner for ReviveBackendStrategyRunner {
         inspector: &mut dyn foundry_evm::InspectorExt,
         inspect_ctx: Box<dyn std::any::Any>,
     ) -> eyre::Result<revm::primitives::ResultAndState> {
-        // TODO: Need to decide the context switching here
+        if !is_revive_inspect_context(inspect_ctx.as_ref()) {
+            return EvmBackendStrategyRunner.inspect(backend, env, inspector, inspect_ctx);
+        }
+
+        let _ = sh_err!(
+            "Revive backend strategy is not implemented yet, using EVM backend strategy instead."
+        );
+
         EvmBackendStrategyRunner.inspect(backend, env, inspector, inspect_ctx)
     }
 
@@ -75,7 +83,7 @@ impl BackendStrategyRunner for ReviveBackendStrategyRunner {
     }
 }
 
-/// Context for [reviveBackendStrategyRunner].
+/// Context for [ReviveBackendStrategyRunner].
 #[derive(Debug, Clone)]
 pub struct ReviveBackendStrategyContext {
     pub revive_test_externalities: Arc<Mutex<sp_io::TestExternalities>>,
@@ -113,3 +121,7 @@ pub fn get_backend_ref(ctx: &dyn BackendStrategyContext) -> &ReviveBackendStrate
 
 #[derive(Clone, Debug, Default)]
 pub(crate) struct ReviveInspectContext;
+
+fn is_revive_inspect_context(ctx: &dyn Any) -> bool {
+    ctx.downcast_ref::<ReviveInspectContext>().is_some()
+}
