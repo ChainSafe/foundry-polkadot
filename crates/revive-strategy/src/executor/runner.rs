@@ -1,7 +1,6 @@
-use std::u128;
-
 use alloy_primitives::{Address, U256};
 use foundry_cheatcodes::CheatcodeInspectorStrategy;
+use foundry_common::sh_err;
 use foundry_evm::{
     backend::BackendStrategy,
     executors::{EvmExecutorStrategyRunner, ExecutorStrategyContext, ExecutorStrategyRunner},
@@ -50,19 +49,20 @@ impl ExecutorStrategyRunner for ReviveExecutorStrategyRunner {
         address: Address,
         amount: U256,
     ) -> foundry_evm::backend::BackendResult<()> {
-        let amount_pvm = U256ToBalance::convert(amount);
+        let amount_pvm =
+            sp_core::U256::from_little_endian(&amount.as_le_bytes()).min(u128::MAX.into());
+        let amount_pvm = U256ToBalance::convert(amount_pvm);
         let amount_evm = U256::from(amount_pvm);
-        assert_eq!(
-            amount, amount_evm,
-            "Amount mismatch {amount} != {amount_evm}, Polkadot balances are u128"
-        );
+        if amount != amount_evm {
+            let _ = sh_err!("Amount mismatch {amount} != {amount_evm}, Polkadot balances are u128. Test results may be incorrect.");
+        }
         EvmExecutorStrategyRunner.set_balance(executor, address, amount_evm)?;
 
         let backend = get_backend_ref(executor.backend().strategy.context.as_ref());
         let mut ext = backend.revive_test_externalities.lock().unwrap();
         ext.execute_with(|| {
             pallet_balances::Pallet::<Runtime>::set_balance(
-                &address_to_account_id(address),
+                &AccountId::to_fallback_account_id(&H160::from_slice(address.as_slice())),
                 amount_pvm,
             );
         });
@@ -79,7 +79,9 @@ impl ExecutorStrategyRunner for ReviveExecutorStrategyRunner {
         let backend = get_backend_ref(executor.backend().strategy.context.as_ref());
         let mut ext = backend.revive_test_externalities.lock().unwrap();
         let balance = ext.execute_with(|| {
-            pallet_balances::Pallet::<Runtime>::free_balance(address_to_account_id(address))
+            pallet_balances::Pallet::<Runtime>::free_balance(AccountId::to_fallback_account_id(
+                &H160::from_slice(address.as_slice()),
+            ))
         });
         assert_eq!(evm_balance, U256::from(balance));
         Ok(evm_balance)
@@ -95,7 +97,8 @@ impl ExecutorStrategyRunner for ReviveExecutorStrategyRunner {
         let backend = get_backend_ref(executor.backend().strategy.context.as_ref());
         let mut ext = backend.revive_test_externalities.lock().unwrap();
         ext.execute_with(|| {
-            let account_id = address_to_account_id(address);
+            let account_id =
+                AccountId::to_fallback_account_id(&H160::from_slice(address.as_slice()));
             let current_nonce = System::account_nonce(&account_id);
 
             assert!(
@@ -118,8 +121,11 @@ impl ExecutorStrategyRunner for ReviveExecutorStrategyRunner {
         let evm_nonce = EvmExecutorStrategyRunner.get_nonce(executor, address)?;
         let backend = get_backend_ref(executor.backend().strategy.context.as_ref());
         let mut ext = backend.revive_test_externalities.lock().unwrap();
-        let revive_nonce =
-            ext.execute_with(|| System::account_nonce(&address_to_account_id(address)));
+        let revive_nonce = ext.execute_with(|| {
+            System::account_nonce(&AccountId::to_fallback_account_id(&H160::from_slice(
+                address.as_slice(),
+            )))
+        });
 
         assert_eq!(evm_nonce, revive_nonce as u64);
         Ok(evm_nonce)
@@ -149,7 +155,7 @@ impl ExecutorStrategyRunner for ReviveExecutorStrategyRunner {
         executor_env: &EnvWithHandlerCfg,
         inspector: &mut foundry_evm::inspectors::InspectorStack,
     ) -> eyre::Result<ResultAndState> {
-        let ctx = get_context_ref(ctx);
+        let ctx = get_context_ref_mut(ctx);
         if ctx.wip_in_pvm {
             backend.inspect(env, inspector, Box::new(ReviveInspectContext))
         } else {
@@ -162,6 +168,8 @@ fn get_context_ref(ctx: &dyn ExecutorStrategyContext) -> &ReviveExecutorStrategy
     ctx.as_any_ref().downcast_ref().expect("expected ReviveExecutorStrategyContext")
 }
 
-fn address_to_account_id(address: Address) -> AccountId {
-    AccountId::to_fallback_account_id(&H160::from_slice(address.as_slice()))
+fn get_context_ref_mut(
+    ctx: &mut dyn ExecutorStrategyContext,
+) -> &mut ReviveExecutorStrategyContext {
+    ctx.as_any_mut().downcast_mut().expect("expected ReviveExecutorStrategyContext")
 }

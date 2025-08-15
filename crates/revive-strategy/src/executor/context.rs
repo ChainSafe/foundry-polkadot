@@ -7,12 +7,6 @@ pub struct ReviveExecutorStrategyContext {
     pub(crate) wip_in_pvm: bool,
 }
 
-impl ReviveExecutorStrategyContext {
-    pub fn new() -> Self {
-        Self { wip_in_pvm: false }
-    }
-}
-
 impl ExecutorStrategyContext for ReviveExecutorStrategyContext {
     fn new_cloned(&self) -> Box<dyn ExecutorStrategyContext> {
         Box::new(self.clone())
