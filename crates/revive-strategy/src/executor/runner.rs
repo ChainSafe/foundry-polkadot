@@ -35,7 +35,6 @@ impl ExecutorStrategyRunner for ReviveExecutorStrategyRunner {
         ctx: &dyn ExecutorStrategyContext,
     ) -> foundry_cheatcodes::CheatcodesStrategy {
         let _ctx = get_context_ref(ctx);
-        // TODO: Context should be used to configure the cheatcodes strategy
         CheatcodeInspectorStrategy::new_pvm()
     }
 

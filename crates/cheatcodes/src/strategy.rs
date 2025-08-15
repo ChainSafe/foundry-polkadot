@@ -207,10 +207,6 @@ impl CheatcodeInspectorStrategy {
         Self { runner: &EvmCheatcodeInspectorStrategyRunner, context: Box::new(()) }
     }
 
-    /// Creates a new PVM strategy for the [super::Cheatcodes].
-    // TODO: Should use argument `ctx: &ReviveExecutorStrategyContext` or parts of it here,
-    // maybe it's better to move the implementation to revive-strategy crate?
-    // TODO: See `impl Cheatcode for pvmCall` for further constraints
     pub fn new_pvm() -> Self {
         Self {
             runner: &crate::pvm::PvmCheatcodeInspectorStrategyRunner,
