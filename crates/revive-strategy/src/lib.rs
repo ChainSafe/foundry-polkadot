@@ -3,7 +3,7 @@
 //! It is designed to work with the Revive runtime, allowing for the execution of smart contracts
 //! in a Polkadot environment.
 //!
-//! It is heavily inspired from https://github.com/matter-labs/foundry-zksync/tree/main/crates/strategy/zksync
+//! It is heavily inspired from <https://github.com/matter-labs/foundry-zksync/tree/main/crates/strategy/zksync>
 use foundry_evm::executors::ExecutorStrategy;
 
 use crate::executor::{
@@ -12,6 +12,9 @@ use crate::executor::{
 
 mod backend;
 mod executor;
+mod tracing;
+
+pub use tracing::trace;
 
 /// Create Revive strategy for [ExecutorStrategy].
 pub trait ReviveExecutorStrategyBuilder {
