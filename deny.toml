@@ -20,7 +20,7 @@ ignore = [
     # https://rustsec.org/advisories/RUSTSEC-2024-0438 Wasmtime doesn't fully sandbox all the Windows device filenames
     "RUSTSEC-2024-0438",
     # https://rustsec.org/advisories/RUSTSEC-2023-0091 Miscompilation of wasm `i64x2.shr_s` instruction with constant input on x86\_64
-    "RUSTSEC-2023-0091"
+    "RUSTSEC-2023-0091",
     # https://rustsec.org/advisories/RUSTSEC-2024-0442 Dump Undefined Memory by `JitDumpFile`
     "RUSTSEC-2024-0442"
 ]
