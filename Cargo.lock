@@ -14109,7 +14109,6 @@ dependencies = [
  "polkadot-runtime-parachains",
  "polkadot-sdk-frame",
  "sc-allocator",
- "sc-authority-discovery",
  "sc-basic-authorship",
  "sc-block-builder",
  "sc-chain-spec",
@@ -14121,19 +14120,14 @@ dependencies = [
  "sc-executor",
  "sc-executor-common",
  "sc-executor-wasmtime",
- "sc-informant",
  "sc-keystore",
  "sc-network-types",
  "sc-rpc",
  "sc-rpc-api",
  "sc-rpc-server",
  "sc-rpc-spec-v2",
- "sc-runtime-utilities",
  "sc-service",
  "sc-state-db",
- "sc-sync-state-rpc",
- "sc-sysinfo",
- "sc-telemetry",
  "sc-tracing",
  "sc-transaction-pool",
  "sc-transaction-pool-api",
@@ -14167,7 +14161,6 @@ dependencies = [
  "sp-io",
  "sp-keyring",
  "sp-keystore",
- "sp-maybe-compressed-blob",
  "sp-metadata-ir",
  "sp-mixnet",
  "sp-mmr-primitives",
@@ -16070,38 +16063,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "sc-authority-discovery"
-version = "0.51.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "410eca090a42a9a2036de845530392c5b776a1f31aa23bb44edee09ebcca19c8"
-dependencies = [
- "async-trait",
- "futures",
- "futures-timer",
- "ip_network",
- "linked_hash_set",
- "log",
- "parity-scale-codec",
- "prost 0.12.6",
- "prost-build",
- "rand 0.8.5",
- "sc-client-api",
- "sc-network",
- "sc-network-types",
- "serde",
- "serde_json",
- "sp-api",
- "sp-authority-discovery",
- "sp-blockchain",
- "sp-core",
- "sp-keystore",
- "sp-runtime",
- "substrate-prometheus-endpoint",
- "thiserror 1.0.69",
- "tokio",
-]
-
-[[package]]
 name = "sc-basic-authorship"
 version = "0.50.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -16382,51 +16343,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "sc-consensus-grandpa"
-version = "0.36.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f727caed762bd2feda49c00f244a919beca4542d685b44d93a5d1fd682493773"
-dependencies = [
- "ahash",
- "array-bytes",
- "async-trait",
- "dyn-clone",
- "finality-grandpa",
- "fork-tree",
- "futures",
- "futures-timer",
- "log",
- "parity-scale-codec",
- "parking_lot 0.12.3",
- "rand 0.8.5",
- "sc-block-builder",
- "sc-chain-spec",
- "sc-client-api",
- "sc-consensus",
- "sc-network",
- "sc-network-common",
- "sc-network-gossip",
- "sc-network-sync",
- "sc-network-types",
- "sc-telemetry",
- "sc-transaction-pool-api",
- "sc-utils",
- "serde_json",
- "sp-api",
- "sp-application-crypto",
- "sp-arithmetic",
- "sp-blockchain",
- "sp-consensus",
- "sp-consensus-grandpa",
- "sp-core",
- "sp-crypto-hashing",
- "sp-keystore",
- "sp-runtime",
- "substrate-prometheus-endpoint",
- "thiserror 1.0.69",
-]
-
-[[package]]
 name = "sc-consensus-manual-seal"
 version = "0.52.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -16677,26 +16593,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "sc-network-gossip"
-version = "0.51.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2bc29763481d2a8b385d76e4303bbfbfa7980a1536cda22f7fd17273ab566c77"
-dependencies = [
- "ahash",
- "futures",
- "futures-timer",
- "log",
- "sc-network",
- "sc-network-common",
- "sc-network-sync",
- "sc-network-types",
- "schnellru",
- "sp-runtime",
- "substrate-prometheus-endpoint",
- "tracing",
-]
-
-[[package]]
 name = "sc-network-light"
 version = "0.50.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -16920,22 +16816,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "sc-runtime-utilities"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "31920bb34f133f7898fbc7b7155c0c64f95abb91f540733a83e45f884d4fb85c"
-dependencies = [
- "parity-scale-codec",
- "sc-executor",
- "sc-executor-common",
- "sp-core",
- "sp-crypto-hashing",
- "sp-state-machine",
- "sp-wasm-interface",
- "thiserror 1.0.69",
-]
-
-[[package]]
 name = "sc-service"
 version = "0.52.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -17010,26 +16890,6 @@ dependencies = [
  "parity-scale-codec",
  "parking_lot 0.12.3",
  "sp-core",
-]
-
-[[package]]
-name = "sc-sync-state-rpc"
-version = "0.51.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e4a40b87cbd801ecc1892e8925fd19708a45bd9870d3538da5bbfd30d258c04e"
-dependencies = [
- "jsonrpsee",
- "parity-scale-codec",
- "sc-chain-spec",
- "sc-client-api",
- "sc-consensus-babe",
- "sc-consensus-epochs",
- "sc-consensus-grandpa",
- "serde",
- "serde_json",
- "sp-blockchain",
- "sp-runtime",
- "thiserror 1.0.69",
 ]
 
 [[package]]
