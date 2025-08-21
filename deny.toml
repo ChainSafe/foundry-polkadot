@@ -22,7 +22,9 @@ ignore = [
     # https://rustsec.org/advisories/RUSTSEC-2023-0091 Miscompilation of wasm `i64x2.shr_s` instruction with constant input on x86\_64
     "RUSTSEC-2023-0091",
     # https://rustsec.org/advisories/RUSTSEC-2024-0442 Dump Undefined Memory by `JitDumpFile`
-    "RUSTSEC-2024-0442"
+    "RUSTSEC-2024-0442",
+    # https://rustsec.org/advisories/RUSTSEC-2024-0384 `instant` is unmaintained
+    "RUSTSEC-2024-0384"
 ]
 
 # This section is considered when running `cargo deny check bans`.
@@ -138,6 +140,10 @@ exceptions = [
     { allow = ["GPL-3.0-or-later WITH Classpath-exception-2.0"], name = "sc-tracing" }, # Polkadot SDK
     { allow = ["GPL-3.0-or-later WITH Classpath-exception-2.0"], name = "sc-transaction-pool" }, # Polkadot SDK
     { allow = ["GPL-3.0-or-later WITH Classpath-exception-2.0"], name = "sc-transaction-pool-api" }, # Polkadot SDK
+    { allow = ["GPL-3.0-or-later WITH Classpath-exception-2.0"], name = "sc-basic-authorship" }, # Polkadot SDK
+    { allow = ["GPL-3.0-or-later WITH Classpath-exception-2.0"], name = "sc-informant" }, # Polkadot SDK
+    { allow = ["GPL-3.0-or-later WITH Classpath-exception-2.0"], name = "sc-network" }, # Polkadot SDK
+    { allow = ["GPL-3.0-or-later WITH Classpath-exception-2.0"], name = "sc-network-common" }, # Polkadot SDK
 ]
 #copyleft = "deny"
 
