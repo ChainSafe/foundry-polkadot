@@ -25,6 +25,8 @@ members = [
     "crates/script-sequence/",
     "crates/macros/",
     "crates/test-utils/",
+    "crates/revive-env",
+    "crates/revive-strategy",
 ]
 resolver = "2"
 
@@ -192,6 +194,8 @@ foundry-macros = { path = "crates/macros" }
 foundry-test-utils = { path = "crates/test-utils" }
 foundry-wallets = { path = "crates/wallets" }
 foundry-linking = { path = "crates/linking" }
+revive-env = { path = "crates/revive-env"}
+revive-strategy = { path = "crates/revive-strategy"}
 
 # solc & compilation utilities
 foundry-block-explorers = { version = "0.13.3", default-features = false }
@@ -324,14 +328,13 @@ yansi = { version = "1.0", features = ["detect-tty", "detect-env"] }
 path-slash = "0.2"
 jiff = "0.2"
 serial_test = "2.0"
+polkadot-sdk = { version = "2506.0.0", default-features = false }
+
 
 # Use unicode-rs which has a smaller binary size than the default ICU4X as the IDNA backend, used
 # by the `url` crate.
 # See the `idna_adapter` README.md for more details: https://docs.rs/crate/idna_adapter/latest
 idna_adapter = "=1.1.0"
-
-## polkadot
-polkadot-sdk = { version = "2506.0.0", default-features = false }
 
 [patch.crates-io]
 ## alloy-core
