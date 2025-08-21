@@ -11,7 +11,6 @@ use eyre::Result;
 use opts::{Anvil, AnvilSubcommand};
 use polkadot_sdk::{
     sc_cli::{self, SubstrateCli},
-    sc_network::Litep2pNetworkBackend,
     sc_service::{self, TaskManager},
 };
 use server::try_spawn_ipc;
@@ -102,9 +101,8 @@ pub async fn spawn(
     substrate_config: sc_service::Configuration,
 ) -> Result<TaskManager, sc_cli::Error> {
     // Spawn the substrate node.
-    let substrate_service =
-        substrate_node::service::new::<Litep2pNetworkBackend>(&anvil_config, substrate_config)
-            .map_err(sc_cli::Error::Service)?;
+    let substrate_service = substrate_node::service::new(&anvil_config, substrate_config)
+        .map_err(sc_cli::Error::Service)?;
 
     // Spawn the other tasks.
     spawn_anvil_tasks(anvil_config, &substrate_service)
@@ -153,7 +151,7 @@ pub async fn spawn_anvil_tasks(anvil_config: AnvilNodeConfig, service: &Service)
 }
 
 #[doc(hidden)]
-// TODO: this tracing intialisation conflicts with the one in substrate.
+// TODO: this tracing initialisation conflicts with the one in substrate.
 fn init_tracing() -> LoggingManager {
     use tracing_subscriber::prelude::*;
 

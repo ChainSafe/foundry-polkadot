@@ -37,13 +37,6 @@ polkadot-sdk = { workspace = true, features = [
 	"sc-executor-wasmtime",
 	"sc-informant",
 	"sc-keystore",
-	"sc-network",
-	"sc-network-common",
-	"sc-network-gossip",
-	"sc-network-light",
-	"sc-network-statement",
-	"sc-network-sync",
-	"sc-network-transactions",
 	"sc-network-types",
     "sc-rpc",
 	"sc-rpc-api",
@@ -72,7 +65,6 @@ polkadot-sdk = { workspace = true, features = [
 	"substrate-frame-rpc-system",
 	"substrate-rpc-client",
 	"substrate-wasm-builder",
-	"tracing-gum",
 ] }
 anvil-core.workspace = true
 anvil-server.workspace = true

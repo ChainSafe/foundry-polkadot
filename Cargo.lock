@@ -3948,17 +3948,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "coarsetime"
-version = "0.1.36"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "91849686042de1b41cd81490edc83afbcb0abe5a9b6f2c4114f23ce8cca1bcf4"
-dependencies = [
- "libc",
- "wasix",
- "wasm-bindgen",
-]
-
-[[package]]
 name = "codespan-reporting"
 version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -14134,13 +14123,6 @@ dependencies = [
  "sc-executor-wasmtime",
  "sc-informant",
  "sc-keystore",
- "sc-network",
- "sc-network-common",
- "sc-network-gossip",
- "sc-network-light",
- "sc-network-statement",
- "sc-network-sync",
- "sc-network-transactions",
  "sc-network-types",
  "sc-rpc",
  "sc-rpc-api",
@@ -14221,7 +14203,6 @@ dependencies = [
  "substrate-rpc-client",
  "substrate-wasm-builder",
  "testnet-parachains-constants",
- "tracing-gum",
  "xcm-runtime-apis",
 ]
 
@@ -16698,27 +16679,6 @@ dependencies = [
  "sp-core",
  "sp-runtime",
  "thiserror 1.0.69",
-]
-
-[[package]]
-name = "sc-network-statement"
-version = "0.33.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7969b9ba2a64f68b3befc952792c6ebfeefba4e47336ca9dbe77c7fafd12c8ab"
-dependencies = [
- "array-bytes",
- "async-channel 1.9.0",
- "futures",
- "log",
- "parity-scale-codec",
- "sc-network",
- "sc-network-common",
- "sc-network-sync",
- "sc-network-types",
- "sp-consensus",
- "sp-runtime",
- "sp-statement-store",
- "substrate-prometheus-endpoint",
 ]
 
 [[package]]
@@ -20821,31 +20781,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "tracing-gum"
-version = "20.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6082c8bf3c053748d72abeb69fad4ebc123239d0ee358c16d68ddf0facf58651"
-dependencies = [
- "coarsetime",
- "polkadot-primitives",
- "tracing",
- "tracing-gum-proc-macro",
-]
-
-[[package]]
-name = "tracing-gum-proc-macro"
-version = "5.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0f074568687ffdfd0adb6005aa8d1d96840197f2c159f80471285f08694cf0ce"
-dependencies = [
- "expander",
- "proc-macro-crate 3.3.0",
- "proc-macro2",
- "quote",
- "syn 2.0.101",
-]
-
-[[package]]
 name = "tracing-log"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -21481,15 +21416,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9683f9a5a998d873c0d21fcbe3c083009670149a8fab228644b8bd36b2c48cb3"
 dependencies = [
  "wit-bindgen-rt",
-]
-
-[[package]]
-name = "wasix"
-version = "0.12.21"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c1fbb4ef9bbca0c1170e0b00dd28abc9e3b68669821600cad1caaed606583c6d"
-dependencies = [
- "wasi 0.11.0+wasi-snapshot-preview1",
 ]
 
 [[package]]
