@@ -27,6 +27,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly
+      - name: Add wasm target
+        run: rustup target add wasm32-unknown-unknown --toolchain nightly
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
@@ -53,6 +55,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - name: Add wasm target
+        run: rustup target add wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
@@ -78,6 +82,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@clippy
+      - name: Add wasm target
+        run: rustup target add wasm32-unknown-unknown --toolchain nightly
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
