@@ -28,11 +28,11 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly
         with:
-          version: nightly-2025-08-22
+          version: nightly
       - name: Add wasm target
-        run: rustup target add wasm32-unknown-unknown --toolchain nightly-2025-08-22
+        run: rustup target add wasm32-unknown-unknown --toolchain nightly
       - name: Add rust-src
-        run: rustup component add rust-src --toolchain nightly-2025-08-22
+        run: rustup component add rust-src --toolchain nightly
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
