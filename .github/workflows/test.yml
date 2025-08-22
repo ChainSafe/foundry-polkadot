@@ -30,6 +30,11 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          version: "32.0"
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Build documentation
         run: cargo doc --workspace --all-features --no-deps --document-private-items
         env:
@@ -51,6 +56,11 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          version: "32.0"
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
       - run: cargo test --workspace --doc
 
   codespell:
@@ -71,6 +81,11 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          version: "32.0"
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
       - run: cargo clippy --workspace --all-targets --all-features
         env:
           RUSTFLAGS: -Dwarnings
