@@ -27,6 +27,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly-2024-08-21
+        with:
           toolchain: nightly-2024-08-21
       - name: Add wasm target
         run: rustup target add wasm32-unknown-unknown --toolchain nightly-2024-08-21
