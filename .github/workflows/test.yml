@@ -92,6 +92,8 @@ jobs:
           components: clippy
       - name: Add wasm target
         run: rustup target add wasm32-unknown-unknown --toolchain nightly
+      - name: Add rust-src
+        run: rustup component add rust-src --toolchain nightly
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
