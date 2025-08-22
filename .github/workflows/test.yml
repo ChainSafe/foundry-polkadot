@@ -87,14 +87,9 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@clippy
+      - uses: dtolnay/rust-toolchain@nightly
         with:
-          toolchain: nightly-2024-02-03
           components: clippy
-      - name: Add wasm target
-        run: rustup target add wasm32-unknown-unknown --toolchain nightly-2024-02-03
-      - name: Add rust-src
-        run: rustup component add rust-src --toolchain nightly-2024-02-03
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
