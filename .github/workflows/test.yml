@@ -90,6 +90,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@nightly
         with:
           components: clippy
+      - name: Add wasm target
+        run: rustup target add wasm32-unknown-unknown --toolchain nightly
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
