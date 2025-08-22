@@ -150,7 +150,6 @@ pub async fn spawn_anvil_tasks(anvil_config: AnvilNodeConfig, service: &Service)
     Ok(())
 }
 
-#[doc(hidden)]
 // TODO: this tracing initialisation conflicts with the one in substrate.
 fn init_tracing() -> LoggingManager {
     use tracing_subscriber::prelude::*;

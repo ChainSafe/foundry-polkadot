@@ -1,4 +1,3 @@
-use futures::StreamExt;
 use polkadot_sdk::{
     sc_basic_authorship, sc_consensus, sc_consensus_manual_seal,
     sc_executor::WasmExecutor,
@@ -139,18 +138,7 @@ fn spawn_rpc_server(
         })
     };
 
-    let spawn_handle = task_manager.spawn_handle();
-
-    let (system_rpc_tx, mut system_rpc_rx) = tracing_unbounded("mpsc_system_rpc", 10_000);
-
-    // System rpc responder
-    spawn_handle.spawn("system-rpc", Some("system-rpc"), async move {
-        while let Some(_msg) = system_rpc_rx.next().await {
-            print!("Got msg from system rpc!");
-        }
-
-        print!("Shutting down system rpc");
-    });
+    let (system_rpc_tx, system_rpc_rx) = tracing_unbounded("mpsc_system_rpc", 10_000);
 
     let rpc_id_provider = config.rpc.id_provider.take();
 
@@ -198,7 +186,7 @@ fn spawn_rpc_server(
 
     let in_memory_rpc_handle = RpcHandlers::new(Arc::new(in_memory_rpc), listen_addrs);
 
-    task_manager.keep_alive((config.base_path, rpc_server_handle));
+    task_manager.keep_alive((config.base_path, rpc_server_handle, system_rpc_rx));
 
     Ok(in_memory_rpc_handle)
 }

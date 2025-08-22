@@ -9,53 +9,7 @@ use clap::Parser;
 use foundry_common::shell;
 use foundry_config::Chain;
 use rand::{rngs::StdRng, SeedableRng};
-use serde::{Deserialize, Serialize};
-use std::{
-    net::IpAddr,
-    path::{Path, PathBuf},
-    str::FromStr,
-    time::Duration,
-};
-
-/// Modes that determine the transaction ordering of the mempool
-///
-/// This type controls the transaction order via the priority metric of a transaction
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub enum TransactionOrder {
-    /// Keep the pool transaction transactions sorted in the order they arrive.
-    ///
-    /// This will essentially assign every transaction the exact priority so the order is
-    /// determined by their internal id
-    Fifo,
-    /// This means that it prioritizes transactions based on the fees paid to the miner.
-    #[default]
-    Fees,
-}
-
-impl FromStr for TransactionOrder {
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let s = s.to_lowercase();
-        let order = match s.as_str() {
-            "fees" => Self::Fees,
-            "fifo" => Self::Fifo,
-            _ => return Err(format!("Unknown TransactionOrder: `{s}`")),
-        };
-        Ok(order)
-    }
-}
-
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
-pub struct SerializableState {}
-
-impl SerializableState {
-    /// This is used as the clap `value_parser` implementation
-    #[allow(dead_code)]
-    pub(crate) fn parse(_path: &str) -> Result<Self, String> {
-        Ok(Self {})
-    }
-}
+use std::{net::IpAddr, path::PathBuf, time::Duration};
 
 #[derive(Clone, Debug, Parser)]
 pub struct NodeArgs {
@@ -109,10 +63,6 @@ pub struct NodeArgs {
     #[arg(short, long, visible_alias = "blockTime", value_name = "SECONDS", value_parser = duration_from_secs_f64)]
     pub block_time: Option<Duration>,
 
-    /// Slots in an epoch
-    #[arg(long, value_name = "SLOTS_IN_AN_EPOCH", default_value_t = 32)]
-    pub slots_in_an_epoch: u64,
-
     /// Writes output of `anvil` as json to user-specified file.
     #[arg(long, value_name = "FILE", value_hint = clap::ValueHint::FilePath)]
     pub config_out: Option<PathBuf>,
@@ -135,96 +85,18 @@ pub struct NodeArgs {
     )]
     pub host: Vec<IpAddr>,
 
-    /// How transactions are sorted in the mempool.
-    /// TODO: see how this can be used with our transaction pool.
-    #[arg(long, default_value = "fees")]
-    pub order: TransactionOrder,
-
     /// Initialize the genesis block with the given `genesis.json` file.
-    /// TODO: can we even use this? besides the accounts storage.
     #[arg(long, value_name = "PATH", value_parser= read_genesis_file)]
     pub init: Option<Genesis>,
 
-    /// This is an alias for both --load-state and --dump-state.
-    ///
-    /// It initializes the chain with the state and block environment stored at the file, if it
-    /// exists, and dumps the chain's state on exit.
-    #[arg(
-        long,
-        value_name = "PATH",
-        value_parser = StateFile::parse,
-        conflicts_with_all = &[
-            "init",
-            "dump_state",
-            "load_state"
-        ]
-    )]
-    /// TODO: is this going to be the substrate runtime state?
-    pub state: Option<StateFile>,
-
-    /// Interval in seconds at which the state and block environment is to be dumped to disk.
-    ///
-    /// See --state and --dump-state
-    #[arg(short, long, value_name = "SECONDS")]
-    pub state_interval: Option<u64>,
-
-    /// Dump the state and block environment of chain on exit to the given file.
-    ///
-    /// If the value is a directory, the state will be written to `<VALUE>/state.json`.
-    #[arg(long, value_name = "PATH", conflicts_with = "init")]
-    pub dump_state: Option<PathBuf>,
-
-    /// Preserve historical state snapshots when dumping the state.
-    ///
-    /// This will save the in-memory states of the chain at particular block hashes.
-    ///
-    /// These historical states will be loaded into the memory when `--load-state` / `--state`, and
-    /// aids in RPC calls beyond the block at which state was dumped.
-    #[arg(long, conflicts_with = "init", default_value = "false")]
-    pub preserve_historical_states: bool,
-
-    /// Initialize the chain from a previously saved state snapshot.
-    #[arg(
-        long,
-        value_name = "PATH",
-        value_parser = SerializableState::parse,
-        conflicts_with = "init"
-    )]
-    /// TODO: this needs to be serializable substrate state
-    pub load_state: Option<SerializableState>,
-
     #[arg(long, help = IPC_HELP, value_name = "PATH", visible_alias = "ipcpath")]
     pub ipc: Option<Option<String>>,
-
-    /// Don't keep full chain history.
-    /// If a number argument is specified, at most this number of states is kept in memory.
-    ///
-    /// If enabled, no state will be persisted on disk, so `max_persisted_states` will be 0.
-    #[arg(long)]
-    /// TODO: route this to the state pruning on substrate. See if it even makes sense with
-    /// max_persisted_states.
-    pub prune_history: Option<Option<usize>>,
-
-    /// Max number of states to persist on disk.
-    ///
-    /// Note that `prune_history` will overwrite `max_persisted_states` to 0.
-    #[arg(long, conflicts_with = "prune_history")]
-    pub max_persisted_states: Option<usize>,
-
-    /// Number of blocks with transactions to keep in memory.
-    #[arg(long)]
-    /// TODO: Most likely useless
-    pub transaction_block_keeper: Option<usize>,
 
     #[command(flatten)]
     pub evm: AnvilEvmArgs,
 
     #[command(flatten)]
     pub server_config: ServerConfig,
-
-    /// Path to the cache directory where states are stored.    
-    #[arg(long, value_name = "PATH")]
-    pub cache_path: Option<PathBuf>,
 }
 
 #[cfg(windows)]
@@ -258,7 +130,6 @@ impl NodeArgs {
             .set_silent(shell::is_quiet())
             .set_config_out(self.config_out)
             .with_chain_id(self.evm.chain_id)
-            .with_transaction_order(self.order)
             .with_genesis(self.init)
             .with_steps_tracing(self.evm.steps_tracing)
             .with_print_logs(!self.evm.disable_console_log)
@@ -267,14 +138,8 @@ impl NodeArgs {
             .with_ipc(self.ipc)
             .with_code_size_limit(self.evm.code_size_limit)
             .disable_code_size_limit(self.evm.disable_code_size_limit)
-            .set_pruned_history(self.prune_history)
-            .with_init_state(self.load_state.or_else(|| self.state.and_then(|s| s.state)))
-            .with_transaction_block_keeper(self.transaction_block_keeper)
-            .with_max_persisted_states(self.max_persisted_states)
             .with_disable_default_create2_deployer(self.evm.disable_default_create2_deployer)
-            .with_slots_in_an_epoch(self.slots_in_an_epoch)
-            .with_memory_limit(self.evm.memory_limit)
-            .with_cache_path(self.cache_path);
+            .with_memory_limit(self.evm.memory_limit);
 
         let substrate_node_config = SubstrateNodeConfig::new(&anvil_config);
 
@@ -385,38 +250,6 @@ pub struct AnvilEvmArgs {
     pub memory_limit: Option<u64>,
 }
 
-/// Represents the --state flag and where to load from, or dump the state to
-#[derive(Clone, Debug)]
-pub struct StateFile {
-    pub path: PathBuf,
-    pub state: Option<SerializableState>,
-}
-
-impl StateFile {
-    /// This is used as the clap `value_parser` implementation to parse from file but only if it
-    /// exists
-    fn parse(path: &str) -> Result<Self, String> {
-        Self::parse_path(path)
-    }
-
-    /// Parse from file but only if it exists
-    pub fn parse_path(path: impl AsRef<Path>) -> Result<Self, String> {
-        let mut path = path.as_ref().to_path_buf();
-        if path.is_dir() {
-            path = path.join("state.json");
-        }
-        let mut state = Self { path, state: None };
-        if !state.path.exists() {
-            return Ok(state)
-        }
-
-        // TODO: load from file
-        state.state = None;
-
-        Ok(state)
-    }
-}
-
 /// Clap's value parser for genesis. Loads a genesis.json file.
 fn read_genesis_file(path: &str) -> Result<Genesis, String> {
     foundry_common::fs::read_json_file(path.as_ref()).map_err(|err| err.to_string())
@@ -434,21 +267,6 @@ fn duration_from_secs_f64(s: &str) -> Result<Duration, String> {
 mod tests {
     use super::*;
     use std::{env, net::Ipv4Addr};
-
-    #[test]
-    fn can_parse_prune_config() {
-        let args: NodeArgs = NodeArgs::parse_from(["anvil", "--prune-history"]);
-        assert!(args.prune_history.is_some());
-
-        let args: NodeArgs = NodeArgs::parse_from(["anvil", "--prune-history", "100"]);
-        assert_eq!(args.prune_history, Some(Some(100)));
-    }
-
-    #[test]
-    fn can_parse_max_persisted_states_config() {
-        let args: NodeArgs = NodeArgs::parse_from(["anvil", "--max-persisted-states", "500"]);
-        assert_eq!(args.max_persisted_states, (Some(500)));
-    }
 
     #[test]
     fn can_parse_disable_block_gas_limit() {

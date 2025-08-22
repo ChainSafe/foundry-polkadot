@@ -1,4 +1,3 @@
-use crate::cmd::{SerializableState, TransactionOrder};
 use alloy_genesis::Genesis;
 use alloy_primitives::{hex, map::HashMap, utils::Unit, U256};
 use alloy_signer::Signer;
@@ -9,7 +8,6 @@ use alloy_signer_local::{
 use anvil_server::ServerConfig;
 use eyre::{Context, Result};
 use foundry_common::{duration_since_unix_epoch, sh_println};
-use foundry_config::Config;
 use polkadot_sdk::{
     sc_cli::{
         self, CliConfiguration as SubstrateCliConfiguration, Cors, RPC_DEFAULT_MAX_CONNECTIONS,
@@ -161,11 +159,11 @@ impl SubstrateCliConfiguration for SubstrateNodeConfig {
     }
 
     fn rpc_max_connections(&self) -> sc_cli::Result<u32> {
-        Ok(100)
+        Ok(self.rpc_params.rpc_max_connections)
     }
 
     fn rpc_cors(&self, _is_dev: bool) -> sc_cli::Result<Option<Vec<String>>> {
-        Ok(Cors::All.into())
+        Ok(self.rpc_params.rpc_cors.clone().unwrap_or_else(|| Cors::All).into())
     }
 
     fn rpc_addr(
@@ -272,8 +270,6 @@ pub struct AnvilNodeConfig {
     pub server_config: ServerConfig,
     /// The host the server will listen on
     pub host: Vec<IpAddr>,
-    /// How transactions are sorted in the mempool
-    pub transaction_order: TransactionOrder,
     /// Filename to write anvil output as json
     pub config_out: Option<PathBuf>,
     /// The genesis to use to initialize the node
@@ -290,26 +286,12 @@ pub struct AnvilNodeConfig {
     pub enable_auto_impersonate: bool,
     /// Configure the code size limit
     pub code_size_limit: Option<usize>,
-    /// Configures how to remove historic state.
-    ///
-    /// If set to `Some(num)` keep latest num state in memory only.
-    pub prune_history: PruneStateHistoryConfig,
-    /// Max number of states cached on disk.
-    pub max_persisted_states: Option<usize>,
-    /// The file where to load the state from
-    pub init_state: Option<SerializableState>,
-    /// max number of blocks with transactions in memory
-    pub transaction_block_keeper: Option<usize>,
     /// Disable the default CREATE2 deployer
     pub disable_default_create2_deployer: bool,
-    /// Slots in an epoch
-    pub slots_in_an_epoch: u64,
     /// The memory limit per EVM execution in bytes.
     pub memory_limit: Option<u64>,
     /// Do not print log messages.
     pub silent: bool,
-    /// The path where states are cached.
-    pub cache_path: Option<PathBuf>,
 }
 
 impl AnvilNodeConfig {
@@ -499,20 +481,13 @@ impl Default for AnvilNodeConfig {
             enable_auto_impersonate: false,
             server_config: Default::default(),
             host: vec![IpAddr::V4(Ipv4Addr::LOCALHOST)],
-            transaction_order: Default::default(),
             config_out: None,
             genesis: None,
             ipc_path: None,
             code_size_limit: None,
-            prune_history: Default::default(),
-            max_persisted_states: None,
-            init_state: None,
-            transaction_block_keeper: None,
             disable_default_create2_deployer: false,
-            slots_in_an_epoch: 32,
             memory_limit: None,
             silent: false,
-            cache_path: None,
         }
     }
 }
@@ -548,21 +523,6 @@ impl AnvilNodeConfig {
         if disable_code_size_limit {
             self.code_size_limit = Some(usize::MAX);
         }
-        self
-    }
-
-    /// Sets the init state if any
-    #[must_use]
-    pub fn with_init_state(mut self, init_state: Option<SerializableState>) -> Self {
-        self.init_state = init_state;
-        self
-    }
-
-    /// Loads the init state from a file if it exists
-    #[must_use]
-    #[cfg(feature = "cmd")]
-    pub fn with_init_state_path(mut self, path: impl AsRef<std::path::Path>) -> Self {
-        self.init_state = crate::cmd::StateFile::parse_path(path).ok().and_then(|file| file.state);
         self
     }
 
@@ -612,33 +572,6 @@ impl AnvilNodeConfig {
     #[must_use]
     pub fn with_gas_price(mut self, gas_price: Option<u128>) -> Self {
         self.gas_price = gas_price;
-        self
-    }
-
-    /// Sets prune history status.
-    #[must_use]
-    pub fn set_pruned_history(mut self, prune_history: Option<Option<usize>>) -> Self {
-        self.prune_history = PruneStateHistoryConfig::from_args(prune_history);
-        self
-    }
-
-    /// Sets max number of states to cache on disk.
-    #[must_use]
-    pub fn with_max_persisted_states<U: Into<usize>>(
-        mut self,
-        max_persisted_states: Option<U>,
-    ) -> Self {
-        self.max_persisted_states = max_persisted_states.map(Into::into);
-        self
-    }
-
-    /// Sets max number of blocks with transactions to keep in memory
-    #[must_use]
-    pub fn with_transaction_block_keeper<U: Into<usize>>(
-        mut self,
-        transaction_block_keeper: Option<U>,
-    ) -> Self {
-        self.transaction_block_keeper = transaction_block_keeper.map(Into::into);
         self
     }
 
@@ -749,13 +682,6 @@ impl AnvilNodeConfig {
         self
     }
 
-    /// Sets the slots in an epoch
-    #[must_use]
-    pub fn with_slots_in_an_epoch(mut self, slots_in_an_epoch: u64) -> Self {
-        self.slots_in_an_epoch = slots_in_an_epoch;
-        self
-    }
-
     /// Sets the port to use
     #[must_use]
     pub fn with_port(mut self, port: u16) -> Self {
@@ -830,12 +756,6 @@ impl AnvilNodeConfig {
         self
     }
 
-    #[must_use]
-    pub fn with_transaction_order(mut self, transaction_order: TransactionOrder) -> Self {
-        self.transaction_order = transaction_order;
-        self
-    }
-
     /// Returns the ipc path for the ipc endpoint if any
     pub fn get_ipc_path(&self) -> Option<String> {
         match &self.ipc_path {
@@ -876,46 +796,6 @@ impl AnvilNodeConfig {
     pub fn set_silent(mut self, silent: bool) -> Self {
         self.silent = silent;
         self
-    }
-
-    /// Sets the path where states are cached
-    #[must_use]
-    pub fn with_cache_path(mut self, cache_path: Option<PathBuf>) -> Self {
-        self.cache_path = cache_path;
-        self
-    }
-
-    /// Returns the gas limit for a non forked anvil instance
-    ///
-    /// Checks the config for the `disable_block_gas_limit` flag
-    pub(crate) fn _gas_limit(&self) -> u128 {
-        if self.disable_block_gas_limit {
-            return u64::MAX as u128;
-        }
-
-        self.gas_limit.unwrap_or(DEFAULT_GAS_LIMIT)
-    }
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct PruneStateHistoryConfig {
-    pub enabled: bool,
-    pub max_memory_history: Option<usize>,
-}
-
-impl PruneStateHistoryConfig {
-    /// Returns `true` if writing state history is supported
-    pub fn is_state_history_supported(&self) -> bool {
-        !self.enabled || self.max_memory_history.is_some()
-    }
-
-    /// Returns true if this setting was enabled.
-    pub fn is_config_enabled(&self) -> bool {
-        self.enabled
-    }
-
-    pub fn from_args(val: Option<Option<usize>>) -> Self {
-        val.map(|max_memory_history| Self { enabled: true, max_memory_history }).unwrap_or_default()
     }
 }
 
@@ -984,30 +864,5 @@ impl AccountGenerator {
             wallets.push(wallet)
         }
         Ok(wallets)
-    }
-}
-
-/// Returns the path to anvil dir `~/.foundry/anvil`
-pub fn _anvil_dir() -> Option<PathBuf> {
-    Config::foundry_dir().map(|p| p.join("anvil"))
-}
-
-/// Returns the root path to anvil's temporary storage `~/.foundry/anvil/`
-pub fn _anvil_tmp_dir() -> Option<PathBuf> {
-    _anvil_dir().map(|p| p.join("tmp"))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_prune_history() {
-        let config = PruneStateHistoryConfig::default();
-        assert!(config.is_state_history_supported());
-        let config = PruneStateHistoryConfig::from_args(Some(None));
-        assert!(!config.is_state_history_supported());
-        let config = PruneStateHistoryConfig::from_args(Some(Some(10)));
-        assert!(config.is_state_history_supported());
     }
 }
