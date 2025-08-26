@@ -1,0 +1,166 @@
+//! Anvil is a fast local Ethereum development node.
+
+#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+
+use crate::{
+    config::AnvilNodeConfig,
+    logging::{LoggingManager, NodeLogLayer},
+    substrate_node::service::Service,
+};
+use eyre::Result;
+use opts::{Anvil, AnvilSubcommand};
+use polkadot_sdk::{
+    sc_cli::{self, SubstrateCli},
+    sc_service::{self, TaskManager},
+};
+use server::try_spawn_ipc;
+use std::{net::SocketAddr, time::Instant};
+
+mod substrate_node;
+
+mod config;
+
+/// commandline output
+pub mod logging;
+/// types for subscriptions
+pub mod pubsub;
+/// axum RPC server implementations
+pub mod server;
+
+mod api_server;
+
+/// contains cli command
+#[cfg(feature = "cmd")]
+pub mod cmd;
+
+#[cfg(feature = "cmd")]
+pub mod opts;
+
+#[macro_use]
+extern crate tracing;
+
+use clap::{CommandFactory, Parser};
+use foundry_cli::utils;
+
+/// Run the `anvil` command line interface.
+#[cfg(feature = "cmd")]
+pub fn run(start_time: Instant) -> Result<()> {
+    setup()?;
+
+    let args = Anvil::parse();
+    args.global.init()?;
+
+    run_command(args, start_time)
+}
+
+/// Setup the panic handler and other utilities.
+pub fn setup() -> Result<()> {
+    utils::install_crypto_provider();
+    foundry_cli::handler::install();
+    utils::load_dotenv();
+    utils::enable_paint();
+
+    Ok(())
+}
+
+/// Run the subcommand.
+pub fn run_command(args: Anvil, start_time: Instant) -> Result<()> {
+    if let Some(cmd) = &args.cmd {
+        match cmd {
+            AnvilSubcommand::Completions { shell } => {
+                clap_complete::generate(
+                    *shell,
+                    &mut Anvil::command(),
+                    "anvil-polkadot",
+                    &mut std::io::stdout(),
+                );
+            }
+            AnvilSubcommand::GenerateFigSpec => clap_complete::generate(
+                clap_complete_fig::Fig,
+                &mut Anvil::command(),
+                "anvil-polkadot",
+                &mut std::io::stdout(),
+            ),
+        }
+        return Ok(())
+    }
+
+    let _ = fdlimit::raise_fd_limit();
+
+    let (anvil_config, substrate_config) = args.node.clone().into_node_config()?;
+
+    if std::env::var_os("RUST_LOG").is_none() {
+        std::env::set_var(
+            "RUST_LOG",
+            concat!(
+                "anvil=trace,anvil_polkadot=trace,",
+                "node::user=info,node::console=info,",
+                "substrate=warn,sc_service=warn,sc_cli=warn,sc_network=warn,",
+                "sc_sysinfo=warn,txpool=warn,litep2p=warn,polkadot=warn,warn"
+            ),
+        );
+    }
+
+    let runner = args.create_runner(&substrate_config)?;
+
+    Ok(runner.run_node_until_exit(|config| async move {
+        spawn(anvil_config, config, start_time).await
+    })?)
+}
+
+pub async fn spawn(
+    anvil_config: AnvilNodeConfig,
+    substrate_config: sc_service::Configuration,
+    start_time: Instant,
+) -> Result<TaskManager, sc_cli::Error> {
+    // Spawn the substrate node.
+    let substrate_service = substrate_node::service::new(&anvil_config, substrate_config)
+        .map_err(sc_cli::Error::Service)?;
+
+    // Spawn the other tasks.
+    spawn_anvil_tasks(anvil_config, &substrate_service, start_time)
+        .await
+        .map_err(|err| sc_cli::Error::Application(err.into()))?;
+
+    Ok(substrate_service.task_manager)
+}
+
+pub async fn spawn_anvil_tasks(
+    anvil_config: AnvilNodeConfig,
+    service: &Service,
+    start_time: Instant,
+) -> Result<()> {
+    let mut addresses = Vec::with_capacity(anvil_config.host.len());
+
+    // Spawn the api server.
+    let api_handle = api_server::spawn(service, start_time);
+
+    // Spawn the network servers.
+    for addr in &anvil_config.host {
+        let sock_addr = SocketAddr::new(*addr, anvil_config.port);
+
+        // Create a TCP listener.
+        let tcp_listener = tokio::net::TcpListener::bind(sock_addr).await?;
+        addresses.push(tcp_listener.local_addr()?);
+
+        // Spawn the server future on a new task.
+        let srv =
+            server::serve_on(tcp_listener, anvil_config.server_config.clone(), api_handle.clone());
+        let spawn_handle = service.task_manager.spawn_handle();
+        spawn_handle.spawn(
+            "anvil",
+            "anvil-tcp",
+            async move { srv.await.expect("TCP server failure") },
+        );
+    }
+
+    // If configured, spawn the IPC server.
+    anvil_config
+        .get_ipc_path()
+        .map(|path| try_spawn_ipc(&service.task_manager, path, api_handle))
+        .transpose()?;
+
+    anvil_config.print()?;
+
+    Ok(())
+}
