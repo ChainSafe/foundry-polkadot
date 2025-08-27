@@ -1,10 +1,14 @@
 use crate::substrate_node::service::TransactionPoolHandle;
-use futures::{task::AtomicWaker, SinkExt, StreamExt};
-use parking_lot::{Mutex, RwLock};
-use polkadot_sdk::{sc_consensus_manual_seal::EngineCommand, sp_core};
-use std::sync::Arc;
 use alloy_primitives::U256;
+use futures::{
+    stream::{select, FusedStream},
+    task::AtomicWaker,
+    SinkExt, StreamExt,
+};
 use jsonrpsee::core::RpcResult;
+use parking_lot::{Mutex, RwLock};
+use polkadot_sdk::{sc_consensus_manual_seal::EngineCommand, sc_service::TransactionPool, sp_core};
+use std::{pin::Pin, sync::Arc};
 
 pub enum MiningMode {
     /// Create a new block everytime there is a new transaction
@@ -37,22 +41,26 @@ impl MinnerInner {
     }
 }
 
+type ConsensusCommandStream = Pin<Box<dyn FusedStream<Item = EngineCommand<sp_core::H256>> + Send>>;
+
 pub struct MiningEngine {
     pub mining_mode: Arc<RwLock<MiningMode>>,
     inner: Arc<MinnerInner>,
+    transaction_pool: Arc<TransactionPoolHandle>,
     manual_command_sender: Mutex<futures::channel::mpsc::Sender<EngineCommand<sp_core::H256>>>,
 }
 
 impl MiningEngine {
     pub fn new(
         mining_mode: MiningMode,
-        _transaction_pool: Arc<TransactionPoolHandle>,
+        transaction_pool: Arc<TransactionPoolHandle>,
     ) -> (Self, futures::channel::mpsc::Receiver<EngineCommand<sp_core::H256>>) {
         let (manual_command_sender, manual_command_receiver) = futures::channel::mpsc::channel(1); // Small buffer
         (
             Self {
                 mining_mode: Arc::new(RwLock::new(mining_mode)),
                 inner: Default::default(),
+                transaction_pool,
                 manual_command_sender: Mutex::new(manual_command_sender),
             },
             manual_command_receiver,
@@ -74,17 +82,45 @@ impl MiningEngine {
         let _ = sender_guard.try_send(seal_command);
         self.inner.wake();
     }
+
+    pub fn get_command_stream(
+        &self,
+        manual_commands: futures::channel::mpsc::Receiver<EngineCommand<sp_core::H256>>,
+    ) -> ConsensusCommandStream {
+        let mining_mode = self.mining_mode.read();
+        match *mining_mode {
+            MiningMode::Manual => {
+                let s = manual_commands.fuse();
+                Box::pin(s)
+            }
+            MiningMode::AutoMining => {
+                let manual_s = manual_commands.fuse();
+                let auto_s = self
+                    .transaction_pool
+                    .import_notification_stream()
+                    .map(|_| EngineCommand::SealNewBlock {
+                        create_empty: false,
+                        finalize: true,
+                        parent_hash: None,
+                        sender: None,
+                    })
+                    .fuse();
+                Box::pin(select(manual_s, auto_s))
+            }
+            _ => todo!(), // Handle other modes like `Interval` here.
+        }
+    }
 }
 
 pub async fn run_mininig_engine(
     _engine: Arc<MiningEngine>,
-    mut manual_command_receiver: futures::channel::mpsc::Receiver<EngineCommand<sp_core::H256>>,
+    mut command_stream: ConsensusCommandStream,
     mut command_sink: futures::channel::mpsc::Sender<EngineCommand<sp_core::H256>>,
 ) {
     loop {
         // Await on the receiver. This is the key. It will block until a message arrives
         // or the sender is dropped.
-        let maybe_cmd = manual_command_receiver.next().await;
+        let maybe_cmd = command_stream.next().await;
 
         if let Some(cmd) = maybe_cmd {
             // Send the command to the manual-seal engine.

@@ -3,7 +3,6 @@
 use jsonrpsee::RpcModule;
 
 use polkadot_sdk::{
-    sc_consensus_manual_seal::rpc::ManualSeal,
     sc_transaction_pool_api::TransactionPool,
     sp_blockchain::{Error as BlockChainError, HeaderBackend, HeaderMetadata},
     *,
@@ -22,9 +21,9 @@ mod interface {
     pub type Nonce = <Runtime as frame_system::Config>::Nonce;
 }
 
-use interface::{AccountId, Nonce, OpaqueBlock};
-use crate::substrate_node::mining::RpcApiServer;
 use super::mining::MiningEngine;
+use crate::substrate_node::mining::RpcApiServer;
+use interface::{AccountId, Nonce, OpaqueBlock};
 
 /// Full client dependencies.
 
@@ -63,10 +62,7 @@ where
     P: TransactionPool + 'static,
 {
     use crate::api_server::mining::AnvilPolkadotMiningApiServer;
-    use polkadot_sdk::{
-        sc_consensus_manual_seal::rpc::ManualSealApiServer,
-        substrate_frame_rpc_system::{System, SystemApiServer},
-    };
+    use polkadot_sdk::substrate_frame_rpc_system::{System, SystemApiServer};
 
     let mut module = RpcModule::new(());
     let FullDeps { client, pool, mining_engine } = deps;

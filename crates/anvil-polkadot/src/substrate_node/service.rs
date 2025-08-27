@@ -1,5 +1,8 @@
-use super::mining::{run_mininig_engine, MiningEngine, MiningMode};
-use crate::AnvilNodeConfig;
+use super::mining::{run_mininig_engine, MiningEngine};
+use crate::{
+    substrate_node::rpc::{create_full, FullDeps},
+    AnvilNodeConfig,
+};
 use anvil::eth::backend::time::TimeManager;
 use polkadot_sdk::{
     sc_basic_authorship, sc_consensus, sc_consensus_manual_seal,
@@ -12,11 +15,9 @@ use polkadot_sdk::{
     sp_io,
     sp_keystore::KeystorePtr,
     sp_timestamp,
-    substrate_frame_rpc_system::SystemApiServer,
 };
 use std::sync::Arc;
 use substrate_runtime::{OpaqueBlock as Block, RuntimeApi};
-use crate::substrate_node::rpc::{FullDeps, create_full};
 
 pub type FullClient =
     sc_service::TFullClient<Block, RuntimeApi, WasmExecutor<sp_io::SubstrateHostFunctions>>;
@@ -37,7 +38,7 @@ pub struct Service {
 }
 
 /// Builds a new service for a full client.
-pub fn new(
+pub async fn new(
     _anvil_config: &AnvilNodeConfig,
     config: Configuration,
 ) -> Result<Service, ServiceError> {
@@ -67,11 +68,20 @@ pub fn new(
     );
 
     let (sink, commands_stream) = futures::channel::mpsc::channel(1024);
+        let mut proposer = sc_basic_authorship::ProposerFactory::new(
+        task_manager.spawn_handle(),
+        client.clone(),
+        transaction_pool.clone(),
+        None,
+        None,
+    );
     let (engine, mining_commands_receiver) = super::mining::MiningEngine::new(
-        super::mining::MiningMode::Manual,
+        super::mining::MiningMode::AutoMining,
         transaction_pool.clone(),
     );
     let mining_engine = Arc::new(engine);
+    // Get the final, configured stream from the engine.
+    let command_stream = mining_engine.get_command_stream(mining_commands_receiver);
 
     let rpc_handlers = spawn_rpc_server(
         &mut task_manager,
@@ -80,22 +90,16 @@ pub fn new(
         transaction_pool.clone(),
         keystore_container.keystore(),
         backend.clone(),
-        mining_engine.clone()
+        mining_engine.clone(),
     )?;
 
     task_manager.spawn_handle().spawn(
         "mining_engine_task",
         Some("consensus"),
-        run_mininig_engine(mining_engine.clone(), mining_commands_receiver, sink),
+        run_mininig_engine(mining_engine.clone(), command_stream, sink),
     );
 
-    let proposer = sc_basic_authorship::ProposerFactory::new(
-        task_manager.spawn_handle(),
-        client.clone(),
-        transaction_pool.clone(),
-        None,
-        None,
-    );
+
 
     let time_manager =
         TimeManager::new_with_milliseconds(sp_timestamp::Timestamp::current().into());
@@ -106,6 +110,26 @@ pub fn new(
             async move { Ok(sp_timestamp::InherentDataProvider::new(next_timestamp.into())) }
         }
     };
+
+    // For some reason when using AutoMining we have to seal the first block :shrug:
+    // Think at a method to clean this up.
+    let select_chain = SelectChain::new(backend.clone());
+    let mut client_mut = client.clone();
+
+    let seal_params = sc_consensus_manual_seal::SealBlockParams {
+        sender: None,
+        parent_hash: None,
+        finalize: true,
+        create_empty: true,
+        env: &mut proposer,
+        select_chain: &select_chain,
+        block_import: &mut client_mut,
+        consensus_data_provider: None,
+        pool: transaction_pool.clone(),
+        client: client.clone(),
+        create_inherent_data_providers: &create_inherent_data_providers,
+    };
+    sc_consensus_manual_seal::seal_block(seal_params).await;
 
     let params = sc_consensus_manual_seal::ManualSealParams {
         block_import: client.clone(),
