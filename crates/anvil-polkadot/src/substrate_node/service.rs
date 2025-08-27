@@ -34,10 +34,7 @@ pub struct Service {
 }
 
 /// Builds a new service for a full client.
-pub fn new(
-    _anvil_config: &AnvilNodeConfig,
-    config: Configuration,
-) -> Result<Service, ServiceError> {
+pub fn new(anvil_config: &AnvilNodeConfig, config: Configuration) -> Result<Service, ServiceError> {
     let (client, backend, keystore_container, mut task_manager) =
         sc_service::new_full_parts::<Block, RuntimeApi, _>(
             &config,
@@ -97,6 +94,12 @@ pub fn new(
         }
     });
 
+    // Get a basis for the system time, so that we can use it to compute
+    // the "passage of time", which is relevant for inherent data provider,
+    // when returning a timestamp relative to a custom genesis timestamp.
+    let genesis_timestamp_prereq = anvil_config
+        .genesis_timestamp
+        .map(|timestamp| (sp_timestamp::Timestamp::current(), timestamp));
     let params = sc_consensus_manual_seal::ManualSealParams {
         block_import: client.clone(),
         env: proposer,
@@ -106,9 +109,28 @@ pub fn new(
         commands_stream: Box::pin(commands_stream),
         consensus_data_provider: None,
         create_inherent_data_providers: move |_, ()| async move {
-            Ok(sp_timestamp::InherentDataProvider::from_system_time())
+            let inherent_data_provider = match genesis_timestamp_prereq {
+                Some((passage_of_time_base, custom_timestamp)) => {
+                    // For the first block, this delta is subject to be more than
+                    // max drift allowed by default by the inherent data provider (60 seconds),
+                    // but the authorship future should start relatively quickly after we
+                    // set the basis for "passage of time".
+                    let delta = sp_timestamp::Timestamp::current()
+                        .checked_sub(passage_of_time_base)
+                        .map(Into::<u64>::into)
+                        .expect("Time to monotonically increase. qed");
+
+                    sp_timestamp::InherentDataProvider::new(sp_timestamp::Timestamp::new(
+                        custom_timestamp + delta,
+                    ))
+                }
+                None => sp_timestamp::InherentDataProvider::from_system_time(),
+            };
+
+            Ok(inherent_data_provider)
         },
     };
+
     let authorship_future = sc_consensus_manual_seal::run_manual_seal(params);
 
     task_manager.spawn_essential_handle().spawn_blocking(

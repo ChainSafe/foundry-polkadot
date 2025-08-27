@@ -246,7 +246,7 @@ pub struct AnvilNodeConfig {
     pub genesis_accounts: Vec<PrivateKeySigner>,
     /// Native token balance of every genesis account in the genesis block
     pub genesis_balance: U256,
-    /// Genesis block timestamp
+    /// Genesis block timestamp - must be given in milliseconds
     pub genesis_timestamp: Option<u64>,
     /// Genesis block number
     pub genesis_block_number: Option<u64>,
