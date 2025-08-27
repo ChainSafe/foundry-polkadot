@@ -68,7 +68,7 @@ pub async fn new(
     );
 
     let (sink, commands_stream) = futures::channel::mpsc::channel(1024);
-        let mut proposer = sc_basic_authorship::ProposerFactory::new(
+    let mut proposer = sc_basic_authorship::ProposerFactory::new(
         task_manager.spawn_handle(),
         client.clone(),
         transaction_pool.clone(),
@@ -76,12 +76,12 @@ pub async fn new(
         None,
     );
     let (engine, mining_commands_receiver) = super::mining::MiningEngine::new(
-        super::mining::MiningMode::AutoMining,
+        super::mining::MiningMode::Mixed { tick: 60 },
         transaction_pool.clone(),
     );
     let mining_engine = Arc::new(engine);
     // Get the final, configured stream from the engine.
-    let command_stream = mining_engine.get_command_stream(mining_commands_receiver);
+    //let command_stream = mining_engine.get_command_stream(mining_commands_receiver);
 
     let rpc_handlers = spawn_rpc_server(
         &mut task_manager,
@@ -96,10 +96,8 @@ pub async fn new(
     task_manager.spawn_handle().spawn(
         "mining_engine_task",
         Some("consensus"),
-        run_mininig_engine(mining_engine.clone(), command_stream, sink),
+        run_mininig_engine(mining_engine.clone(), mining_commands_receiver, sink),
     );
-
-
 
     let time_manager =
         TimeManager::new_with_milliseconds(sp_timestamp::Timestamp::current().into());

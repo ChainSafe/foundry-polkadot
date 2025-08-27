@@ -1,7 +1,7 @@
 use crate::substrate_node::service::TransactionPoolHandle;
 use alloy_primitives::U256;
 use futures::{
-    stream::{select, FusedStream},
+    stream::{select, unfold, FusedStream},
     task::AtomicWaker,
     SinkExt, StreamExt,
 };
@@ -9,7 +9,9 @@ use jsonrpsee::core::RpcResult;
 use parking_lot::{Mutex, RwLock};
 use polkadot_sdk::{sc_consensus_manual_seal::EngineCommand, sc_service::TransactionPool, sp_core};
 use std::{pin::Pin, sync::Arc};
+use tokio::time::{interval, Duration};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MiningMode {
     /// Create a new block everytime there is a new transaction
     AutoMining,
@@ -40,8 +42,6 @@ impl MinnerInner {
         self.waker.register(cx.waker());
     }
 }
-
-type ConsensusCommandStream = Pin<Box<dyn FusedStream<Item = EngineCommand<sp_core::H256>> + Send>>;
 
 pub struct MiningEngine {
     pub mining_mode: Arc<RwLock<MiningMode>>,
@@ -82,56 +82,100 @@ impl MiningEngine {
         let _ = sender_guard.try_send(seal_command);
         self.inner.wake();
     }
-
-    pub fn get_command_stream(
-        &self,
-        manual_commands: futures::channel::mpsc::Receiver<EngineCommand<sp_core::H256>>,
-    ) -> ConsensusCommandStream {
-        let mining_mode = self.mining_mode.read();
-        match *mining_mode {
-            MiningMode::Manual => {
-                let s = manual_commands.fuse();
-                Box::pin(s)
-            }
-            MiningMode::AutoMining => {
-                let manual_s = manual_commands.fuse();
-                let auto_s = self
-                    .transaction_pool
-                    .import_notification_stream()
-                    .map(|_| EngineCommand::SealNewBlock {
-                        create_empty: false,
-                        finalize: true,
-                        parent_hash: None,
-                        sender: None,
-                    })
-                    .fuse();
-                Box::pin(select(manual_s, auto_s))
-            }
-            _ => todo!(), // Handle other modes like `Interval` here.
-        }
-    }
 }
 
 pub async fn run_mininig_engine(
-    _engine: Arc<MiningEngine>,
-    mut command_stream: ConsensusCommandStream,
+    engine: Arc<MiningEngine>,
+    mut manual_commands_receiver: futures::channel::mpsc::Receiver<EngineCommand<sp_core::H256>>,
     mut command_sink: futures::channel::mpsc::Sender<EngineCommand<sp_core::H256>>,
 ) {
-    loop {
-        // Await on the receiver. This is the key. It will block until a message arrives
-        // or the sender is dropped.
-        let maybe_cmd = command_stream.next().await;
+    let mut auto_mine_stream: Option<
+        Pin<Box<dyn FusedStream<Item = EngineCommand<sp_core::H256>> + Send>>,
+    > = None;
+    let mut interval_stream: Option<
+        Pin<Box<dyn FusedStream<Item = EngineCommand<sp_core::H256>> + Send>>,
+    > = None;
+    let mut current_mode = None;
 
-        if let Some(cmd) = maybe_cmd {
-            // Send the command to the manual-seal engine.
-            if let Err(_) = command_sink.send(cmd).await {
-                // If the send fails, it means the manual-seal task has shut down.
-                break;
+    loop {
+        let mut rebuild_future = futures::stream::poll_fn(|cx| {
+            let mode = { *engine.mining_mode.read() };
+            let mode_changed = current_mode.as_ref().map_or(true, |m| *m != mode);
+
+            if mode_changed {
+                current_mode = Some(mode);
+                std::task::Poll::Ready(Some(())) // Return a value to signal a change.
+            } else {
+                engine.inner.register(cx);
+                std::task::Poll::Pending
             }
-        } else {
-            // The `manual_command_receiver.next().await` returned `None`,
-            // which means the sender was dropped. This is the shutdown signal.
-            break;
+        });
+
+        tokio::select! {
+            _ = rebuild_future.next() => {
+                // The mode has changed, so we rebuild the streams.
+                let mode = current_mode.clone().unwrap();
+
+                // Rebuild the auto-mine stream based on the current mode.
+                auto_mine_stream = if matches!(mode, MiningMode::AutoMining | MiningMode::Mixed { .. }) {
+                    let stream = engine
+                        .transaction_pool
+                        .import_notification_stream()
+                        .map(|_| EngineCommand::SealNewBlock { create_empty: false, finalize: true, parent_hash: None, sender: None })
+                        .fuse();
+                    Some(Box::pin(stream))
+                } else {
+                    None
+                };
+
+                // Rebuild the interval stream based on the current mode.
+                interval_stream = if let Some(tick) = match mode { MiningMode::Interval { tick } | MiningMode::Mixed { tick } => Some(tick), _ => None, } {
+                    let stream = unfold(interval(Duration::from_secs(tick)), |mut interval| async {
+                        interval.tick().await;
+                        Some((EngineCommand::SealNewBlock { create_empty: true, finalize: true, parent_hash: None, sender: None }, interval))
+                    }).fuse();
+                    Some(Box::pin(stream))
+                } else {
+                    None
+                };
+            },
+
+            // Poll the manual commands receiver
+            maybe_cmd = manual_commands_receiver.next() => {
+                if let Some(cmd) = maybe_cmd {
+                    if command_sink.send(cmd).await.is_err() {
+                        break;
+                    }
+                } else {
+                    break;
+                }
+            },
+            // Poll the auto-mine stream if it exists
+            maybe_cmd = async {
+                match auto_mine_stream.as_mut() {
+                    Some(stream) => stream.next().await,
+                    None => futures::future::pending().await,
+                }
+            } => {
+                if let Some(cmd) = maybe_cmd {
+                    if command_sink.send(cmd).await.is_err() {
+                        break;
+                    }
+                }
+            },
+            // Poll the interval stream if it exists
+            maybe_cmd = async {
+                match interval_stream.as_mut() {
+                    Some(stream) => stream.next().await,
+                    None => futures::future::pending().await,
+                }
+            } => {
+                if let Some(cmd) = maybe_cmd {
+                    if command_sink.send(cmd).await.is_err() {
+                        break;
+                    }
+                }
+            },
         }
     }
 }
@@ -162,8 +206,15 @@ impl crate::api_server::mining::AnvilPolkadotMiningApiServer for RpcApiServer {
         todo!()
     }
 
-    async fn set_interval_mining(&self, _interval: u64) -> RpcResult<()> {
-        todo!()
+    async fn set_interval_mining(&self, interval: u64) -> RpcResult<()> {
+        let new_mode = if interval <= 0 {
+            MiningMode::Manual
+        } else {
+            MiningMode::Interval { tick: interval }
+        };
+        *self.mining_engine.mining_mode.write() = new_mode;
+        self.mining_engine.inner.wake();
+        Ok(())
     }
 
     async fn set_block_timestamp_interval(&self, _interval: u64) -> RpcResult<()> {
