@@ -6,9 +6,10 @@ use polkadot_sdk::{
     sc_service::{self, error::Error as ServiceError, Configuration, RpcHandlers, TaskManager},
     sc_transaction_pool::{self, TransactionPoolWrapper},
     sc_utils::mpsc::tracing_unbounded,
+    sp_inherents::CreateInherentDataProviders,
     sp_io,
     sp_keystore::KeystorePtr,
-    sp_timestamp,
+    sp_timestamp::{self, InherentDataProvider, Timestamp},
     substrate_frame_rpc_system::SystemApiServer,
 };
 use std::sync::Arc;
@@ -31,6 +32,24 @@ pub struct Service {
     pub backend: Arc<Backend>,
     pub tx_pool: Arc<TransactionPoolHandle>,
     pub rpc_handlers: RpcHandlers,
+}
+
+/// Set up the inherents validated by the node.
+///
+/// At this time we provide only the timestamp inherent, which can
+/// be customised via anvil genesis to a custom timestamp for the
+/// genesis block. In practice, we can't set the very same timestamp,
+/// but something close to it (in the order of seconds). The custom
+/// timestamp close to the genesis timestamp applies to block number 1.
+fn make_inherent_provider(
+    base: sp_timestamp::Timestamp,
+    genesis_timestamp: u64,
+) -> impl CreateInherentDataProviders<Block, ()> {
+    move |_, ()| async move {
+        let current = Timestamp::current();
+        let delta = current.checked_sub(base).expect("monotonic time. qed").as_millis();
+        Ok(InherentDataProvider::new(Timestamp::new(genesis_timestamp + delta)))
+    }
 }
 
 /// Builds a new service for a full client.
@@ -94,12 +113,11 @@ pub fn new(anvil_config: &AnvilNodeConfig, config: Configuration) -> Result<Serv
         }
     });
 
-    // Get a basis for the system time, so that we can use it to compute
-    // the "passage of time", which is relevant for inherent data provider,
-    // when returning a timestamp relative to a custom genesis timestamp.
-    let genesis_timestamp_prereq = anvil_config
-        .genesis_timestamp
-        .map(|timestamp| (sp_timestamp::Timestamp::current(), timestamp));
+    // Get timestamp as set via CLI or genesis config and convert it to milliseconds.
+    // Timestamp in anvil/eth world is in seconds:
+    // https://docs.soliditylang.org/en/latest/units-and-global-variables.html#block-and-transaction-properties.
+    let genesis_timestamp: u64 = anvil_config.get_genesis_timestamp() * 1000;
+    let base = sp_timestamp::Timestamp::current().into();
     let params = sc_consensus_manual_seal::ManualSealParams {
         block_import: client.clone(),
         env: proposer,
@@ -108,27 +126,7 @@ pub fn new(anvil_config: &AnvilNodeConfig, config: Configuration) -> Result<Serv
         select_chain: SelectChain::new(backend.clone()),
         commands_stream: Box::pin(commands_stream),
         consensus_data_provider: None,
-        create_inherent_data_providers: move |_, ()| async move {
-            let inherent_data_provider = match genesis_timestamp_prereq {
-                Some((passage_of_time_base, custom_timestamp)) => {
-                    // For the first block, this delta is subject to be more than
-                    // max drift allowed by default by the inherent data provider (60 seconds),
-                    // but the authorship future should start relatively quickly after we
-                    // set the basis for "passage of time".
-                    let delta = sp_timestamp::Timestamp::current()
-                        .checked_sub(passage_of_time_base)
-                        .map(Into::<u64>::into)
-                        .expect("Time to monotonically increase. qed");
-
-                    sp_timestamp::InherentDataProvider::new(sp_timestamp::Timestamp::new(
-                        custom_timestamp + delta,
-                    ))
-                }
-                None => sp_timestamp::InherentDataProvider::from_system_time(),
-            };
-
-            Ok(inherent_data_provider)
-        },
+        create_inherent_data_providers: make_inherent_provider(base, genesis_timestamp),
     };
 
     let authorship_future = sc_consensus_manual_seal::run_manual_seal(params);
