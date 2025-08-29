@@ -36,8 +36,13 @@ pub fn new(
     _anvil_config: &AnvilNodeConfig,
     config: Configuration,
 ) -> Result<Service, ServiceError> {
-    let (client, backend, keystore, mut task_manager) =
-        client::new_client(&config, sc_service::new_wasm_executor(&config.executor))?;
+    let (inner_client, backend, keystore_container, mut task_manager) =
+        sc_service::new_full_parts::<Block, RuntimeApi, _>(
+            &config,
+            None,
+            sc_service::new_wasm_executor(&config.executor),
+        )?;
+    let client = Arc::new(Client::new(inner_client));
 
     let transaction_pool = Arc::from(
         sc_transaction_pool::Builder::new(
@@ -61,7 +66,7 @@ pub fn new(
         client.clone(),
         config,
         transaction_pool.clone(),
-        keystore,
+        keystore_container.keystore(),
         backend.clone(),
     )?;
 

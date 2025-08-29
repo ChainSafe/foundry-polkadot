@@ -1,23 +1,20 @@
 use codec::Encode;
 use polkadot_sdk::{
     parachains_common::{Hash, Header},
-    sc_chain_spec::get_extension,
     sc_client_api::{
         self, backend::Finalizer, blockchain, client::ClientInfo,
-        execution_extensions::ExecutionExtensions, Backend as BackendT, BadBlocks, BlockBackend,
-        BlockchainEvents, ClientImportOperation, ExecutorProvider, ForkBlocks, KeysIter, PairsIter,
+        execution_extensions::ExecutionExtensions, Backend as BackendT, BlockBackend,
+        BlockchainEvents, ClientImportOperation, ExecutorProvider, KeysIter, PairsIter,
         ProofProvider, StorageProvider, UsageProvider,
     },
     sc_consensus::{BlockCheckParams, BlockImport, BlockImportParams, ImportResult},
     sc_executor::{RuntimeVersion, WasmExecutor},
-    sc_keystore,
-    sc_service::{self, new_db_backend, GenesisBlockBuilder, KeystoreContainer, LocalCallExecutor},
+    sc_service,
     sp_api::{self, ApiRef, CallApiAt, CallApiAtParams, ConstructRuntimeApi, ProvideRuntimeApi},
     sp_blockchain::{self, CachedHeaderMetadata, HeaderBackend, HeaderMetadata},
     sp_consensus,
     sp_core::storage::StorageData,
     sp_externalities, sp_io,
-    sp_keystore::KeystorePtr,
     sp_runtime::{
         generic::{BlockId, SignedBlock},
         traits::{BlockIdTo, NumberFor},
@@ -29,7 +26,7 @@ use polkadot_sdk::{
     sp_storage::{self, ChildInfo},
     sp_trie::MerkleValue,
 };
-use std::{collections::HashMap, sync::Arc};
+use std::collections::HashMap;
 use substrate_runtime::{Block, RuntimeApi, UncheckedExtrinsic};
 
 use crate::substrate_node::service::Backend;
@@ -68,76 +65,6 @@ impl Client {
     pub fn clear_storage_overrides(&mut self) {
         self.overrides.clear();
     }
-}
-
-pub fn new_client(
-    config: &sc_service::Configuration,
-    executor: WasmExecutor,
-) -> Result<
-    (Arc<Client>, Arc<Backend>, KeystorePtr, sc_service::TaskManager),
-    sc_service::error::Error,
-> {
-    let backend = new_db_backend(config.db_config())?;
-
-    let genesis_block_builder = GenesisBlockBuilder::new(
-        config.chain_spec.as_storage_builder(),
-        !config.no_genesis(),
-        backend.clone(),
-        executor.clone(),
-    )?;
-
-    let keystore_container = KeystoreContainer::new(&config.keystore)?;
-
-    let task_manager = {
-        let registry = config.prometheus_config.as_ref().map(|cfg| &cfg.registry);
-        sc_service::TaskManager::new(config.tokio_handle.clone(), registry)?
-    };
-
-    let chain_spec = &config.chain_spec;
-    let fork_blocks =
-        get_extension::<ForkBlocks<Block>>(chain_spec.extensions()).cloned().unwrap_or_default();
-
-    let bad_blocks =
-        get_extension::<BadBlocks<Block>>(chain_spec.extensions()).cloned().unwrap_or_default();
-
-    let client = {
-        let execution_extensions = ExecutionExtensions::new(None, Arc::new(executor.clone()));
-
-        let wasm_runtime_substitutes = HashMap::new();
-
-        let client = {
-            let client_config = sc_service::ClientConfig {
-                offchain_worker_enabled: config.offchain_worker.enabled,
-                offchain_indexing_api: config.offchain_worker.indexing_enabled,
-                wasm_runtime_overrides: config.wasm_runtime_overrides.clone(),
-                no_genesis: config.no_genesis(),
-                wasm_runtime_substitutes,
-                enable_import_proof_recording: false,
-            };
-            let executor = LocalCallExecutor::new(
-                backend.clone(),
-                executor,
-                client_config.clone(),
-                execution_extensions,
-            )?;
-
-            InnerClient::new(
-                backend.clone(),
-                executor,
-                Box::new(task_manager.spawn_handle()),
-                genesis_block_builder,
-                fork_blocks,
-                bad_blocks,
-                None,
-                None,
-                client_config,
-            )?
-        };
-
-        Client::new(client)
-    };
-
-    Ok((Arc::new(client), backend, keystore_container.keystore(), task_manager))
 }
 
 impl ProvideRuntimeApi<Block> for Client {
@@ -262,16 +189,6 @@ impl CallApiAt<Block> for Client {
     type StateBackend = <InnerClient as CallApiAt<Block>>::StateBackend;
 
     fn call_api_at(&self, params: CallApiAtParams<'_, Block>) -> Result<Vec<u8>, sp_api::ApiError> {
-        // tracing::error!(
-        //     "Name: {} Prev value: {:#?}",
-        //     params.function,
-        //     params.overlayed_changes.borrow_mut().storage(
-        //         hex::decode("f0c365c3cf59d671eb72da0e7a4113c49f1f0515f462cdcf84e0f1d6045dfcbb")
-        //             .unwrap()
-        //             .as_slice()
-        //     )
-        // );
-
         if params.function == "Core_initialize_block" {
             params.overlayed_changes.borrow_mut().set_storage(
                 hex::decode("c2261276cc9d1f8598ea4b6a74b15c2f57c875e4cff74148e4628f264b974c80")
