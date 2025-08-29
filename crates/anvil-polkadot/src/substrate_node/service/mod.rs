@@ -1,33 +1,31 @@
 use polkadot_sdk::{
     sc_basic_authorship, sc_consensus, sc_consensus_manual_seal,
-    sc_executor::WasmExecutor,
     sc_network_types::{self, multiaddr::Multiaddr},
     sc_rpc_api::DenyUnsafe,
     sc_service::{self, error::Error as ServiceError, Configuration, RpcHandlers, TaskManager},
-    sc_transaction_pool::{self, TransactionPoolWrapper},
+    sc_transaction_pool::{self},
     sc_utils::mpsc::tracing_unbounded,
-    sp_io,
     sp_keystore::KeystorePtr,
     sp_timestamp,
     substrate_frame_rpc_system::SystemApiServer,
 };
 use std::sync::Arc;
-use substrate_runtime::{OpaqueBlock as Block, RuntimeApi};
+use substrate_runtime::{Block, RuntimeApi};
 
 use crate::AnvilNodeConfig;
+use client::Client;
 
-pub type FullClient =
-    sc_service::TFullClient<Block, RuntimeApi, WasmExecutor<sp_io::SubstrateHostFunctions>>;
+mod client;
 
 pub type Backend = sc_service::TFullBackend<Block>;
 
-pub type TransactionPoolHandle = sc_transaction_pool::TransactionPoolHandle<Block, FullClient>;
+pub type TransactionPoolHandle = sc_transaction_pool::TransactionPoolHandle<Block, Client>;
 
 type SelectChain = sc_consensus::LongestChain<Backend, Block>;
 
 pub struct Service {
     pub task_manager: TaskManager,
-    pub client: Arc<FullClient>,
+    pub client: Arc<Client>,
     pub backend: Arc<Backend>,
     pub tx_pool: Arc<TransactionPoolHandle>,
     pub rpc_handlers: RpcHandlers,
@@ -38,13 +36,8 @@ pub fn new(
     _anvil_config: &AnvilNodeConfig,
     config: Configuration,
 ) -> Result<Service, ServiceError> {
-    let (client, backend, keystore_container, mut task_manager) =
-        sc_service::new_full_parts::<Block, RuntimeApi, _>(
-            &config,
-            None,
-            sc_service::new_wasm_executor(&config.executor),
-        )?;
-    let client = Arc::new(client);
+    let (client, backend, keystore, mut task_manager) =
+        client::new_client(&config, sc_service::new_wasm_executor(&config.executor))?;
 
     let transaction_pool = Arc::from(
         sc_transaction_pool::Builder::new(
@@ -68,7 +61,7 @@ pub fn new(
         client.clone(),
         config,
         transaction_pool.clone(),
-        keystore_container.keystore(),
+        keystore,
         backend.clone(),
     )?;
 
@@ -122,9 +115,9 @@ pub fn new(
 
 fn spawn_rpc_server(
     task_manager: &mut TaskManager,
-    client: Arc<FullClient>,
+    client: Arc<Client>,
     mut config: Configuration,
-    transaction_pool: Arc<TransactionPoolWrapper<Block, FullClient>>,
+    transaction_pool: Arc<TransactionPoolHandle>,
     keystore: KeystorePtr,
     backend: Arc<Backend>,
 ) -> Result<RpcHandlers, ServiceError> {

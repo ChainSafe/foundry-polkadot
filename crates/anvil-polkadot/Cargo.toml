@@ -19,6 +19,8 @@ path = "bin/main.rs"
 
 [dependencies]
 # foundry internal
+hex = "0.4.3"
+codec = { version = "3.7.5", default-features = true, package = "parity-scale-codec" }
 substrate-runtime = { path = "substrate-runtime" }
 polkadot-sdk = { version = "2507.1.0", default-features = false, features = [
     "sc-allocator",

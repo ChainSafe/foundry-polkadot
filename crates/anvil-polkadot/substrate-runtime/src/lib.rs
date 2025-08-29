@@ -26,8 +26,6 @@ use polkadot_sdk::{
 };
 use sp_weights::{ConstantMultiplier, IdentityFee};
 
-pub use polkadot_sdk::polkadot_sdk_frame::runtime::types_common::OpaqueBlock;
-
 pub mod currency {
     use super::Balance;
     pub const MILLICENTS: Balance = 1_000_000_000;
