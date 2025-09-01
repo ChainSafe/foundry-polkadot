@@ -3,8 +3,9 @@
 use crate::{
     config::*,
     test_helpers::{
-        ForgeTestData, RE_PATH_SEPARATOR, TEST_DATA_DEFAULT, TEST_DATA_MULTI_VERSION,
-        TEST_DATA_PARIS,
+        ForgeTestData, RE_PATH_SEPARATOR, TEST_DATA_DEFAULT, TEST_DATA_DEFAULT_RESOLC,
+        TEST_DATA_MULTI_VERSION, TEST_DATA_MULTI_VERSION_RESOLC, TEST_DATA_PARIS,
+        TEST_DATA_PARIS_RESOLC,
     },
 };
 use alloy_primitives::U256;
@@ -79,4 +80,29 @@ async fn test_cheats_local_multi_version() {
 #[tokio::test(flavor = "multi_thread")]
 async fn test_cheats_local_paris() {
     test_cheats_local(&TEST_DATA_PARIS).await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_resolc_cheats_local_default() {
+    test_cheats_local(&TEST_DATA_DEFAULT_RESOLC).await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_resolc_cheats_local_default_isolated() {
+    test_cheats_local_isolated(&TEST_DATA_DEFAULT_RESOLC).await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_resolc_cheats_local_default_with_seed() {
+    test_cheats_local_with_seed(&TEST_DATA_DEFAULT_RESOLC).await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_resolc_cheats_local_multi_version() {
+    test_cheats_local(&TEST_DATA_MULTI_VERSION_RESOLC).await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_resolc_cheats_local_paris() {
+    test_cheats_local(&TEST_DATA_PARIS_RESOLC).await
 }

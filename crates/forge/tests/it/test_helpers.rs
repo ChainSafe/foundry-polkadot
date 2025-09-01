@@ -35,17 +35,17 @@ static VYPER: LazyLock<PathBuf> = LazyLock::new(|| std::env::temp_dir().join("vy
 
 /// Profile for the tests group. Used to configure separate configurations for test runs.
 pub enum ForgeTestProfile {
-    Default,
-    Paris,
-    MultiVersion,
+    Default { resolc: bool },
+    Paris { resolc: bool },
+    MultiVersion { resolc: bool },
 }
 
 impl fmt::Display for ForgeTestProfile {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Default => write!(f, "default"),
-            Self::Paris => write!(f, "paris"),
-            Self::MultiVersion => write!(f, "multi-version"),
+            Self::Default { resolc: _ } => write!(f, "default"),
+            Self::Paris { resolc: _ } => write!(f, "paris"),
+            Self::MultiVersion { resolc: _ } => write!(f, "multi-version"),
         }
     }
 }
@@ -53,7 +53,7 @@ impl fmt::Display for ForgeTestProfile {
 impl ForgeTestProfile {
     /// Returns true if the profile is Paris.
     pub fn is_paris(&self) -> bool {
-        matches!(self, Self::Paris)
+        matches!(self, Self::Paris { resolc: _ })
     }
 
     pub fn root(&self) -> PathBuf {
@@ -68,7 +68,7 @@ impl ForgeTestProfile {
         let mut settings =
             Settings { libraries: Libraries::parse(&libs).unwrap(), ..Default::default() };
 
-        if matches!(self, Self::Paris) {
+        if matches!(self, Self::Paris { resolc: _ }) {
             settings.evm_version = Some(EvmVersion::Paris);
         }
 
@@ -158,6 +158,33 @@ impl ForgeTestProfile {
             timeout: None,
             show_solidity: false,
         };
+
+        if matches!(
+            self,
+            Self::Default { resolc: true } |
+                Self::Paris { resolc: true } |
+                Self::MultiVersion { resolc: true }
+        ) {
+            config.resolc.resolc_compile = true;
+            config.resolc.resolc_startup = true;
+            config.skip = vec![
+                "*testdata/default/fork/*".parse().unwrap(),
+                "*testdata/default/repros/*".parse().unwrap(),
+                "*testdata/default/fuzz/*".parse().unwrap(),
+                "*testdata/default/linking/*".parse().unwrap(),
+                "*testdata/default/cheats/AttachDelegation.t.sol*".parse().unwrap(),
+                "*testdata/default/cheats/GetArtifactPath.t.sol*".parse().unwrap(),
+                "*testdata/default/cheats/GetDeployedCode.t.sol*".parse().unwrap(),
+                "*testdata/default/cheats/DeployCode.t.sol*".parse().unwrap(),
+                "*testdata/default/cheats/dumpState.t.sol*".parse().unwrap(),
+                "*testdata/default/cheats/Etch.t.sol*".parse().unwrap(),
+                "*testdata/default/cheats/GetCode.t.sol*".parse().unwrap(),
+                "*testdata/default/cheats/loadAllocs.t.sol*".parse().unwrap(),
+                "*testdata/default/cheats/RecordAccountAccesses.t.sol*".parse().unwrap(),
+                "*testdata/default/cheats/Broadcast.t.sol*".parse().unwrap(),
+                "*testdata/default/cheats/MemSafety.t.sol*".parse().unwrap(),
+            ];
+        }
 
         config.sanitized()
     }
@@ -346,15 +373,27 @@ pub fn get_compiled(project: &mut Project) -> ProjectCompileOutput {
 
 /// Default data for the tests group.
 pub static TEST_DATA_DEFAULT: LazyLock<ForgeTestData> =
-    LazyLock::new(|| ForgeTestData::new(ForgeTestProfile::Default));
+    LazyLock::new(|| ForgeTestData::new(ForgeTestProfile::Default { resolc: false }));
 
 /// Data for tests requiring Paris support on Solc and EVM level.
 pub static TEST_DATA_PARIS: LazyLock<ForgeTestData> =
-    LazyLock::new(|| ForgeTestData::new(ForgeTestProfile::Paris));
+    LazyLock::new(|| ForgeTestData::new(ForgeTestProfile::Paris { resolc: false }));
 
 /// Data for tests requiring Cancun support on Solc and EVM level.
 pub static TEST_DATA_MULTI_VERSION: LazyLock<ForgeTestData> =
-    LazyLock::new(|| ForgeTestData::new(ForgeTestProfile::MultiVersion));
+    LazyLock::new(|| ForgeTestData::new(ForgeTestProfile::MultiVersion { resolc: false }));
+
+/// Default data for the tests group with resolc enabled.
+pub static TEST_DATA_DEFAULT_RESOLC: LazyLock<ForgeTestData> =
+    LazyLock::new(|| ForgeTestData::new(ForgeTestProfile::Default { resolc: true }));
+
+/// Data for tests requiring Paris support on Solc and EVM level with resolc enabled.
+pub static TEST_DATA_PARIS_RESOLC: LazyLock<ForgeTestData> =
+    LazyLock::new(|| ForgeTestData::new(ForgeTestProfile::Paris { resolc: true }));
+
+/// Data for tests requiring Cancun support on Solc and EVM level with resolc enabled.
+pub static TEST_DATA_MULTI_VERSION_RESOLC: LazyLock<ForgeTestData> =
+    LazyLock::new(|| ForgeTestData::new(ForgeTestProfile::MultiVersion { resolc: true }));
 
 pub fn manifest_root() -> &'static Path {
     let mut root = Path::new(env!("CARGO_MANIFEST_DIR"));
