@@ -1,12 +1,23 @@
+use codec::Encode;
+use foundry_evm::backend;
+use futures::StreamExt;
 use polkadot_sdk::{
-    sc_basic_authorship, sc_consensus, sc_consensus_manual_seal,
+    sc_basic_authorship,
+    sc_client_api::{
+        Backend as BackendT, BlockImportOperation, BlockchainEvents, NewBlockState,
+        TrieCacheContext,
+    },
+    sc_consensus, sc_consensus_manual_seal,
     sc_network_types::{self, multiaddr::Multiaddr},
     sc_rpc_api::DenyUnsafe,
     sc_service::{self, error::Error as ServiceError, Configuration, RpcHandlers, TaskManager},
+    sc_state_db,
     sc_transaction_pool::{self},
     sc_utils::mpsc::tracing_unbounded,
+    sp_database::Transaction,
     sp_keystore::KeystorePtr,
-    sp_timestamp,
+    sp_state_machine::{Backend as StateMachineBackend, StorageCollection},
+    sp_storage, sp_timestamp,
     substrate_frame_rpc_system::SystemApiServer,
 };
 use std::sync::Arc;
@@ -82,16 +93,20 @@ pub fn new(
     // every 6 seconds. This will have to change.
     let default_block_time = 6000;
     let (mut sink, commands_stream) = futures::channel::mpsc::channel(1024);
+    let backend_clone = backend.clone();
     task_manager.spawn_handle().spawn("block_authoring", "anvil-polkadot", async move {
+        let backend = backend_clone;
         loop {
             futures_timer::Delay::new(std::time::Duration::from_millis(default_block_time)).await;
+            let (sender, recv) = futures::channel::oneshot::channel();
             sink.try_send(sc_consensus_manual_seal::EngineCommand::SealNewBlock {
                 create_empty: true,
-                finalize: true,
+                finalize: false,
                 parent_hash: None,
-                sender: None,
+                sender: Some(sender),
             })
             .unwrap();
+            recv.await.unwrap().unwrap();
         }
     });
 
@@ -114,8 +129,73 @@ pub fn new(
         "substrate",
         authorship_future,
     );
+    let mut import_notification_stream = client.import_notification_stream();
+    let backend_clone = backend.clone();
 
-    Ok(Service { task_manager, client, backend, tx_pool: transaction_pool, rpc_handlers })
+    task_manager.spawn_handle().spawn(
+        "block-import-notifications",
+        Some("block-import"),
+        async move {
+            while let Some(notification) = import_notification_stream.next().await {
+                let prev_state =
+                    backend.state_at(notification.hash, TrieCacheContext::Trusted).unwrap();
+                let (root, mut db_updates) = prev_state.full_storage_root(
+                    [(
+                        hex::decode(
+                            "c2261276cc9d1f8598ea4b6a74b15c2f57c875e4cff74148e4628f264b974c80",
+                        )
+                        .unwrap()
+                        .as_slice(),
+                        Some(0u128.encode().as_slice()),
+                    )]
+                    .into_iter(),
+                    std::iter::empty::<(
+                        &sp_storage::ChildInfo,
+                        std::iter::Empty<(&'_ [u8], Option<&'_ [u8]>)>,
+                    )>(),
+                    polkadot_sdk::sp_version::StateVersion::V1,
+                );
+
+                let (db, state_col) = backend.expose_db();
+                let mut changeset: sc_state_db::ChangeSet<Vec<u8>> =
+                    sc_state_db::ChangeSet::default();
+
+                for (mut key, (val, rc)) in db_updates.drain() {
+                    println!("key: 0x{}, val: {:?}", hex::encode(&key), val);
+                    let _prefix = key.drain(0..key.len() - 32);
+                    drop(_prefix);
+                    changeset.inserted.push((key, val.to_vec()));
+                }
+                let mut transaction = Transaction::new();
+
+                for (key, val) in changeset.inserted.into_iter() {
+                    transaction.set_from_vec(state_col, &key[..], val);
+                }
+                db.commit(transaction).unwrap();
+
+                // let mut op = backend.begin_operation().unwrap();
+                // backend.begin_state_operation(&mut op, Default::default()).unwrap();
+                // let updates: StorageCollection = vec![(
+                //     hex::decode("
+                // c2261276cc9d1f8598ea4b6a74b15c2f57c875e4cff74148e4628f264b974c80")
+                //         .unwrap(),
+                //     Some(0u128.encode()),
+                // )];
+                // op.update_storage(updates, Default::default()).unwrap();
+                // op.set_block_data(notification.header, None, None, None, NewBlockState::Final)
+                //     .unwrap();
+                // backend.commit_operation(op).unwrap();
+            }
+        },
+    );
+
+    Ok(Service {
+        task_manager,
+        client,
+        backend: backend_clone,
+        tx_pool: transaction_pool,
+        rpc_handlers,
+    })
 }
 
 fn spawn_rpc_server(

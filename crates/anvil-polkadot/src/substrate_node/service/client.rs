@@ -189,13 +189,14 @@ impl CallApiAt<Block> for Client {
     type StateBackend = <InnerClient as CallApiAt<Block>>::StateBackend;
 
     fn call_api_at(&self, params: CallApiAtParams<'_, Block>) -> Result<Vec<u8>, sp_api::ApiError> {
-        if params.function == "Core_initialize_block" {
-            params.overlayed_changes.borrow_mut().set_storage(
-                hex::decode("c2261276cc9d1f8598ea4b6a74b15c2f57c875e4cff74148e4628f264b974c80")
-                    .unwrap(),
-                Some(0u128.encode()),
-            );
-        }
+        tracing::error!("Calling API method: {}", params.function);
+        // if params.function == "Core_initialize_block" {
+        //     params.overlayed_changes.borrow_mut().set_storage(
+        //         hex::decode("c2261276cc9d1f8598ea4b6a74b15c2f57c875e4cff74148e4628f264b974c80")
+        //             .unwrap(),
+        //         Some(0u128.encode()),
+        //     );
+        // }
 
         // if params.function == "BlockBuilder_finalize_block" {
         //     params.overlayed_changes.borrow_mut().set_storage(
