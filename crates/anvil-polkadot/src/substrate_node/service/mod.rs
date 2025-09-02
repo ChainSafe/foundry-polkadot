@@ -23,7 +23,7 @@ use polkadot_sdk::{
 use std::sync::Arc;
 use substrate_runtime::{Block, RuntimeApi};
 
-use crate::AnvilNodeConfig;
+use crate::{substrate_node::service::client::Executor, AnvilNodeConfig};
 use client::Client;
 
 mod client;
@@ -47,13 +47,8 @@ pub fn new(
     _anvil_config: &AnvilNodeConfig,
     config: Configuration,
 ) -> Result<Service, ServiceError> {
-    let (inner_client, backend, keystore_container, mut task_manager) =
-        sc_service::new_full_parts::<Block, RuntimeApi, _>(
-            &config,
-            None,
-            sc_service::new_wasm_executor(&config.executor),
-        )?;
-    let client = Arc::new(Client::new(inner_client));
+    let (client, backend, keystore, mut task_manager) =
+        client::new_client(&config, sc_service::new_wasm_executor(&config.executor))?;
 
     let transaction_pool = Arc::from(
         sc_transaction_pool::Builder::new(
@@ -77,7 +72,7 @@ pub fn new(
         client.clone(),
         config,
         transaction_pool.clone(),
-        keystore_container.keystore(),
+        keystore,
         backend.clone(),
     )?;
 
@@ -129,73 +124,8 @@ pub fn new(
         "substrate",
         authorship_future,
     );
-    let mut import_notification_stream = client.import_notification_stream();
-    let backend_clone = backend.clone();
 
-    task_manager.spawn_handle().spawn(
-        "block-import-notifications",
-        Some("block-import"),
-        async move {
-            while let Some(notification) = import_notification_stream.next().await {
-                let prev_state =
-                    backend.state_at(notification.hash, TrieCacheContext::Trusted).unwrap();
-                let (root, mut db_updates) = prev_state.full_storage_root(
-                    [(
-                        hex::decode(
-                            "c2261276cc9d1f8598ea4b6a74b15c2f57c875e4cff74148e4628f264b974c80",
-                        )
-                        .unwrap()
-                        .as_slice(),
-                        Some(0u128.encode().as_slice()),
-                    )]
-                    .into_iter(),
-                    std::iter::empty::<(
-                        &sp_storage::ChildInfo,
-                        std::iter::Empty<(&'_ [u8], Option<&'_ [u8]>)>,
-                    )>(),
-                    polkadot_sdk::sp_version::StateVersion::V1,
-                );
-
-                let (db, state_col) = backend.expose_db();
-                let mut changeset: sc_state_db::ChangeSet<Vec<u8>> =
-                    sc_state_db::ChangeSet::default();
-
-                for (mut key, (val, rc)) in db_updates.drain() {
-                    println!("key: 0x{}, val: {:?}", hex::encode(&key), val);
-                    let _prefix = key.drain(0..key.len() - 32);
-                    drop(_prefix);
-                    changeset.inserted.push((key, val.to_vec()));
-                }
-                let mut transaction = Transaction::new();
-
-                for (key, val) in changeset.inserted.into_iter() {
-                    transaction.set_from_vec(state_col, &key[..], val);
-                }
-                db.commit(transaction).unwrap();
-
-                // let mut op = backend.begin_operation().unwrap();
-                // backend.begin_state_operation(&mut op, Default::default()).unwrap();
-                // let updates: StorageCollection = vec![(
-                //     hex::decode("
-                // c2261276cc9d1f8598ea4b6a74b15c2f57c875e4cff74148e4628f264b974c80")
-                //         .unwrap(),
-                //     Some(0u128.encode()),
-                // )];
-                // op.update_storage(updates, Default::default()).unwrap();
-                // op.set_block_data(notification.header, None, None, None, NewBlockState::Final)
-                //     .unwrap();
-                // backend.commit_operation(op).unwrap();
-            }
-        },
-    );
-
-    Ok(Service {
-        task_manager,
-        client,
-        backend: backend_clone,
-        tx_pool: transaction_pool,
-        rpc_handlers,
-    })
+    Ok(Service { task_manager, client, backend, tx_pool: transaction_pool, rpc_handlers })
 }
 
 fn spawn_rpc_server(
