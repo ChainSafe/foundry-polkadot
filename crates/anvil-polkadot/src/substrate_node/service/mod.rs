@@ -1,30 +1,21 @@
-use codec::Encode;
-use foundry_evm::backend;
-use futures::StreamExt;
+use parking_lot::Mutex;
 use polkadot_sdk::{
-    sc_basic_authorship,
-    sc_client_api::{
-        Backend as BackendT, BlockImportOperation, BlockchainEvents, NewBlockState,
-        TrieCacheContext,
-    },
-    sc_consensus, sc_consensus_manual_seal,
+    sc_basic_authorship, sc_consensus, sc_consensus_manual_seal,
     sc_network_types::{self, multiaddr::Multiaddr},
     sc_rpc_api::DenyUnsafe,
     sc_service::{self, error::Error as ServiceError, Configuration, RpcHandlers, TaskManager},
-    sc_state_db,
     sc_transaction_pool::{self},
     sc_utils::mpsc::tracing_unbounded,
-    sp_database::Transaction,
     sp_keystore::KeystorePtr,
-    sp_state_machine::{Backend as StateMachineBackend, StorageCollection},
-    sp_storage, sp_timestamp,
+    sp_timestamp,
     substrate_frame_rpc_system::SystemApiServer,
 };
 use std::sync::Arc;
-use substrate_runtime::{Block, RuntimeApi};
+use substrate_runtime::Block;
 
-use crate::{substrate_node::service::client::Executor, AnvilNodeConfig};
+use crate::AnvilNodeConfig;
 use client::Client;
+pub use client::StorageOverrides;
 
 mod client;
 
@@ -40,6 +31,7 @@ pub struct Service {
     pub backend: Arc<Backend>,
     pub tx_pool: Arc<TransactionPoolHandle>,
     pub rpc_handlers: RpcHandlers,
+    pub storage_overrides: Arc<Mutex<StorageOverrides>>,
 }
 
 /// Builds a new service for a full client.
@@ -47,8 +39,13 @@ pub fn new(
     _anvil_config: &AnvilNodeConfig,
     config: Configuration,
 ) -> Result<Service, ServiceError> {
-    let (client, backend, keystore, mut task_manager) =
-        client::new_client(&config, sc_service::new_wasm_executor(&config.executor))?;
+    let storage_overrides = Arc::new(Mutex::new(StorageOverrides::new()));
+
+    let (client, backend, keystore, mut task_manager) = client::new_client(
+        &config,
+        sc_service::new_wasm_executor(&config.executor),
+        storage_overrides.clone(),
+    )?;
 
     let transaction_pool = Arc::from(
         sc_transaction_pool::Builder::new(
@@ -88,9 +85,7 @@ pub fn new(
     // every 6 seconds. This will have to change.
     let default_block_time = 6000;
     let (mut sink, commands_stream) = futures::channel::mpsc::channel(1024);
-    let backend_clone = backend.clone();
     task_manager.spawn_handle().spawn("block_authoring", "anvil-polkadot", async move {
-        let backend = backend_clone;
         loop {
             futures_timer::Delay::new(std::time::Duration::from_millis(default_block_time)).await;
             let (sender, recv) = futures::channel::oneshot::channel();
@@ -125,7 +120,14 @@ pub fn new(
         authorship_future,
     );
 
-    Ok(Service { task_manager, client, backend, tx_pool: transaction_pool, rpc_handlers })
+    Ok(Service {
+        task_manager,
+        client,
+        backend,
+        tx_pool: transaction_pool,
+        rpc_handlers,
+        storage_overrides,
+    })
 }
 
 fn spawn_rpc_server(

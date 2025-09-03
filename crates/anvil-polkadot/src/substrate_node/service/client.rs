@@ -1,43 +1,29 @@
 use codec::Encode;
+use lru::LruCache;
+use parking_lot::Mutex;
 use polkadot_sdk::{
-    parachains_common::{Hash, Header},
+    parachains_common::Hash,
     sc_chain_spec::get_extension,
     sc_client_api::{
-        self, backend::Finalizer, blockchain, client::ClientInfo,
-        execution_extensions::ExecutionExtensions, Backend as BackendT, BadBlocks, BlockBackend,
-        BlockchainEvents, CallExecutor, ClientImportOperation, ExecutorProvider, ForkBlocks,
-        KeysIter, PairsIter, ProofProvider, StorageProvider, UsageProvider,
+        execution_extensions::ExecutionExtensions, Backend as BackendT, BadBlocks, CallExecutor,
+        ForkBlocks,
     },
-    sc_consensus::{BlockCheckParams, BlockImport, BlockImportParams, ImportResult},
     sc_executor::{self, RuntimeVersion, RuntimeVersionOf, WasmExecutor},
     sc_service::{
         self, new_db_backend, GenesisBlockBuilder, KeystoreContainer, LocalCallExecutor,
         TaskManager,
     },
-    sp_api::{
-        self, ApiRef, CallApiAt, CallApiAtParams, CallContext, ConstructRuntimeApi, ProofRecorder,
-        ProvideRuntimeApi,
-    },
-    sp_blockchain::{self, CachedHeaderMetadata, HeaderBackend, HeaderMetadata},
-    sp_consensus,
-    sp_core::{self, storage::StorageData},
+    sp_api::{CallContext, ProofRecorder},
+    sp_blockchain::{self, HeaderBackend},
+    sp_core::{self},
     sp_externalities, sp_io,
     sp_keystore::KeystorePtr,
-    sp_runtime::{
-        generic::{BlockId, SignedBlock},
-        traits::{BlockIdTo, HashingFor, NumberFor},
-        Justification, Justifications,
-    },
-    sp_state_machine::{
-        CompactProof, KeyValueStates, KeyValueStorageLevel, OverlayedChanges, StorageKey,
-        StorageProof, StorageValue,
-    },
-    sp_storage::{self, ChildInfo},
-    sp_trie::MerkleValue,
+    sp_runtime::{generic::BlockId, traits::HashingFor},
+    sp_state_machine::{OverlayedChanges, StorageKey, StorageProof, StorageValue},
     sp_version,
 };
-use std::{cell::RefCell, collections::HashMap, sync::Arc};
-use substrate_runtime::{Block, RuntimeApi, UncheckedExtrinsic};
+use std::{cell::RefCell, collections::HashMap, num::NonZeroUsize, sync::Arc};
+use substrate_runtime::{Block, RuntimeApi};
 
 use crate::substrate_node::service::Backend;
 
@@ -49,11 +35,69 @@ type InnerLocalCallExecutor = sc_service::client::LocalCallExecutor<
 
 pub type Client = sc_service::client::Client<Backend, Executor, Block, RuntimeApi>;
 
+mod well_known_keys {
+    // Hex-encode key: 0x9527366927478e710d3f7fb77c6d1f89
+    pub const CHAIN_ID: [u8; 16] = [
+        149u8, 39u8, 54u8, 105u8, 39u8, 71u8, 142u8, 113u8, 13u8, 63u8, 127u8, 183u8, 124u8, 109u8,
+        31u8, 137u8,
+    ];
+
+    // Hex-encoded key: 0xf0c365c3cf59d671eb72da0e7a4113c49f1f0515f462cdcf84e0f1d6045dfcbb
+    pub const TIMESTAMP: [u8; 32] = [
+        240, 195, 101, 195, 207, 89, 214, 113, 235, 114, 218, 14, 122, 65, 19, 196, 159, 31, 5, 21,
+        244, 98, 205, 207, 132, 224, 241, 214, 4, 93, 252, 187,
+    ];
+}
+
+pub struct StorageOverrides {
+    per_block: LruCache<Hash, HashMap<StorageKey, StorageValue>>,
+}
+
+impl StorageOverrides {
+    pub fn new() -> Self {
+        Self { per_block: LruCache::new(NonZeroUsize::new(10).expect("10 is greater than 0")) }
+    }
+
+    pub fn set_chain_id(&mut self, latest_block: Hash, id: u64) {
+        let mut changeset = HashMap::with_capacity(1);
+        changeset.insert(well_known_keys::CHAIN_ID.to_vec(), id.encode());
+
+        self.add(latest_block, changeset);
+    }
+
+    pub fn set_timestamp(&mut self, latest_block: Hash, timestamp: u64) {
+        let mut changeset = HashMap::with_capacity(1);
+        changeset.insert(well_known_keys::TIMESTAMP.to_vec(), timestamp.encode());
+
+        self.add(latest_block, changeset);
+    }
+
+    fn add(&mut self, latest_block: Hash, changeset: HashMap<StorageKey, StorageValue>) {
+        if let Some(per_block) = self.per_block.get_mut(&latest_block) {
+            per_block.extend(changeset.into_iter());
+        } else {
+            self.per_block.put(latest_block, changeset);
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct Executor {
     inner: InnerLocalCallExecutor,
-    overrides: HashMap<StorageKey, StorageValue>,
+    storage_overrides: Arc<Mutex<StorageOverrides>>,
     backend: Arc<Backend>,
+}
+
+impl Executor {
+    fn apply_overrides(&self, hash: &Hash, overlay: &mut OverlayedChanges<HashingFor<Block>>) {
+        let Some(overrides) = self.storage_overrides.lock().per_block.get(hash).cloned() else {
+            return
+        };
+
+        for (key, val) in overrides {
+            overlay.set_storage(key, Some(val));
+        }
+    }
 }
 
 impl CallExecutor<Block> for Executor {
@@ -73,17 +117,13 @@ impl CallExecutor<Block> for Executor {
         context: CallContext,
     ) -> sp_blockchain::Result<Vec<u8>> {
         if context == CallContext::Offchain {
-            println!("Call: {}", method);
-            let mut changes = OverlayedChanges::default();
-            changes.set_storage(
-                hex::decode("c2261276cc9d1f8598ea4b6a74b15c2f57c875e4cff74148e4628f264b974c80")
-                    .unwrap(),
-                Some(0u128.encode()),
-            );
-
             let at_number =
                 self.backend.blockchain().expect_block_number_from_id(&BlockId::Hash(at_hash))?;
             let extensions = self.execution_extensions().extensions(at_hash, at_number);
+
+            let mut changes = OverlayedChanges::default();
+
+            self.apply_overrides(&at_hash, &mut changes);
 
             self.contextual_call(
                 at_hash,
@@ -110,11 +150,7 @@ impl CallExecutor<Block> for Executor {
         extensions: &RefCell<sp_externalities::Extensions>,
     ) -> Result<Vec<u8>, sp_blockchain::Error> {
         if method == "Core_initialize_block" && call_context == CallContext::Onchain {
-            changes.borrow_mut().set_storage(
-                hex::decode("c2261276cc9d1f8598ea4b6a74b15c2f57c875e4cff74148e4628f264b974c80")
-                    .unwrap(),
-                Some(0u128.encode()),
-            );
+            self.apply_overrides(&at_hash, &mut changes.borrow_mut());
         }
 
         self.inner.contextual_call(
@@ -155,6 +191,7 @@ impl RuntimeVersionOf for Executor {
 pub fn new_client(
     config: &sc_service::Configuration,
     executor: WasmExecutor,
+    storage_overrides: Arc<Mutex<StorageOverrides>>,
 ) -> Result<(Arc<Client>, Arc<Backend>, KeystorePtr, TaskManager), sc_service::error::Error> {
     let backend = new_db_backend(config.db_config())?;
 
@@ -199,7 +236,7 @@ pub fn new_client(
             execution_extensions,
         )?;
         let executor =
-            Executor { inner: inner_executor, overrides: HashMap::new(), backend: backend.clone() };
+            Executor { inner: inner_executor, storage_overrides, backend: backend.clone() };
 
         Client::new(
             backend.clone(),

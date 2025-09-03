@@ -1,30 +1,48 @@
 use super::ApiRequest;
-use crate::substrate_node::service::Service;
+use crate::substrate_node::service::{Backend, Service, StorageOverrides};
 use anvil_core::eth::EthRequest;
 use anvil_rpc::{error::RpcError, response::ResponseResult};
-use foundry_common::sh_println;
 use futures::{channel::mpsc, StreamExt};
+use parking_lot::Mutex;
+use polkadot_sdk::sc_client_api::{Backend as _, HeaderBackend};
+use std::sync::Arc;
 
 pub struct ApiServer {
     req_receiver: mpsc::Receiver<ApiRequest>,
+    storage_overrides: Arc<Mutex<StorageOverrides>>,
+    backend: Arc<Backend>,
 }
 
 impl ApiServer {
-    pub fn new(_substrate_service: &Service, req_receiver: mpsc::Receiver<ApiRequest>) -> Self {
-        Self { req_receiver }
+    pub fn new(substrate_service: &Service, req_receiver: mpsc::Receiver<ApiRequest>) -> Self {
+        Self {
+            req_receiver,
+            storage_overrides: substrate_service.storage_overrides.clone(),
+            backend: substrate_service.backend.clone(),
+        }
     }
 
     pub async fn run(mut self) {
         while let Some(msg) = self.req_receiver.next().await {
-            sh_println!("GOT REQUEST: {:?}", msg.req).unwrap();
-
             let resp = self.execute(msg.req).await;
 
             msg.resp_sender.send(resp).expect("Dropped receiver");
         }
     }
 
-    pub async fn execute(&mut self, _req: EthRequest) -> ResponseResult {
-        ResponseResult::Error(RpcError::internal_error())
+    pub async fn execute(&mut self, req: EthRequest) -> ResponseResult {
+        match req {
+            EthRequest::SetChainId(chain_id) => {
+                let latest_block = self.backend.blockchain().info().best_hash;
+
+                {
+                    let mut storage_overrides = self.storage_overrides.lock();
+                    storage_overrides.set_chain_id(latest_block, chain_id);
+                }
+
+                ResponseResult::Success(serde_json::Value::Null)
+            }
+            _ => ResponseResult::Error(RpcError::internal_error()),
+        }
     }
 }
