@@ -9,10 +9,10 @@ use alloy_network::{
 };
 use alloy_primitives::{hex, Address, Bloom, Bytes, FixedBytes, Uint, I256, U256, U64, U8};
 use alloy_rpc_types::{
-    AccessListItem, Block, BlockTransactions, Header, Log, Transaction, TransactionReceipt,
+    AccessListItem, Block, BlockTransactions, Header, Log, SignedAuthorization, Transaction,
+    TransactionReceipt,
 };
 use alloy_serde::{OtherFields, WithOtherFields};
-use revm_primitives::SignedAuthorization;
 use serde::Deserialize;
 
 /// length of the name column for pretty formatting `{:>20}{value}`
