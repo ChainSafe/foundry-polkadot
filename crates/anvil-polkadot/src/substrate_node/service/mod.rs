@@ -14,8 +14,7 @@ use std::sync::Arc;
 use substrate_runtime::Block;
 
 use crate::AnvilNodeConfig;
-use client::Client;
-pub use client::StorageOverrides;
+pub use client::{BackendWithOverlay, Client, StorageOverrides};
 
 mod client;
 

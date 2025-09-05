@@ -1,13 +1,17 @@
-use codec::Encode;
+use alloy_primitives::Address;
+use codec::{Decode, Encode};
 use lru::LruCache;
 use parking_lot::Mutex;
 use polkadot_sdk::{
-    parachains_common::Hash,
+    pallet_balances::AccountData,
+    pallet_revive::AccountInfo,
+    parachains_common::{AccountId, Hash, Nonce},
     sc_chain_spec::get_extension,
     sc_client_api::{
         execution_extensions::ExecutionExtensions, Backend as BackendT, BadBlocks, CallExecutor,
-        ForkBlocks,
+        ForkBlocks, StateBackend, TrieCacheContext,
     },
+    sc_client_db::BlockchainDb,
     sc_executor::{self, RuntimeVersion, RuntimeVersionOf, WasmExecutor},
     sc_service::{
         self, new_db_backend, GenesisBlockBuilder, KeystoreContainer, LocalCallExecutor,
@@ -16,14 +20,18 @@ use polkadot_sdk::{
     sp_api::{CallContext, ProofRecorder},
     sp_blockchain::{self, HeaderBackend},
     sp_core::{self},
-    sp_externalities, sp_io,
+    sp_externalities,
+    sp_io::{
+        self,
+        hashing::{blake2_128, twox_128},
+    },
     sp_keystore::KeystorePtr,
     sp_runtime::{generic::BlockId, traits::HashingFor},
     sp_state_machine::{OverlayedChanges, StorageKey, StorageProof, StorageValue},
     sp_version,
 };
 use std::{cell::RefCell, collections::HashMap, num::NonZeroUsize, sync::Arc};
-use substrate_runtime::{Block, RuntimeApi};
+use substrate_runtime::{Balance, Block, RuntimeApi};
 
 use crate::substrate_node::service::Backend;
 
@@ -36,6 +44,11 @@ type InnerLocalCallExecutor = sc_service::client::LocalCallExecutor<
 pub type Client = sc_service::client::Client<Backend, Executor, Block, RuntimeApi>;
 
 mod well_known_keys {
+    use polkadot_sdk::sp_core::H160;
+
+    pub const TOTAL_ISSUANCE: &str =
+        "c2261276cc9d1f8598ea4b6a74b15c2f57c875e4cff74148e4628f264b974c80";
+
     // Hex-encode key: 0x9527366927478e710d3f7fb77c6d1f89
     pub const CHAIN_ID: [u8; 16] = [
         149u8, 39u8, 54u8, 105u8, 39u8, 71u8, 142u8, 113u8, 13u8, 63u8, 127u8, 183u8, 124u8, 109u8,
@@ -47,6 +60,112 @@ mod well_known_keys {
         240, 195, 101, 195, 207, 89, 214, 113, 235, 114, 218, 14, 122, 65, 19, 196, 159, 31, 5, 21,
         244, 98, 205, 207, 132, 224, 241, 214, 4, 93, 252, 187,
     ];
+
+    pub fn balance(account_id: AccountId) -> Vec<u8> {
+        let mut key = Vec::new();
+        key.extend_from_slice(&twox_128("Balances".as_bytes()));
+        key.extend_from_slice(&twox_128("Account".as_bytes()));
+        key.extend_from_slice(&blake2_128(account_id.as_ref()));
+        key.extend_from_slice(&account_id.encode());
+
+        key
+    }
+
+    pub fn nonce(account_id: AccountId) -> Vec<u8> {
+        let mut key = Vec::new();
+        key.extend_from_slice(&twox_128("System".as_bytes()));
+        key.extend_from_slice(&twox_128("Account".as_bytes()));
+        key.extend_from_slice(&blake2_128(account_id.as_ref()));
+        key.extend_from_slice(&account_id.encode());
+
+        key
+    }
+
+    pub fn account_info(address: H160) -> Vec<u8> {
+        let mut key = Vec::new();
+        key.extend_from_slice(&twox_128("Revive".as_bytes()));
+        key.extend_from_slice(&twox_128("AccountInfoOf".as_bytes()));
+        key.extend_from_slice(&address.encode());
+
+        key
+    }
+}
+
+pub struct BackendWithOverlay {
+    backend: Arc<Backend>,
+    overrides: Arc<Mutex<StorageOverrides>>,
+}
+
+impl BackendWithOverlay {
+    pub fn new(backend: Arc<Backend>, overrides: Arc<Mutex<StorageOverrides>>) -> Self {
+        Self { backend, overrides }
+    }
+
+    pub fn blockchain(&self) -> &BlockchainDb<Block> {
+        self.backend.blockchain()
+    }
+
+    pub fn read_balance(&self, hash: Hash, account_id: AccountId) -> Option<AccountData<Balance>> {
+        let key = well_known_keys::balance(account_id);
+
+        self.read_state(hash, key)
+            .unwrap()
+            .map(|value| AccountData::<Balance>::decode(&mut &[..]).unwrap())
+    }
+
+    pub fn read_total_issuance(&self, hash: Hash) -> Balance {
+        let key = hex::decode(well_known_keys::TOTAL_ISSUANCE).unwrap();
+
+        println!("total issuance key: {:?}", key.clone());
+
+        self.read_state(hash, key).unwrap().map(|value| Balance::decode(&mut &[..]).unwrap())
+    }
+
+    pub fn read_account_info(&self, hash: Hash, address: Address) -> Option<AccountInfo> {
+        let key = well_known_keys::account_info(account_id);
+
+        self.read_state(hash, key).unwrap().map(|value| AccountInfo::decode(&mut &[..]).unwrap())
+    }
+
+    pub fn inject_nonce(&self, at: Hash, account_id: AccountId, value: Nonce) {
+        let mut overrides = self.overrides.lock();
+        overrides.set_nonce(at, account_id, value);
+    }
+
+    pub fn inject_chain_id(&self, at: Hash, chain_id: u64) {
+        let mut overrides = self.overrides.lock();
+        overrides.set_chain_id(at, chain_id);
+    }
+
+    pub fn inject_total_issuance(&self, at: Hash, value: Balance) {
+        let mut overrides = self.overrides.lock();
+        overrides.set_total_issuance(at, value);
+    }
+
+    pub fn inject_balance(&self, at: Hash, account_id: AccountId, value: AccountData<Balance>) {
+        let mut overrides = self.overrides.lock();
+        overrides.set_balance(at, account_id, value);
+    }
+
+    pub fn inject_account_info(&self, at: Hash, address: Address, info: AccountInfo) {
+        let mut overrides = self.overrides.lock();
+        overrides.set_account_info(at, address, info);
+    }
+
+    fn read_state(&self, hash: Hash, key: StorageKey) -> Option<StorageValue> {
+        let overriden_val = {
+            let guard = self.overrides.lock();
+
+            guard.per_block(hash).get(&key)
+        };
+
+        if let Some(val) = overriden_val {
+            return val
+        }
+
+        let state = self.backend.state_at(hash, TrieCacheContext::Trusted).unwrap();
+        state.storage(key.as_slice())
+    }
 }
 
 pub struct StorageOverrides {
@@ -58,16 +177,53 @@ impl StorageOverrides {
         Self { per_block: LruCache::new(NonZeroUsize::new(10).expect("10 is greater than 0")) }
     }
 
-    pub fn set_chain_id(&mut self, latest_block: Hash, id: u64) {
+    fn set_chain_id(&mut self, latest_block: Hash, id: u64) {
         let mut changeset = HashMap::with_capacity(1);
         changeset.insert(well_known_keys::CHAIN_ID.to_vec(), id.encode());
 
         self.add(latest_block, changeset);
     }
 
-    pub fn set_timestamp(&mut self, latest_block: Hash, timestamp: u64) {
+    fn set_timestamp(&mut self, latest_block: Hash, timestamp: u64) {
         let mut changeset = HashMap::with_capacity(1);
         changeset.insert(well_known_keys::TIMESTAMP.to_vec(), timestamp.encode());
+
+        self.add(latest_block, changeset);
+    }
+
+    fn set_nonce(&mut self, latest_block: Hash, account_id: AccountId, nonce: Nonce) {
+        let mut changeset = HashMap::with_capacity(1);
+        changeset.insert(well_known_keys::nonce(account_id), nonce.encode());
+
+        self.add(latest_block, changeset);
+    }
+
+    fn set_total_issuance(&mut self, latest_block: Hash, value: Balance) {
+        let mut changeset = HashMap::with_capacity(1);
+        changeset
+            .insert(hex::decode(well_known_keys::TOTAL_ISSUANCE).unwrap().to_vec(), value.encode());
+
+        self.add(latest_block, changeset);
+    }
+
+    fn set_balance(
+        &mut self,
+        latest_block: Hash,
+        account_id: AccountId,
+        value: AccountData<Balance>,
+    ) {
+        let mut changeset = HashMap::with_capacity(1);
+        changeset.insert(well_known_keys::balance(account_id), value.encode());
+
+        self.add(latest_block, changeset);
+    }
+
+    fn set_account_info(&mut self, latest_block: Hash, address: Address, info: AccountInfo) {
+        let mut changeset = HashMap::with_capacity(1);
+        changeset.insert(
+            hex::decode(well_known_keys::account_info(address)).unwrap().to_vec(),
+            info.encode(),
+        );
 
         self.add(latest_block, changeset);
     }
