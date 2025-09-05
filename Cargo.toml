@@ -198,7 +198,7 @@ revive-env = { path = "crates/revive-env" }
 revive-strategy = { path = "crates/revive-strategy" }
 
 # solc & compilation utilities
-foundry-block-explorers = { version = "0.13.3", default-features = false }
+foundry-block-explorers = { version = "0.14.0", default-features = false }
 foundry-compilers = { version = "0.14.0", default-features = false }
 foundry-fork-db = "0.16.0"
 solang-parser = { version = "=0.3.9", package = "foundry-solang-parser" }
