@@ -234,7 +234,7 @@ impl<'hir> Visit<'hir> for BytecodeDependencyCollector<'hir> {
                         for &var in clause.args {
                             self.visit_nested_var(var)?;
                         }
-                        for stmt in clause.block {
+                        for stmt in clause.block.stmts {
                             self.visit_stmt(stmt)?;
                         }
                     }
@@ -266,7 +266,7 @@ fn handle_call_expr(
                 // `new Counter {value: 333} (  address(this))`
                 // the offset will be used to replace `{value: 333} (  ` with `(`
                 let call_args_offset = if named_args.is_some() && !call_args.is_empty() {
-                    (call_args.span().lo() - ty_new.span.hi()).to_usize()
+                    (call_args.span.lo() - ty_new.span.hi()).to_usize()
                 } else {
                     0
                 };
