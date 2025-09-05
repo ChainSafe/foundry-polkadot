@@ -64,9 +64,9 @@ pub fn abi_decode_calldata(
     }
 
     let res = if input {
-        func.abi_decode_input(calldata, false)
+        func.abi_decode_input(calldata)
     } else {
-        func.abi_decode_output(calldata, false)
+        func.abi_decode_output(calldata)
     }?;
 
     // in case the decoding worked but nothing was decoded
