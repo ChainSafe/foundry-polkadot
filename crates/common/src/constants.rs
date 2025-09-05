@@ -2,7 +2,7 @@
 
 use alloy_consensus::Typed2718;
 use alloy_network::AnyTxEnvelope;
-use alloy_primitives::{address, Address, PrimitiveSignature, B256};
+use alloy_primitives::{address, Address, Signature as PrimitiveSignature, B256};
 use std::time::Duration;
 
 /// The dev chain-id, inherited from hardhat
