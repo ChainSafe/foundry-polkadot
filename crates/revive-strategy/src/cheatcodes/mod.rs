@@ -30,7 +30,7 @@ use polkadot_sdk::{
 
 use revm::{
     interpreter::{
-        opcode as op, CallInputs, CreateOutcome, Gas, InstructionResult, Interpreter,
+        opcode as op, CallInputs, CallOutcome, CreateOutcome, Gas, InstructionResult, Interpreter,
         InterpreterResult,
     },
     primitives::{CreateScheme, SignedAuthorization},
@@ -39,6 +39,7 @@ pub trait PvmCheatcodeInspectorStrategyBuilder {
     fn new_pvm(
         test_externalities: Arc<Mutex<sp_io::TestExternalities>>,
         dual_compiled_contracts: DualCompiledContracts,
+        resolc_startup: bool,
     ) -> Self;
 }
 impl PvmCheatcodeInspectorStrategyBuilder for CheatcodeInspectorStrategy {
@@ -46,12 +47,14 @@ impl PvmCheatcodeInspectorStrategyBuilder for CheatcodeInspectorStrategy {
     fn new_pvm(
         test_externalities: Arc<Mutex<sp_io::TestExternalities>>,
         dual_compiled_contracts: DualCompiledContracts,
+        resolc_startup: bool,
     ) -> Self {
         Self {
             runner: &PvmCheatcodeInspectorStrategyRunner,
             context: Box::new(PvmCheatcodeInspectorStrategyContext::new(
                 test_externalities,
                 dual_compiled_contracts,
+                resolc_startup,
             )),
         }
     }
@@ -63,6 +66,8 @@ pub struct PvmCheatcodeInspectorStrategyContext {
     /// Whether we're using PVM mode
     /// Currently unused but kept for future PVM-specific logic
     pub using_pvm: bool,
+    /// Whether to start in PVM mode (from config)
+    pub resolc_startup: bool,
     pub revive_test_externalities: Arc<Mutex<sp_io::TestExternalities>>,
     pub dual_compiled_contracts: DualCompiledContracts,
 }
@@ -71,9 +76,11 @@ impl PvmCheatcodeInspectorStrategyContext {
     pub fn new(
         revive_test_externalities: Arc<Mutex<sp_io::TestExternalities>>,
         dual_compiled_contracts: DualCompiledContracts,
+        resolc_startup: bool,
     ) -> Self {
         Self {
             using_pvm: false, // Start in EVM mode by default
+            resolc_startup,
             revive_test_externalities,
             dual_compiled_contracts,
         }
@@ -177,12 +184,17 @@ impl CheatcodeInspectorStrategyRunner for PvmCheatcodeInspectorStrategyRunner {
 
     fn post_initialize_interp(
         &self,
-        _ctx: &mut dyn CheatcodeInspectorStrategyContext,
+        ctx: &mut dyn CheatcodeInspectorStrategyContext,
         _interpreter: &mut Interpreter,
-        _ecx: Ecx<'_, '_, '_>,
+        ecx: Ecx<'_, '_, '_>,
     ) {
-        // PVM mode is enabled, but no special initialization needed for now
-        // Only intercept PVM-specific calls when needed in future implementations
+        let ctx = get_context_ref_mut(ctx);
+
+        if ctx.resolc_startup && !ctx.using_pvm {
+            tracing::info!("startup PVM migration initiated");
+            select_pvm(ctx, ecx);
+            tracing::info!("startup PVM migration completed");
+        }
     }
 
     fn pre_step_end(
@@ -412,6 +424,119 @@ impl foundry_cheatcodes::CheatcodeInspectorStrategyExt for PvmCheatcodeInspector
                         gas,
                     },
                     address: None,
+                })
+            }
+        }
+    }
+
+    /// Try handling the `CALL` within PVM.
+    ///
+    /// If `Some` is returned then the result must be returned immediately, else the call must be
+    /// handled in EVM.
+    fn revive_try_call(
+        &self,
+        state: &mut foundry_cheatcodes::Cheatcodes,
+        ecx: InnerEcx<'_, '_, '_>,
+        call: &CallInputs,
+        _executor: &mut dyn foundry_cheatcodes::CheatcodesExecutor,
+    ) -> Option<CallOutcome> {
+        let ctx = get_context_ref_mut(state.strategy.context.as_mut());
+
+        if !ctx.using_pvm {
+            return None;
+        }
+
+        if ecx
+            .db
+            .get_test_contract_address()
+            .map(|addr| call.bytecode_address == addr)
+            .unwrap_or_default()
+        {
+            tracing::info!(
+                "running call in EVM, instead of PVM (Test Contract) {:#?}",
+                call.bytecode_address
+            );
+            return None;
+        }
+
+        tracing::info!("running call in PVM {:#?}", call);
+
+        let max_gas =
+            <<Runtime as Config>::EthGasEncoder as GasEncoder<BalanceOf<Runtime>>>::encode(
+                Default::default(),
+                Weight::MAX,
+                1u128 << 99,
+            );
+        let gas_limit = sp_core::U256::from(call.gas_limit).min(max_gas);
+
+        let res = ctx.revive_test_externalities.lock().unwrap().execute_with(|| {
+            let origin = OriginFor::<Runtime>::signed(AccountId::to_fallback_account_id(
+                &H160::from_slice(call.caller.as_slice()),
+            ));
+            let evm_value = sp_core::U256::from_little_endian(&call.call_value().as_le_bytes());
+
+            let (gas_limit, storage_deposit_limit) =
+                <<Runtime as Config>::EthGasEncoder as GasEncoder<BalanceOf<Runtime>>>::decode(
+                    gas_limit,
+                )
+                .expect("gas limit is valid");
+            let storage_deposit_limit = DepositLimit::Balance(storage_deposit_limit);
+            let target = H160::from_slice(call.target_address.as_slice());
+
+            Pallet::<Runtime>::bare_call(
+                origin,
+                target,
+                evm_value,
+                gas_limit,
+                storage_deposit_limit,
+                call.input.to_vec(),
+            )
+        });
+
+        let mut gas = Gas::new(call.gas_limit);
+        let gas_used =
+            <<Runtime as Config>::EthGasEncoder as GasEncoder<BalanceOf<Runtime>>>::encode(
+                gas_limit,
+                res.gas_required,
+                res.storage_deposit.charge_or_zero(),
+            );
+        match res.result {
+            Ok(result) => {
+                let _ = gas.record_cost(gas_used.as_u64());
+
+                let outcome = if result.did_revert() {
+                    CallOutcome {
+                        result: InterpreterResult {
+                            result: InstructionResult::Revert,
+                            output: result.data.into(),
+                            gas,
+                        },
+                        memory_offset: call.return_memory_offset.clone(),
+                    }
+                } else {
+                    CallOutcome {
+                        result: InterpreterResult {
+                            result: InstructionResult::Return,
+                            output: result.data.into(),
+                            gas,
+                        },
+                        memory_offset: call.return_memory_offset.clone(),
+                    }
+                };
+
+                Some(outcome)
+            }
+            Err(e) => {
+                tracing::error!("Contract call failed: {e:#?}");
+                Some(CallOutcome {
+                    result: InterpreterResult {
+                        result: InstructionResult::Revert,
+                        output: Bytes::from_iter(
+                            format!("Contract call failed: {e:#?}").as_bytes(),
+                        ),
+                        gas,
+                    },
+                    memory_offset: call.return_memory_offset.clone(),
                 })
             }
         }

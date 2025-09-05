@@ -1,5 +1,9 @@
 use super::ApiRequest;
-use crate::substrate_node::service::{Backend, Service, StorageOverrides};
+use crate::{
+    logging::LoggingManager,
+    macros::node_info,
+    substrate_node::service::{Service, StorageOverrides},
+};
 use anvil_core::eth::EthRequest;
 use anvil_rpc::{error::RpcError, response::ResponseResult};
 use futures::{channel::mpsc, StreamExt};
@@ -11,12 +15,18 @@ pub struct ApiServer {
     req_receiver: mpsc::Receiver<ApiRequest>,
     storage_overrides: Arc<Mutex<StorageOverrides>>,
     backend: Arc<Backend>,
+    logging_manager: LoggingManager,
 }
 
 impl ApiServer {
-    pub fn new(substrate_service: &Service, req_receiver: mpsc::Receiver<ApiRequest>) -> Self {
+    pub fn new(
+        substrate_service: &Service,
+        req_receiver: mpsc::Receiver<ApiRequest>,
+        logging_manager: LoggingManager,
+    ) -> Self {
         Self {
             req_receiver,
+            logging_manager,
             storage_overrides: substrate_service.storage_overrides.clone(),
             backend: substrate_service.backend.clone(),
         }
@@ -41,6 +51,11 @@ impl ApiServer {
                 }
 
                 ResponseResult::Success(serde_json::Value::Null)
+            }
+            EthRequest::SetLogging(enabled) => {
+                node_info!("anvil_setLoggingEnabled");
+                self.logging_manager.set_enabled(enabled);
+                ResponseResult::Success(serde_json::Value::Bool(true))
             }
             _ => ResponseResult::Error(RpcError::internal_error()),
         }
