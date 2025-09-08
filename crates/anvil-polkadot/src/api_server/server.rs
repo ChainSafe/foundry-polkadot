@@ -2,24 +2,27 @@ use super::ApiRequest;
 use crate::{
     logging::LoggingManager,
     macros::node_info,
-    substrate_node::service::{Backend, BackendWithOverlay, Client, Service, StorageOverrides},
+    substrate_node::service::{
+        storage::{AccountInfo, AccountType},
+        BackendWithOverlay, Client, Service,
+    },
 };
-use alloy_primitives::U256;
+use alloy_primitives::{Address, U256};
 use anvil_core::eth::EthRequest;
 use anvil_rpc::{error::RpcError, response::ResponseResult};
-use codec::Decode;
 use futures::{channel::mpsc, StreamExt};
-use parking_lot::Mutex;
 use polkadot_sdk::{
     pallet_revive::ReviveApi,
+    pallet_revive_eth_rpc::subxt_client::src_chain::runtime_types::pallet_revive::storage::ContractInfo,
     parachains_common::{AccountId, Hash},
-    sc_client_api::{Backend as _, HeaderBackend},
+    sc_client_api::HeaderBackend,
     sc_service::RpcHandlers,
     sp_api::ProvideRuntimeApi,
+    sp_core::H256,
+    sp_io,
 };
-use serde_json::json;
 use std::sync::Arc;
-use substrate_runtime::Address;
+use substrate_runtime::Balance;
 
 pub struct ApiServer {
     req_receiver: mpsc::Receiver<ApiRequest>,
@@ -84,7 +87,8 @@ impl ApiServer {
                         .inject_total_issuance(latest_block, total_issuance.saturating_add(diff));
                 }
 
-                let mut account_info = self.backend.read_account_info(latest_block, address);
+                let mut account_info =
+                    self.backend.read_account_info(latest_block, address).unwrap();
 
                 if account_info.dust != dust {
                     account_info.dust = dust;
@@ -109,25 +113,26 @@ impl ApiServer {
                 let account_id = self.get_account_id(latest_block, address);
 
                 let code_hash = H256(sp_io::hashing::keccak_256(&bytes));
-                let account_info = self.backend.read_account_info(latest_block, address).unwrap_or_else(|| {
-                    let contract_info = ContractInfo::new(&address, 0u32.into(), code_hash);
+                let account_info =
+                    self.backend.read_account_info(latest_block, address).unwrap_or_else(|| {
+                        let contract_info = ContractInfo::new(&address, 0u32.into(), code_hash);
 
-                    AccountInfo { AccountType::Contract(info), dust: 0 }
-                });
+                        AccountInfo { account_type: AccountType::Contract(contract_info), dust: 0 }
+                    });
 
                 // if account info type is not contract, return
                 self.backend.inject_account_info(latest_block, address, account_info);
 
-                Bytecode::new_raw_checked(Bytes::from(code.to_vec())).unwrap();
+                // Bytecode::new_raw_checked(Bytes::from(code.to_vec())).unwrap();
 
-                let code_info = CodeInfo {
-                    owner: account_id,
-                    deposit: 0,
-                    refcount: 0,
-                    code_len: bytes.len(),
-                    code_type: BytecodeType::Evm,
-                    behaviour_version: Default::default(),
-                };
+                // let code_info = CodeInfo {
+                //     owner: account_id,
+                //     deposit: 0,
+                //     refcount: 0,
+                //     code_len: bytes.len(),
+                //     code_type: BytecodeType::Evm,
+                //     behaviour_version: Default::default(),
+                // };
 
                 // inject_pristine_code(bytes);
                 // inject_code_info(code_info);
@@ -137,7 +142,7 @@ impl ApiServer {
             EthRequest::SetStorageAt(address, key, value) => {
                 let latest_block = self.backend.blockchain().info().best_hash;
 
-                let account_info = self.backend.read_account_info(hash, address).unwrap();
+                let account_info = self.backend.read_account_info(latest_block, address).unwrap();
                 // get child trie id.
                 // Add the child trie to the storage overrides.
                 ResponseResult::Success(serde_json::Value::Null)
