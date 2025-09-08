@@ -1,5 +1,8 @@
-use super::ApiRequest;
 use crate::{
+    api_server::{
+        error::{Error, Result, ToRpcResponseResult},
+        ApiRequest,
+    },
     logging::LoggingManager,
     macros::node_info,
     substrate_node::service::{
@@ -7,19 +10,24 @@ use crate::{
         BackendWithOverlay, Client, Service,
     },
 };
-use alloy_primitives::{Address, U256};
+use alloy_primitives::{Address, Bytes, B256, U256};
 use anvil_core::eth::EthRequest;
 use anvil_rpc::{error::RpcError, response::ResponseResult};
+use codec::Encode;
 use futures::{channel::mpsc, StreamExt};
 use polkadot_sdk::{
     pallet_revive::ReviveApi,
-    pallet_revive_eth_rpc::subxt_client::src_chain::runtime_types::pallet_revive::storage::ContractInfo,
+    pallet_revive_eth_rpc::subxt_client::{
+        runtime_types::bounded_collections::bounded_vec::BoundedVec,
+        src_chain::runtime_types::pallet_revive::storage::ContractInfo,
+    },
     parachains_common::{AccountId, Hash},
     sc_client_api::HeaderBackend,
     sc_service::RpcHandlers,
     sp_api::ProvideRuntimeApi,
-    sp_core::H256,
+    sp_core::{Hasher, H160, H256},
     sp_io,
+    sp_runtime::traits::BlakeTwo256,
 };
 use std::sync::Arc;
 use substrate_runtime::Balance;
@@ -59,109 +67,145 @@ impl ApiServer {
     }
 
     pub async fn execute(&mut self, req: EthRequest) -> ResponseResult {
-        match req {
-            EthRequest::SetBalance(address, value) => {
-                let latest_block = self.backend.blockchain().info().best_hash;
-
-                let account_id = self.get_account_id(latest_block, address);
-                let mut balance_data =
-                    self.backend.read_balance(latest_block, account_id).unwrap_or_default();
-                let total_issuance = self.backend.read_total_issuance(latest_block);
-                let (new_balance, dust) = self.construct_balance_with_dust(latest_block, value);
-
-                let diff = new_balance as i128 - (balance_data.total() as i128);
-
-                if diff < 0 {
-                    let diff = diff.abs() as Balance;
-
-                    balance_data.free.saturating_sub(diff);
-                    self.backend.inject_balance(latest_block, account_id, balance_data);
-                    self.backend
-                        .inject_total_issuance(latest_block, total_issuance.saturating_sub(diff));
-                } else if diff > 0 {
-                    let diff = diff.abs() as Balance;
-
-                    balance_data.free.saturating_add(diff);
-                    self.backend.inject_balance(latest_block, account_id, balance_data);
-                    self.backend
-                        .inject_total_issuance(latest_block, total_issuance.saturating_add(diff));
-                }
-
-                let mut account_info =
-                    self.backend.read_account_info(latest_block, address).unwrap();
-
-                if account_info.dust != dust {
-                    account_info.dust = dust;
-
-                    self.backend.inject_account_info(latest_block, address, account_info);
-                }
-
-                ResponseResult::Success(serde_json::Value::Null)
-            }
-            EthRequest::SetNonce(address, value) => {
-                let latest_block = self.backend.blockchain().info().best_hash;
-
-                let account_id = self.get_account_id(latest_block, address);
-
-                self.backend.inject_nonce(latest_block, account_id, value.try_into().unwrap());
-
-                ResponseResult::Success(serde_json::Value::Null)
-            }
-            EthRequest::SetCode(address, bytes) => {
-                let latest_block = self.backend.blockchain().info().best_hash;
-
-                let account_id = self.get_account_id(latest_block, address);
-
-                let code_hash = H256(sp_io::hashing::keccak_256(&bytes));
-                let account_info =
-                    self.backend.read_account_info(latest_block, address).unwrap_or_else(|| {
-                        let contract_info = ContractInfo::new(&address, 0u32.into(), code_hash);
-
-                        AccountInfo { account_type: AccountType::Contract(contract_info), dust: 0 }
-                    });
-
-                // if account info type is not contract, return
-                self.backend.inject_account_info(latest_block, address, account_info);
-
-                // Bytecode::new_raw_checked(Bytes::from(code.to_vec())).unwrap();
-
-                // let code_info = CodeInfo {
-                //     owner: account_id,
-                //     deposit: 0,
-                //     refcount: 0,
-                //     code_len: bytes.len(),
-                //     code_type: BytecodeType::Evm,
-                //     behaviour_version: Default::default(),
-                // };
-
-                // inject_pristine_code(bytes);
-                // inject_code_info(code_info);
-
-                ResponseResult::Success(serde_json::Value::Null)
-            }
+        let res = match req.clone() {
+            EthRequest::SetBalance(address, value) => self.set_balance(address, value),
+            EthRequest::SetNonce(address, value) => self.set_nonce(address, value),
+            EthRequest::SetCode(address, bytes) => self.set_code(address, bytes),
             EthRequest::SetStorageAt(address, key, value) => {
-                let latest_block = self.backend.blockchain().info().best_hash;
-
-                let account_info = self.backend.read_account_info(latest_block, address).unwrap();
-                // get child trie id.
-                // Add the child trie to the storage overrides.
-                ResponseResult::Success(serde_json::Value::Null)
+                self.set_storage_at(address, key, value)
             }
-            EthRequest::SetChainId(chain_id) => {
-                let latest_block = self.backend.blockchain().info().best_hash;
-
-                self.backend.inject_chain_id(latest_block, chain_id);
-
-                ResponseResult::Success(serde_json::Value::Null)
-            }
-            EthRequest::SetLogging(enabled) => {
-                node_info!("anvil_setLoggingEnabled");
-                self.logging_manager.set_enabled(enabled);
-                ResponseResult::Success(serde_json::Value::Bool(true))
-            }
-            _ => ResponseResult::Error(RpcError::internal_error()),
+            EthRequest::SetChainId(chain_id) => self.set_chain_id(chain_id),
+            EthRequest::SetLogging(enabled) => self.set_logging(enabled),
+            _ => Err(Error::RpcUnimplemented),
         }
+        .to_rpc_result();
+
+        if let ResponseResult::Error(err) = &res {
+            node_info!("\nRPC request failed:");
+            node_info!("    Request: {:?}", res);
+            node_info!("    Error: {}\n", err);
+        }
+
+        res
     }
+
+    fn set_balance(&self, address: Address, value: U256) -> Result<()> {
+        node_info!("anvil_setBalance");
+
+        let latest_block = self.backend.blockchain().info().best_hash;
+
+        let account_id = self.get_account_id(latest_block, address);
+        let mut balance_data =
+            self.backend.read_balance(latest_block, account_id.clone())?.unwrap_or_default();
+        let total_issuance = self.backend.read_total_issuance(latest_block)?;
+        let (new_balance, dust) = self.construct_balance_with_dust(latest_block, value);
+
+        let diff = new_balance as i128 - (balance_data.total() as i128);
+
+        if diff < 0 {
+            let diff = diff.abs() as Balance;
+
+            balance_data.free = balance_data.free.saturating_sub(diff);
+            self.backend.inject_balance(latest_block, account_id, balance_data);
+            self.backend.inject_total_issuance(latest_block, total_issuance.saturating_sub(diff));
+        } else if diff > 0 {
+            let diff = diff.abs() as Balance;
+
+            balance_data.free = balance_data.free.saturating_add(diff);
+            self.backend.inject_balance(latest_block, account_id, balance_data);
+            self.backend.inject_total_issuance(latest_block, total_issuance.saturating_add(diff));
+        }
+
+        let mut account_info = self
+            .backend
+            .read_account_info(latest_block, address)?
+            .unwrap_or_else(|| AccountInfo { account_type: AccountType::EOA, dust: 0 });
+
+        if account_info.dust != dust {
+            account_info.dust = dust;
+
+            self.backend.inject_account_info(latest_block, address, account_info);
+        }
+
+        Ok(())
+    }
+
+    fn set_nonce(&self, address: Address, value: U256) -> Result<()> {
+        node_info!("anvil_setNonce");
+
+        let latest_block = self.backend.blockchain().info().best_hash;
+
+        let account_id = self.get_account_id(latest_block, address);
+
+        self.backend.inject_nonce(
+            latest_block,
+            account_id,
+            value.try_into().map_err(|_| Error::NonceOverflow)?,
+        );
+
+        Ok(())
+    }
+
+    fn set_storage_at(&self, address: Address, key: U256, value: B256) -> Result<()> {
+        let latest_block = self.backend.blockchain().info().best_hash;
+
+        let account_info = self.backend.read_account_info(latest_block, address)?;
+        // get child trie id.
+        // Add the child trie to the storage overrides.
+        Ok(())
+    }
+
+    fn set_logging(&self, enabled: bool) -> Result<()> {
+        node_info!("anvil_setLoggingEnabled");
+        self.logging_manager.set_enabled(enabled);
+        Ok(())
+    }
+
+    fn set_code(&self, address: Address, bytes: Bytes) -> Result<()> {
+        node_info!("anvil_setCode");
+
+        let latest_block = self.backend.blockchain().info().best_hash;
+
+        let account_id = self.get_account_id(latest_block, address);
+
+        let code_hash = H256(sp_io::hashing::keccak_256(&bytes));
+        let account_info =
+            self.backend.read_account_info(latest_block, address)?.unwrap_or_else(|| {
+                let contract_info = new_contract_info(&address, code_hash);
+
+                AccountInfo { account_type: AccountType::Contract(contract_info), dust: 0 }
+            });
+
+        // if account info type is not contract, return
+        self.backend.inject_account_info(latest_block, address, account_info);
+
+        // Bytecode::new_raw_checked(Bytes::from(code.to_vec())).unwrap();
+
+        // let code_info = CodeInfo {
+        //     owner: account_id,
+        //     deposit: 0,
+        //     refcount: 0,
+        //     code_len: bytes.len(),
+        //     code_type: BytecodeType::Evm,
+        //     behaviour_version: Default::default(),
+        // };
+
+        // inject_pristine_code(bytes);
+        // inject_code_info(code_info);
+
+        Ok(())
+    }
+
+    fn set_chain_id(&self, chain_id: u64) -> Result<()> {
+        node_info!("anvil_setChainId");
+
+        let latest_block = self.backend.blockchain().info().best_hash;
+        self.backend.inject_chain_id(latest_block, chain_id);
+
+        Ok(())
+    }
+
+    // ----- Helpers
 
     fn get_account_id(&self, block: Hash, address: Address) -> AccountId {
         self.client.runtime_api().account_id(block, address).unwrap()
@@ -169,5 +213,25 @@ impl ApiServer {
 
     fn construct_balance_with_dust(&self, block: Hash, value: U256) -> (Balance, u32) {
         self.client.runtime_api().new_balance_with_dust(block, value).unwrap()
+    }
+}
+
+fn new_contract_info(address: &Address, code_hash: H256) -> ContractInfo {
+    let address = H160::from_slice(address.as_slice());
+
+    let trie_id = {
+        let buf = ("bcontract_trie_v1", address, 0).using_encoded(BlakeTwo256::hash);
+        buf.as_ref().to_vec()
+    };
+
+    ContractInfo {
+        trie_id: BoundedVec::<u8>(trie_id),
+        code_hash,
+        storage_bytes: 0,
+        storage_items: 0,
+        storage_byte_deposit: 0,
+        storage_item_deposit: 0,
+        storage_base_deposit: 0,
+        immutable_data_len: 0,
     }
 }

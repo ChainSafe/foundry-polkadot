@@ -9,9 +9,9 @@ use anvil_polkadot::{
     substrate_node::service::Service,
 };
 use anvil_rpc::response::ResponseResult;
+use codec::Decode;
 use eyre::{Result, WrapErr};
 use futures::channel::oneshot;
-use parity_scale_codec::Decode;
 use polkadot_sdk::{
     sc_cli::CliConfiguration,
     sc_client_api::{BlockBackend, HeaderBackend},

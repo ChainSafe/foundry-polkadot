@@ -11,11 +11,28 @@ use polkadot_sdk::{
     parachains_common::{AccountId, Hash, Nonce},
     sc_client_api::{Backend as BackendT, StateBackend, TrieCacheContext},
     sc_client_db::BlockchainDb,
+    sp_blockchain,
     sp_core::H160,
     sp_state_machine::{StorageKey, StorageValue},
 };
 use std::{collections::HashMap, num::NonZeroUsize, sync::Arc};
 use substrate_runtime::{Balance, Block};
+
+#[derive(Debug, thiserror::Error)]
+pub enum BackendError {
+    #[error("Inner client error: {0}")]
+    Client(#[from] sp_blockchain::Error),
+    #[error("Could not find total issuance in the state")]
+    MissingTotalIssuance,
+    #[error("Unable to decode total issuance")]
+    DecodeTotalIssuance(codec::Error),
+    #[error("Unable to decode balance")]
+    DecodeBalance(codec::Error),
+    #[error("Unable to decode account info")]
+    DecodeAccountInfo(codec::Error),
+}
+
+type Result<T> = std::result::Result<T, BackendError>;
 
 pub struct BackendWithOverlay {
     backend: Arc<Backend>,
@@ -31,25 +48,39 @@ impl BackendWithOverlay {
         self.backend.blockchain()
     }
 
-    pub fn read_balance(&self, hash: Hash, account_id: AccountId) -> Option<AccountData<Balance>> {
+    pub fn read_balance(
+        &self,
+        hash: Hash,
+        account_id: AccountId,
+    ) -> Result<Option<AccountData<Balance>>> {
         let key = well_known_keys::balance(account_id);
 
-        self.read_state(hash, key)
-            .map(|value| AccountData::<Balance>::decode(&mut &value[..]).unwrap())
+        self.read_state(hash, key)?
+            .map(|value| {
+                AccountData::<Balance>::decode(&mut &value[..])
+                    .map_err(|err| BackendError::DecodeBalance(err))
+            })
+            .transpose()
     }
 
-    pub fn read_total_issuance(&self, hash: Hash) -> Balance {
+    pub fn read_total_issuance(&self, hash: Hash) -> Result<Balance> {
         let key = hex::decode(well_known_keys::TOTAL_ISSUANCE).unwrap();
 
         println!("total issuance key: {:?}", key.clone());
 
-        self.read_state(hash, key).map(|value| Balance::decode(&mut &value[..]).unwrap()).unwrap()
+        let value = self.read_state(hash, key)?.ok_or(BackendError::MissingTotalIssuance)?;
+        Balance::decode(&mut &value[..]).map_err(|err| BackendError::DecodeTotalIssuance(err))
     }
 
-    pub fn read_account_info(&self, hash: Hash, address: Address) -> Option<AccountInfo> {
+    pub fn read_account_info(&self, hash: Hash, address: Address) -> Result<Option<AccountInfo>> {
         let key = well_known_keys::account_info(H160::from_slice(address.as_slice()));
 
-        self.read_state(hash, key).map(|value| AccountInfo::decode(&mut &value[..]).unwrap())
+        self.read_state(hash, key)?
+            .map(|value| {
+                AccountInfo::decode(&mut &value[..])
+                    .map_err(|err| BackendError::DecodeAccountInfo(err))
+            })
+            .transpose()
     }
 
     pub fn inject_nonce(&self, at: Hash, account_id: AccountId, value: Nonce) {
@@ -77,19 +108,21 @@ impl BackendWithOverlay {
         overrides.set_account_info(at, address, info);
     }
 
-    fn read_state(&self, hash: Hash, key: StorageKey) -> Option<StorageValue> {
+    fn read_state(&self, hash: Hash, key: StorageKey) -> Result<Option<StorageValue>> {
         let maybe_overriden_val = {
             let mut guard = self.overrides.lock();
 
-            guard.per_block.get(&hash)?.get(&key).cloned()
+            guard.per_block.get(&hash).and_then(|overrides| overrides.get(&key).cloned())
         };
 
         if let Some(overriden_val) = maybe_overriden_val {
-            return Some(overriden_val)
+            return Ok(Some(overriden_val))
         }
 
-        let state = self.backend.state_at(hash, TrieCacheContext::Trusted).unwrap();
-        state.storage(key.as_slice()).unwrap()
+        let state = self.backend.state_at(hash, TrieCacheContext::Trusted)?;
+        Ok(state
+            .storage(key.as_slice())
+            .map_err(|e| sp_blockchain::Error::from_state(Box::new(e)))?)
     }
 }
 
