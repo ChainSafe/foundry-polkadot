@@ -127,6 +127,10 @@ impl SubstrateNodeConfig {
 
         Self { shared_params, rpc_params, import_params }
     }
+
+    pub fn set_base_path(&mut self, base_path: Option<PathBuf>) {
+        self.shared_params.base_path = base_path;
+    }
 }
 
 impl SubstrateCliConfiguration for SubstrateNodeConfig {
@@ -472,6 +476,17 @@ Genesis Number
           "gas_limit": gas_limit,
           "genesis_timestamp": format!("{}", self.get_genesis_timestamp()),
         })
+    }
+
+    pub fn test_config() -> Self {
+        Self {
+            port: 0,
+            no_mining: true,
+            mixed_mining: false,
+            enable_tracing: true,
+            silent: true,
+            ..Default::default()
+        }
     }
 }
 
