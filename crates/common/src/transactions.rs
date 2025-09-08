@@ -1,6 +1,6 @@
 //! Wrappers for transactions.
 
-use alloy_consensus::{Transaction, TxEnvelope};
+use alloy_consensus::{transaction::SignerRecoverable, Transaction, TxEnvelope};
 use alloy_eips::eip7702::SignedAuthorization;
 use alloy_network::AnyTransactionReceipt;
 use alloy_primitives::{Address, TxKind, U256};
@@ -212,7 +212,7 @@ impl TransactionMaybeSigned {
     /// Creates a new signed transaction for broadcast.
     pub fn new_signed(
         tx: TxEnvelope,
-    ) -> core::result::Result<Self, alloy_primitives::SignatureError> {
+    ) -> core::result::Result<Self, alloy_consensus::crypto::RecoveryError> {
         let from = tx.recover_signer()?;
         Ok(Self::Signed { tx, from })
     }
@@ -286,7 +286,7 @@ impl From<TransactionRequest> for TransactionMaybeSigned {
 }
 
 impl TryFrom<TxEnvelope> for TransactionMaybeSigned {
-    type Error = alloy_primitives::SignatureError;
+    type Error = alloy_consensus::crypto::RecoveryError;
 
     fn try_from(tx: TxEnvelope) -> core::result::Result<Self, Self::Error> {
         Self::new_signed(tx)
