@@ -19,7 +19,7 @@ pub mod well_known_keys {
     use codec::Encode;
     use polkadot_sdk::{
         parachains_common::AccountId,
-        sp_core::{blake2_128, twox_128, H160},
+        sp_core::{blake2_128, twox_128, H160, H256},
     };
 
     pub const TOTAL_ISSUANCE: &str =
@@ -62,6 +62,24 @@ pub mod well_known_keys {
         key.extend_from_slice(&twox_128("Revive".as_bytes()));
         key.extend_from_slice(&twox_128("AccountInfoOf".as_bytes()));
         key.extend_from_slice(&address.encode());
+
+        key
+    }
+
+    pub fn pristine_code(code_hash: H256) -> Vec<u8> {
+        let mut key = Vec::new();
+        key.extend_from_slice(&twox_128("Revive".as_bytes()));
+        key.extend_from_slice(&twox_128("PristineCode".as_bytes()));
+        key.extend_from_slice(&code_hash.encode());
+
+        key
+    }
+
+    pub fn code_info(code_hash: H256) -> Vec<u8> {
+        let mut key = Vec::new();
+        key.extend_from_slice(&twox_128("Revive".as_bytes()));
+        key.extend_from_slice(&twox_128("CodeInfoOf".as_bytes()));
+        key.extend_from_slice(&code_hash.encode());
 
         key
     }

@@ -12,13 +12,15 @@ use crate::{
 };
 use alloy_primitives::{Address, Bytes, B256, U256};
 use anvil_core::eth::EthRequest;
-use anvil_rpc::{error::RpcError, response::ResponseResult};
+use anvil_rpc::response::ResponseResult;
 use codec::Encode;
 use futures::{channel::mpsc, StreamExt};
 use polkadot_sdk::{
     pallet_revive::ReviveApi,
     pallet_revive_eth_rpc::subxt_client::{
-        runtime_types::bounded_collections::bounded_vec::BoundedVec,
+        runtime_types::{
+            bounded_collections::bounded_vec::BoundedVec, pallet_revive::vm::CodeInfo,
+        },
         src_chain::runtime_types::pallet_revive::storage::ContractInfo,
     },
     parachains_common::{AccountId, Hash},
@@ -149,9 +151,20 @@ impl ApiServer {
     fn set_storage_at(&self, address: Address, key: U256, value: B256) -> Result<()> {
         let latest_block = self.backend.blockchain().info().best_hash;
 
-        let account_info = self.backend.read_account_info(latest_block, address)?;
-        // get child trie id.
-        // Add the child trie to the storage overrides.
+        let Some(AccountInfo { account_type: AccountType::Contract(contract_info), .. }) =
+            self.backend.read_account_info(latest_block, address)?
+        else {
+            return Ok(())
+        };
+        let trie_id = contract_info.trie_id.0;
+
+        self.backend.inject_child_storage(
+            latest_block,
+            trie_id,
+            key.to_be_bytes_vec(),
+            value.to_vec(),
+        );
+
         Ok(())
     }
 
@@ -169,29 +182,43 @@ impl ApiServer {
         let account_id = self.get_account_id(latest_block, address);
 
         let code_hash = H256(sp_io::hashing::keccak_256(&bytes));
-        let account_info =
-            self.backend.read_account_info(latest_block, address)?.unwrap_or_else(|| {
+
+        let account_info = match self.backend.read_account_info(latest_block, address)? {
+            None => {
                 let contract_info = new_contract_info(&address, code_hash);
 
                 AccountInfo { account_type: AccountType::Contract(contract_info), dust: 0 }
-            });
+            }
+            Some(AccountInfo { account_type: AccountType::Contract(mut contract_info), dust }) => {
+                if contract_info.code_hash != code_hash {
+                    // Remove the pristine code and code info for the old hash.
+                    self.backend.inject_pristine_code(latest_block, contract_info.code_hash, None);
+                    self.backend.inject_code_info(latest_block, contract_info.code_hash, None);
+                }
 
-        // if account info type is not contract, return
+                contract_info.code_hash = code_hash;
+
+                AccountInfo { account_type: AccountType::Contract(contract_info), dust }
+            }
+            Some(AccountInfo { account_type: AccountType::EOA, dust }) => {
+                let contract_info = new_contract_info(&address, code_hash);
+
+                AccountInfo { account_type: AccountType::Contract(contract_info), dust }
+            }
+        };
+
         self.backend.inject_account_info(latest_block, address, account_info);
 
-        // Bytecode::new_raw_checked(Bytes::from(code.to_vec())).unwrap();
+        let code_info = CodeInfo {
+            owner: <[u8; 32]>::from(account_id).into(),
+            deposit: 0,
+            refcount: 0,
+            code_len: bytes.len() as u32,
+            behaviour_version: 0,
+        };
 
-        // let code_info = CodeInfo {
-        //     owner: account_id,
-        //     deposit: 0,
-        //     refcount: 0,
-        //     code_len: bytes.len(),
-        //     code_type: BytecodeType::Evm,
-        //     behaviour_version: Default::default(),
-        // };
-
-        // inject_pristine_code(bytes);
-        // inject_code_info(code_info);
+        self.backend.inject_pristine_code(latest_block, code_hash, Some(bytes));
+        self.backend.inject_code_info(latest_block, code_hash, Some(code_info));
 
         Ok(())
     }

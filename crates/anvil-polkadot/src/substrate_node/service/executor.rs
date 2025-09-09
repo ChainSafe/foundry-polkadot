@@ -9,6 +9,7 @@ use polkadot_sdk::{
     sp_core, sp_externalities, sp_io,
     sp_runtime::{generic::BlockId, traits::HashingFor},
     sp_state_machine::{OverlayedChanges, StorageProof},
+    sp_storage::ChildInfo,
     sp_version,
 };
 use std::{cell::RefCell, sync::Arc};
@@ -42,8 +43,16 @@ impl Executor {
         let overrides = { self.storage_overrides.lock().get(hash) };
         let Some(overrides) = overrides else { return };
 
-        for (key, val) in overrides {
-            overlay.set_storage(key, Some(val));
+        for (key, val) in overrides.top {
+            overlay.set_storage(key, val);
+        }
+
+        for (child_key, child_map) in overrides.children {
+            let child_info = ChildInfo::new_default_from_vec(child_key);
+
+            for (key, val) in child_map {
+                overlay.set_child_storage(&child_info, key, val);
+            }
         }
     }
 }
