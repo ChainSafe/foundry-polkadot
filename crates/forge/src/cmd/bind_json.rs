@@ -16,7 +16,7 @@ use foundry_compilers::{
 use foundry_config::Config;
 use itertools::Itertools;
 use rayon::prelude::*;
-use solar_parse::{
+use solar::parse::{
     ast::{self, interface::source_map::FileName, visit::Visit, Arena, FunctionKind, Span, VarMut},
     interface::Session,
     Parser as SolarParser,
@@ -90,7 +90,7 @@ impl BindJsonArgs {
             .1;
 
         let sess = Session::builder().with_stderr_emitter().build();
-        let result = sess.enter_parallel(|| -> solar_parse::interface::Result<()> {
+        let result = sess.enter_parallel(|| -> solar::parse::interface::Result<()> {
             sources.0.par_iter_mut().try_for_each(|(path, source)| {
                 let mut content = Arc::try_unwrap(std::mem::take(&mut source.content)).unwrap();
 
@@ -153,7 +153,7 @@ impl PreprocessorVisitor {
 }
 
 impl<'ast> Visit<'ast> for PreprocessorVisitor {
-    type BreakValue = solar_parse::interface::data_structures::Never;
+    type BreakValue = solar::parse::interface::data_structures::Never;
 
     fn visit_item_function(
         &mut self,

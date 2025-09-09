@@ -6601,6 +6601,7 @@ dependencies = [
  "semver 1.0.26",
  "serde",
  "serde_json",
+ "solar-compiler",
  "terminal_size",
  "thiserror 2.0.12",
  "tokio",

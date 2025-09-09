@@ -371,8 +371,8 @@ function f2() {} /** forge-config: default.fuzz.runs = 800 */ function f3() {}
 ";
         let mut natspecs = vec![];
         let id = || "path.sol:C".to_string();
-        let solar_parser = SolarParser::new();
-        solar_parser.parse(&mut natspecs, src, &id(), "C");
+        let solar::parser = SolarParser::new();
+        solar::parser.parse(&mut natspecs, src, &id(), "C");
         assert_eq!(
             natspecs,
             [

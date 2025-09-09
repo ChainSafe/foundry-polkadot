@@ -4,7 +4,7 @@ use foundry_cli::utils::LoadConfig;
 use foundry_compilers::{resolver::parse::SolData, Graph};
 use foundry_config::{impl_figment_convert_basic, Config};
 use itertools::Itertools;
-use solar_parse::{ast, ast::visit::Visit, interface::Session};
+use solar::parse::{ast, ast::visit::Visit, interface::Session};
 use std::{
     ops::ControlFlow,
     path::{Path, PathBuf},
@@ -124,9 +124,9 @@ fn try_lint_file(
     sess: &Session,
     unsafe_cheatcodes: &[String],
     path: &Path,
-) -> solar_parse::interface::Result<usize> {
-    let arena = solar_parse::ast::Arena::new();
-    let mut parser = solar_parse::Parser::from_file(sess, &arena, path)?;
+) -> solar::parse::interface::Result<usize> {
+    let arena = solar::parse::ast::Arena::new();
+    let mut parser = solar::parse::Parser::from_file(sess, &arena, path)?;
     let ast = parser.parse_file().map_err(|e| e.emit())?;
     let mut visitor = Visitor::new(sess, unsafe_cheatcodes);
     let _ = visitor.visit_source_unit(&ast);
@@ -146,7 +146,7 @@ impl<'a> Visitor<'a> {
 }
 
 impl<'ast> Visit<'ast> for Visitor<'_> {
-    type BreakValue = solar_parse::interface::data_structures::Never;
+    type BreakValue = solar::parse::interface::data_structures::Never;
 
     fn visit_expr(&mut self, expr: &'ast ast::Expr<'ast>) -> ControlFlow<Self::BreakValue> {
         if let ast::ExprKind::Call(lhs, _args) = &expr.kind {

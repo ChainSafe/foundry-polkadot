@@ -7,11 +7,13 @@ use foundry_compilers::{
     solc::{SolcCompiler, SolcVersionedInput},
     Compiler, Language, ProjectPathsConfig,
 };
-use solar_parse::{
-    ast::Span,
-    interface::{Session, SourceMap},
+use solar::{
+    parse::{
+        ast::Span,
+        interface::{Session, SourceMap},
+    },
+    sema::{thread_local::ThreadLocal, ParsingContext},
 };
-use solar_sema::{thread_local::ThreadLocal, ParsingContext};
 use std::{collections::HashSet, ops::Range, path::PathBuf};
 
 mod data;
@@ -44,7 +46,7 @@ impl Preprocessor<SolcCompiler> for TestOptimizerPreprocessor {
         }
 
         let sess = solar_session_from_solc(input);
-        let _ = sess.enter(|| -> solar_parse::interface::Result {
+        let _ = sess.enter(|| -> solar::parse::interface::Result {
             // Set up the parsing context with the project paths.
             let mut parsing_context = solar_pcx_from_solc_no_sources(&sess, input, paths);
 
@@ -123,7 +125,7 @@ impl Preprocessor<MultiCompiler> for TestOptimizerPreprocessor {
 }
 
 fn solar_session_from_solc(solc: &SolcVersionedInput) -> Session {
-    use solar_parse::interface::config;
+    use solar::parse::interface::config;
 
     Session::builder()
         .with_buffer_emitter(Default::default())
@@ -151,7 +153,7 @@ fn solar_pcx_from_solc_no_sources<'sess>(
     let mut pcx = ParsingContext::new(sess);
     pcx.file_resolver.set_current_dir(solc.cli_settings.base_path.as_ref().unwrap_or(&paths.root));
     for remapping in &paths.remappings {
-        pcx.file_resolver.add_import_remapping(solar_sema::interface::config::ImportRemapping {
+        pcx.file_resolver.add_import_remapping(solar::sema::interface::config::ImportRemapping {
             context: remapping.context.clone().unwrap_or_default(),
             prefix: remapping.name.clone(),
             path: remapping.path.clone(),

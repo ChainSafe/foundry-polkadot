@@ -1,10 +1,12 @@
 use super::span_to_range;
 use foundry_compilers::artifacts::{Source, Sources};
 use path_slash::PathExt;
-use solar_parse::interface::{Session, SourceMap};
-use solar_sema::{
-    hir::{Contract, ContractId, Hir},
-    interface::source_map::FileName,
+use solar::{
+    parse::interface::{Session, SourceMap},
+    sema::{
+        hir::{Contract, ContractId, Hir},
+        interface::source_map::FileName,
+    },
 };
 use std::{
     collections::{BTreeMap, HashSet},
@@ -81,7 +83,7 @@ impl ContractData {
         contract_id: ContractId,
         contract: &Contract<'_>,
         path: &Path,
-        source: &solar_sema::hir::Source<'_>,
+        source: &solar::sema::hir::Source<'_>,
         source_map: &SourceMap,
     ) -> Self {
         let artifact = format!("{}:{}", path.to_slash_lossy(), contract.name);

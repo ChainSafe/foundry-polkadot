@@ -4,10 +4,14 @@ use super::{
 };
 use foundry_compilers::Updates;
 use itertools::Itertools;
-use solar_parse::interface::Session;
-use solar_sema::{
-    hir::{CallArgs, ContractId, Expr, ExprKind, Hir, NamedArg, Stmt, StmtKind, TypeKind, Visit},
-    interface::{data_structures::Never, source_map::FileName, SourceMap},
+use solar::{
+    parse::interface::Session,
+    sema::{
+        hir::{
+            CallArgs, ContractId, Expr, ExprKind, Hir, NamedArg, Stmt, StmtKind, TypeKind, Visit,
+        },
+        interface::{data_structures::Never, source_map::FileName, SourceMap},
+    },
 };
 use std::{
     collections::{BTreeMap, BTreeSet, HashSet},
