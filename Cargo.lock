@@ -3739,7 +3739,7 @@ dependencies = [
  "semver 1.0.26",
  "serde",
  "serde_json",
- "solar-parse",
+ "solar-compiler",
  "strum 0.27.1",
  "tikv-jemallocator",
  "time",
@@ -5338,7 +5338,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.101",
- "unicode-xid",
 ]
 
 [[package]]
@@ -6246,7 +6245,7 @@ dependencies = [
  "serial_test",
  "similar",
  "similar-asserts",
- "solar-parse",
+ "solar-compiler",
  "soldeer-commands",
  "strum 0.27.1",
  "svm-rs",
@@ -6441,9 +6440,9 @@ dependencies = [
 
 [[package]]
 name = "foundry-block-explorers"
-version = "0.14.0"
+version = "0.22.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7b06acca93a3370fe313ac1fd41bba512934aea60088b49656c1aa44205a9f62"
+checksum = "ff814624bb21bfe43b70fb736ab39527b405d04cdc94d90b7e182fba28b25ec7"
 dependencies = [
  "alloy-chains",
  "alloy-json-abi",
@@ -6453,7 +6452,7 @@ dependencies = [
  "semver 1.0.26",
  "serde",
  "serde_json",
- "thiserror 1.0.69",
+ "thiserror 2.0.12",
  "tracing",
 ]
 
@@ -6602,8 +6601,6 @@ dependencies = [
  "semver 1.0.26",
  "serde",
  "serde_json",
- "solar-parse",
- "solar-sema",
  "terminal_size",
  "thiserror 2.0.12",
  "tokio",
@@ -6637,23 +6634,20 @@ dependencies = [
 
 [[package]]
 name = "foundry-compilers"
-version = "0.14.0"
+version = "0.19.1"
 dependencies = [
  "alloy-json-abi",
  "alloy-primitives 1.3.0",
  "auto_impl",
- "derive_more 1.0.0",
- "dirs 6.0.0",
+ "derive_more 2.0.1",
  "dyn-clone",
  "foundry-compilers-artifacts",
  "foundry-compilers-core",
  "fs_extra",
  "futures-util",
- "home",
  "itertools 0.14.0",
- "md-5",
  "path-slash",
- "rand 0.8.5",
+ "rand 0.9.1",
  "rayon",
  "revive-solc-json-interface",
  "rvm-rs",
@@ -6661,8 +6655,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.10.9",
- "solar-parse",
- "solar-sema",
+ "solar-compiler",
  "svm-rs",
  "svm-rs-builds",
  "tempfile",
@@ -6675,7 +6668,7 @@ dependencies = [
 
 [[package]]
 name = "foundry-compilers-artifacts"
-version = "0.14.0"
+version = "0.19.1"
 dependencies = [
  "foundry-compilers-artifacts-resolc",
  "foundry-compilers-artifacts-solc",
@@ -6684,13 +6677,12 @@ dependencies = [
 
 [[package]]
 name = "foundry-compilers-artifacts-resolc"
-version = "0.14.0"
+version = "0.19.1"
 dependencies = [
  "alloy-json-abi",
  "alloy-primitives 1.3.0",
  "foundry-compilers-artifacts-solc",
  "foundry-compilers-core",
- "md-5",
  "path-slash",
  "rayon",
  "semver 1.0.26",
@@ -6704,29 +6696,27 @@ dependencies = [
 
 [[package]]
 name = "foundry-compilers-artifacts-solc"
-version = "0.14.0"
+version = "0.19.1"
 dependencies = [
  "alloy-json-abi",
  "alloy-primitives 1.3.0",
  "foundry-compilers-core",
  "futures-util",
- "md-5",
  "path-slash",
  "rayon",
+ "regex",
  "semver 1.0.26",
  "serde",
  "serde_json",
- "serde_repr",
  "thiserror 2.0.12",
  "tokio",
  "tracing",
- "walkdir",
  "yansi",
 ]
 
 [[package]]
 name = "foundry-compilers-artifacts-vyper"
-version = "0.14.0"
+version = "0.19.1"
 dependencies = [
  "alloy-json-abi",
  "alloy-primitives 1.3.0",
@@ -6739,7 +6729,7 @@ dependencies = [
 
 [[package]]
 name = "foundry-compilers-core"
-version = "0.14.0"
+version = "0.19.1"
 dependencies = [
  "alloy-primitives 1.3.0",
  "cfg-if",
@@ -6755,6 +6745,7 @@ dependencies = [
  "thiserror 2.0.12",
  "tokio",
  "walkdir",
+ "xxhash-rust",
 ]
 
 [[package]]
@@ -6783,7 +6774,7 @@ dependencies = [
  "serde",
  "serde_json",
  "similar-asserts",
- "solar-parse",
+ "solar-compiler",
  "soldeer-core",
  "tempfile",
  "thiserror 2.0.12",
@@ -6946,7 +6937,7 @@ dependencies = [
  "revm-inspectors",
  "serde",
  "serde_json",
- "solar-parse",
+ "solar-compiler",
  "tempfile",
  "tokio",
  "tracing",
@@ -10269,16 +10260,6 @@ checksum = "a06de3016e9fae57a36fd14dba131fccf49f74b40b7fbdb472f96e361ec71a08"
 dependencies = [
  "autocfg",
  "rawpointer",
-]
-
-[[package]]
-name = "md-5"
-version = "0.10.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d89e7ee0cfbedfc4da3340218492196241d89eefb6dab27de5df917a6d2e78cf"
-dependencies = [
- "cfg-if",
- "digest 0.10.7",
 ]
 
 [[package]]
@@ -15141,9 +15122,9 @@ checksum = "60a357793950651c4ed0f3f52338f53b2f809f32d83a07f72909fa13e4c6c1e3"
 
 [[package]]
 name = "rayon"
-version = "1.10.0"
+version = "1.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b418a60154510ca1a002a752ca9714984e21e4241e804d32555251faf8b78ffa"
+checksum = "368f01d005bf8fd9b1206fb6fa653e6c4a81ceb1466406b81792d87c5677a58f"
 dependencies = [
  "either",
  "rayon-core",
@@ -15151,9 +15132,9 @@ dependencies = [
 
 [[package]]
 name = "rayon-core"
-version = "1.12.1"
+version = "1.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1465873a3dfdaa8ae7cb14b4383657caab0b3e8a0aa9ae8e04b044854c8dfce2"
+checksum = "22e18b0f0062d30d4230b2e85ff77fdfe4326feb054b9783a3460d8435c8ab91"
 dependencies = [
  "crossbeam-deque",
  "crossbeam-utils",
@@ -17620,17 +17601,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "serde_repr"
-version = "0.1.20"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "175ee3e80ae9982737ca543e96133087cbd9a485eecc3bc4de9c1a37b47ea59c"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.101",
-]
-
-[[package]]
 name = "serde_spanned"
 version = "0.6.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -18198,6 +18168,22 @@ dependencies = [
  "solar-interface",
  "solar-macros",
  "strum 0.27.1",
+]
+
+[[package]]
+name = "solar-compiler"
+version = "0.1.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f726b10330517ecfa1e66e781ed55fb720ac02e3995453d14f6f90fe53ed8f63"
+dependencies = [
+ "alloy-primitives 1.3.0",
+ "solar-ast",
+ "solar-config",
+ "solar-data-structures",
+ "solar-interface",
+ "solar-macros",
+ "solar-parse",
+ "solar-sema",
 ]
 
 [[package]]
@@ -20019,9 +20005,9 @@ checksum = "e502f78cdbb8ba4718f566c418c52bc729126ffd16baee5baa718cf25dd5a69a"
 
 [[package]]
 name = "tempfile"
-version = "3.19.1"
+version = "3.21.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7437ac7763b9b123ccf33c338a5cc1bac6f69b45a136c19bdd8a65e3916435bf"
+checksum = "15b61f8f20e3a6f7e0649d825294eaf317edce30f82cf6026e7e4cb9222a7d1e"
 dependencies = [
  "fastrand",
  "getrandom 0.3.2",
@@ -22703,6 +22689,12 @@ checksum = "d7d8a75eaf6557bb84a65ace8609883db44a29951042ada9b393151532e41fcb"
 dependencies = [
  "xml-rs",
 ]
+
+[[package]]
+name = "xxhash-rust"
+version = "0.8.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fdd20c5420375476fbd4394763288da7eb0cc0b8c11deed431a91562af7335d3"
 
 [[package]]
 name = "yamux"
