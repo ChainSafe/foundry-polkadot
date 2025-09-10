@@ -100,6 +100,8 @@ pub use figment;
 
 pub mod providers;
 pub use providers::Remappings;
+
+pub use semver;
 use providers::*;
 
 mod fuzz;
