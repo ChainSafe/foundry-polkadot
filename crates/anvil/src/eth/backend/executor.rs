@@ -406,21 +406,17 @@ fn build_logs_bloom(logs: Vec<Log>, bloom: &mut Bloom) {
     }
 }
 
-/// Creates a database with given database and inspector, optionally enabling odyssey features.
+/// Creates a database with given database and inspector
 pub fn new_evm_with_inspector<DB: revm::Database>(
     db: DB,
     env: EnvWithHandlerCfg,
     inspector: &mut dyn revm::Inspector<DB>,
-    odyssey: bool,
 ) -> revm::Evm<'_, &mut dyn revm::Inspector<DB>, DB> {
     let EnvWithHandlerCfg { env, handler_cfg } = env;
 
     let mut handler = revm::Handler::new(handler_cfg);
 
     handler.append_handler_register_plain(revm::inspector_handle_register);
-    if odyssey {
-        handler.append_handler_register_plain(odyssey_handler_register);
-    }
 
     let context = revm::Context::new(revm::EvmContext::new_with_env(db, env), inspector);
 
@@ -432,10 +428,9 @@ pub fn new_evm_with_inspector_ref<'a, DB>(
     db: DB,
     env: EnvWithHandlerCfg,
     inspector: &mut dyn revm::Inspector<WrapDatabaseRef<DB>>,
-    odyssey: bool,
 ) -> revm::Evm<'a, &mut dyn revm::Inspector<WrapDatabaseRef<DB>>, WrapDatabaseRef<DB>>
 where
     DB: revm::DatabaseRef,
 {
-    new_evm_with_inspector(WrapDatabaseRef(db), env, inspector, odyssey)
+    new_evm_with_inspector(WrapDatabaseRef(db), env, inspector)
 }

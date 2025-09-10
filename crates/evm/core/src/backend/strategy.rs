@@ -1,15 +1,11 @@
 use std::{any::Any, fmt::Debug};
 
-use crate::InspectorExt;
-
 use super::{Backend, BackendInner, Fork, ForkDB, FoundryEvmInMemoryDB};
+use crate::{backend::JournaledState, AsEnvMut, Env, InspectorExt};
+use alloy_evm::Evm;
 use alloy_primitives::Address;
 use eyre::{Context, Result};
-use revm::{
-    db::CacheDB,
-    primitives::{EnvWithHandlerCfg, ResultAndState},
-    DatabaseRef, JournaledState,
-};
+use revm::{context::result::ResultAndState, database::CacheDB, DatabaseRef};
 use serde::{Deserialize, Serialize};
 
 /// Context for [BackendStrategy].
@@ -49,7 +45,7 @@ pub trait BackendStrategyRunner: Debug + Send + Sync {
     fn inspect(
         &self,
         backend: &mut Backend,
-        env: &mut EnvWithHandlerCfg,
+        env: &mut Env,
         inspector: &mut dyn InspectorExt,
         inspect_ctx: Box<dyn Any>,
     ) -> Result<ResultAndState>;
@@ -111,15 +107,15 @@ impl BackendStrategyRunner for EvmBackendStrategyRunner {
     fn inspect(
         &self,
         backend: &mut Backend,
-        env: &mut EnvWithHandlerCfg,
+        env: &mut Env,
         inspector: &mut dyn InspectorExt,
         _inspect_ctx: Box<dyn Any>,
     ) -> Result<ResultAndState> {
-        let mut evm = crate::utils::new_evm_with_inspector(backend, env.clone(), inspector);
+        let mut evm = crate::evm::new_evm_with_inspector(backend, env.clone(), inspector);
 
-        let res = evm.transact().wrap_err("EVM error")?;
+        let res = evm.transact(env.tx.clone()).wrap_err("EVM error")?;
 
-        env.env = evm.context.evm.inner.env;
+        *env = evm.as_env_mut().to_owned();
 
         Ok(res)
     }
@@ -198,12 +194,6 @@ pub(crate) fn merge_account_data<ExtDB: DatabaseRef>(
         merge_journaled_state_data(addr, active_journaled_state, &mut target_fork.journaled_state);
     }
 
-    // need to mock empty journal entries in case the current checkpoint is higher than the existing
-    // journal entries
-    while active_journaled_state.journal.len() > target_fork.journaled_state.journal.len() {
-        target_fork.journaled_state.journal.push(Default::default());
-    }
-
     *active_journaled_state = target_fork.journaled_state.clone();
 }
 
@@ -233,17 +223,17 @@ fn merge_db_account_data<ExtDB: DatabaseRef>(
 ) {
     trace!(?addr, "merging database data");
 
-    let Some(acc) = active.accounts.get(&addr) else { return };
+    let Some(acc) = active.cache.accounts.get(&addr) else { return };
 
     // port contract cache over
-    if let Some(code) = active.contracts.get(&acc.info.code_hash) {
+    if let Some(code) = active.cache.contracts.get(&acc.info.code_hash) {
         trace!("merging contract cache");
-        fork_db.contracts.insert(acc.info.code_hash, code.clone());
+        fork_db.cache.contracts.insert(acc.info.code_hash, code.clone());
     }
 
     // port account storage over
     use std::collections::hash_map::Entry;
-    match fork_db.accounts.entry(addr) {
+    match fork_db.cache.accounts.entry(addr) {
         Entry::Vacant(vacant) => {
             trace!("target account not present - inserting from active");
             // if the fork_db doesn't have the target account

@@ -316,9 +316,9 @@ impl CallTraceDecoder {
     /// [CallTraceDecoder::decode_event] for more details.
     pub async fn populate_traces(&self, traces: &mut Vec<CallTraceNode>) {
         for node in traces {
-            node.trace.decoded = self.decode_function(&node.trace).await;
+            node.trace.decoded = Some(Box::new(self.decode_function(&node.trace).await));
             for log in &mut node.logs {
-                log.decoded = self.decode_event(&log.raw_log).await;
+                log.decoded = Some(Box::new(self.decode_event(&log.raw_log).await));
             }
 
             if let Some(debug) = self.debug_identifier.as_ref() {
@@ -409,7 +409,7 @@ impl CallTraceDecoder {
             }
 
             if args.is_none() {
-                if let Ok(v) = func.abi_decode_input(&trace.data[SELECTOR_LEN..], false) {
+                if let Ok(v) = func.abi_decode_input(&trace.data[SELECTOR_LEN..]) {
                     args = Some(v.iter().map(|value| self.format_value(value)).collect());
                 }
             }
@@ -445,7 +445,7 @@ impl CallTraceDecoder {
                 }
             }
             "sign" | "signP256" => {
-                let mut decoded = func.abi_decode_input(&data[SELECTOR_LEN..], false).ok()?;
+                let mut decoded = func.abi_decode_input(&data[SELECTOR_LEN..]).ok()?;
 
                 // Redact private key and replace in trace
                 // sign(uint256,bytes32) / signP256(uint256,bytes32) / sign(Wallet,bytes32)
@@ -458,7 +458,7 @@ impl CallTraceDecoder {
                 Some(decoded.iter().map(format_token).collect())
             }
             "signDelegation" | "signAndAttachDelegation" => {
-                let mut decoded = func.abi_decode_input(&data[SELECTOR_LEN..], false).ok()?;
+                let mut decoded = func.abi_decode_input(&data[SELECTOR_LEN..]).ok()?;
                 // Redact private key and replace in trace for
                 // signAndAttachDelegation(address implementation, uint256 privateKey)
                 // signDelegation(address implementation, uint256 privateKey)
@@ -482,7 +482,7 @@ impl CallTraceDecoder {
             "parseJsonBytes32Array" |
             "writeJson" |
             // `keyExists` is being deprecated in favor of `keyExistsJson`. It will be removed in future versions.
-            "keyExists" | 
+            "keyExists" |
             "keyExistsJson" |
             "serializeBool" |
             "serializeUint" |
@@ -495,10 +495,10 @@ impl CallTraceDecoder {
                 if self.verbosity >= 5 {
                     None
                 } else {
-                    let mut decoded = func.abi_decode_input(&data[SELECTOR_LEN..], false).ok()?;
+                    let mut decoded = func.abi_decode_input(&data[SELECTOR_LEN..]).ok()?;
                     let token = if func.name.as_str() == "parseJson" ||
                         // `keyExists` is being deprecated in favor of `keyExistsJson`. It will be removed in future versions.
-                        func.name.as_str() == "keyExists" || 
+                        func.name.as_str() == "keyExists" ||
                         func.name.as_str() == "keyExistsJson"
                     {
                         "<JSON file>"
@@ -513,7 +513,7 @@ impl CallTraceDecoder {
                 if self.verbosity >= 5 {
                     None
                 } else {
-                    let mut decoded = func.abi_decode_input(&data[SELECTOR_LEN..], false).ok()?;
+                    let mut decoded = func.abi_decode_input(&data[SELECTOR_LEN..]).ok()?;
                     let token = if func.name.as_str() == "parseToml" ||
                         func.name.as_str() == "keyExistsToml"
                     {
@@ -528,7 +528,7 @@ impl CallTraceDecoder {
             "createFork" |
             "createSelectFork" |
             "rpc" => {
-                let mut decoded = func.abi_decode_input(&data[SELECTOR_LEN..], false).ok()?;
+                let mut decoded = func.abi_decode_input(&data[SELECTOR_LEN..]).ok()?;
 
                 // Redact RPC URL except if referenced by an alias
                 if !decoded.is_empty() && func.inputs[0].ty == "string" {
@@ -561,7 +561,7 @@ impl CallTraceDecoder {
         }
 
         if let Some(values) =
-            funcs.iter().find_map(|func| func.abi_decode_output(&trace.output, false).ok())
+            funcs.iter().find_map(|func| func.abi_decode_output(&trace.output).ok())
         {
             // Functions coming from an external database do not have any outputs specified,
             // and will lead to returning an empty list of values.
@@ -608,7 +608,7 @@ impl CallTraceDecoder {
 
     /// The default decoded return data for a trace.
     fn default_return_data(&self, trace: &CallTrace) -> Option<String> {
-        (!trace.success).then(|| self.revert_decoder.decode(&trace.output, Some(trace.status)))
+        (!trace.success).then(|| self.revert_decoder.decode(&trace.output, trace.status))
     }
 
     /// Decodes an event.
@@ -628,7 +628,7 @@ impl CallTraceDecoder {
             }
         };
         for event in events {
-            if let Ok(decoded) = event.decode_log(log, false) {
+            if let Ok(decoded) = event.decode_log(log) {
                 let params = reconstruct_params(event, &decoded);
                 return DecodedCallLog {
                     name: Some(event.name.clone()),

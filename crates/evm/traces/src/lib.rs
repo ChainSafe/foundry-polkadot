@@ -15,7 +15,7 @@ use foundry_common::{
     contracts::{ContractsByAddress, ContractsByArtifact},
     shell,
 };
-use revm::interpreter::OpCode;
+use revm::bytecode::OpCode;
 use revm_inspectors::tracing::{
     types::{DecodedTraceStep, TraceMemberOrder},
     OpcodeFilter,
@@ -86,7 +86,7 @@ impl SparsedTraceArena {
                     .chain(nodes[node_idx].ordering.clone().into_iter().map(Some))
                     .enumerate();
 
-                let mut iternal_calls = Vec::new();
+                let mut internal_calls = Vec::new();
                 let mut items_to_remove = BTreeSet::new();
                 for (item_idx, item) in items {
                     if let Some(end_node) = ignored.get(&(node_idx, item_idx)) {
@@ -109,16 +109,17 @@ impl SparsedTraceArena {
                         // we only remove decoded internal calls if they did not start/pause tracing
                         Some(TraceMemberOrder::Step(step_idx)) => {
                             // If this is an internal call beginning, track it in `iternal_calls`
-                            if let Some(DecodedTraceStep::InternalCall(_, end_step_idx)) =
-                                &nodes[node_idx].trace.steps[step_idx].decoded
-                            {
-                                iternal_calls.push((item_idx, remove, *end_step_idx));
-                                // we decide if we should remove it later
-                                remove = false;
+                            if let Some(decoded) = &nodes[node_idx].trace.steps[step_idx].decoded {
+                                if let DecodedTraceStep::InternalCall(_, end_step_idx) = &**decoded
+                                {
+                                    internal_calls.push((item_idx, remove, *end_step_idx));
+                                    // we decide if we should remove it later
+                                    remove = false;
+                                }
                             }
                             // Handle ends of internal calls
-                            iternal_calls.retain(|(start_item_idx, remove_start, end_step_idx)| {
-                                if *end_step_idx != step_idx {
+                            internal_calls.retain(|(start_item_idx, remove_start, end_idx)| {
+                                if *end_idx != step_idx {
                                     return true;
                                 }
                                 // only remove start if end should be removed as well

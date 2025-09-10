@@ -121,7 +121,7 @@ foldhash.opt-level = 3
 keccak.opt-level = 3
 revm-interpreter.opt-level = 3
 revm-precompile.opt-level = 3
-revm-primitives.opt-level = 3
+# revm-primitives.opt-level = 3
 revm.opt-level = 3
 ruint.opt-level = 3
 sha2.opt-level = 3
@@ -199,14 +199,18 @@ revive-strategy = { path = "crates/revive-strategy" }
 # solc & compilation utilities
 foundry-block-explorers = { version = "0.22.0", default-features = false }
 foundry-compilers = { version = "0.19.1", default-features = false }
-foundry-fork-db = "0.16.0"
+foundry-fork-db = "0.18"
 solang-parser = { version = "=0.3.9", package = "foundry-solang-parser" }
 solar = { package = "solar-compiler", version = "=0.1.6", default-features = false }
 
 ## revm
-revm = { version = "27.0.2", default-features = false }
-revm-primitives = { version = "20.0.0", default-features = false }
-revm-inspectors = { version = "0.27.1", features = ["serde"] }
+revm = { version = "29.0.0", default-features = false }
+revm-inspectors = { version = "0.29.0", features = ["serde"] }
+op-revm = { version = "10.0.0", default-features = false }
+
+## alloy-evm
+alloy-evm = "0.19.0"
+alloy-op-evm = "0.19.0"
 
 ## alloy
 alloy-consensus = { version = "1.0.22", default-features = false }
@@ -247,6 +251,7 @@ alloy-sol-types = "1.3.0"
 alloy-chains = "0.2.9"
 alloy-rlp = "0.3"
 alloy-trie = "0.7.0"
+
 
 ## op-alloy
 op-alloy-consensus = "0.18.14"

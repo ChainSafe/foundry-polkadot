@@ -40,7 +40,7 @@ use foundry_compilers::{
     RestrictionsWithVersion, VyperLanguage,
 };
 use regex::Regex;
-use revm_primitives::{hardfork::SpecId, map::AddressHashMap, FixedBytes};
+use revm::primitives::{hardfork::SpecId, map::AddressHashMap, FixedBytes};
 use semver::Version;
 use serde::{Deserialize, Serialize, Serializer};
 use std::{
@@ -101,8 +101,8 @@ pub use figment;
 pub mod providers;
 pub use providers::Remappings;
 
-pub use semver;
 use providers::*;
+pub use semver;
 
 mod fuzz;
 pub use fuzz::{FuzzConfig, FuzzDictionaryConfig};

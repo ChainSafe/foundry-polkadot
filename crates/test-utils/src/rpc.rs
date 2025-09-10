@@ -213,7 +213,6 @@ fn next_url(is_ws: bool, chain: NamedChain) -> String {
 mod tests {
     use super::*;
     use alloy_primitives::address;
-    use foundry_block_explorers::EtherscanApiVersion;
     use foundry_config::Chain;
 
     #[tokio::test]
@@ -275,7 +274,6 @@ mod tests {
 
         let client = foundry_block_explorers::Client::builder()
             .with_api_key(ehterscan_key)
-            .with_api_version(EtherscanApiVersion::V1)
             .chain(Chain::optimism_mainnet())
             .unwrap()
             .build()

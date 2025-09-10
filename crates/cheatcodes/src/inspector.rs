@@ -34,7 +34,7 @@ use foundry_evm_core::{
     abi::Vm::stopExpectSafeMemoryCall,
     backend::{DatabaseError, DatabaseExt, RevertDiagnostic},
     constants::{CHEATCODE_ADDRESS, HARDHAT_CONSOLE_ADDRESS, MAGIC_ASSUME},
-    utils::new_evm_with_existing_context,
+    evm::new_evm_with_existing_context,
     InspectorExt,
 };
 use foundry_evm_traces::{TracingInspector, TracingInspectorConfig};
@@ -43,10 +43,11 @@ use itertools::Itertools;
 use proptest::test_runner::{RngAlgorithm, TestRng, TestRunner};
 use rand::Rng;
 use revm::{
+    bytecode::opcode as op,
+    handler::FrameResult,
     interpreter::{
-        opcode as op, CallInputs, CallOutcome, CallScheme, CreateInputs, CreateOutcome,
-        EOFCreateInputs, EOFCreateKind, Gas, InstructionResult, Interpreter, InterpreterAction,
-        InterpreterResult,
+        CallInputs, CallOutcome, CallScheme, CreateInputs, CreateOutcome, EOFCreateInputs,
+        EOFCreateKind, Gas, InstructionResult, Interpreter, InterpreterAction, InterpreterResult,
     },
     primitives::{
         BlockEnv, CreateScheme, EVMError, EvmStorageSlot, SignedAuthorization, SpecId,
@@ -109,15 +110,15 @@ pub trait CheatcodesExecutor {
             };
 
             let mut result = match first_frame_or_result {
-                revm::FrameOrResult::Frame(first_frame) => evm.run_the_loop(first_frame)?,
-                revm::FrameOrResult::Result(result) => result,
+                FrameOrResult::Frame(first_frame) => evm.run_the_loop(first_frame)?,
+                FrameOrResult::Result(result) => result,
             };
 
             evm.handler.execution().last_frame_return(&mut evm.context, &mut result)?;
 
             let outcome = match result {
-                revm::FrameResult::Call(_) => unreachable!(),
-                revm::FrameResult::Create(create) | revm::FrameResult::EOFCreate(create) => create,
+                FrameResult::Call(_) => unreachable!(),
+                FrameResult::Create(create) | FrameResult::EOFCreate(create) => create,
             };
 
             evm.context.evm.inner.journaled_state.depth -= 1;
@@ -145,7 +146,7 @@ fn with_evm<E, F, O>(
 where
     E: CheatcodesExecutor + ?Sized,
     F: for<'a, 'b> FnOnce(
-        &mut revm::Evm<'_, &'b mut dyn InspectorExt, &'a mut dyn DatabaseExt>,
+        &mut FoundryEvm<'a, &'b mut dyn InspectorExt>,
     ) -> Result<O, EVMError<DatabaseError>>,
 {
     let mut inspector = executor.get_inspector(ccx.state);

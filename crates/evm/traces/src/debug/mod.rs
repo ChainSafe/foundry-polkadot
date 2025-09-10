@@ -7,7 +7,7 @@ use alloy_dyn_abi::{
 use alloy_primitives::U256;
 use foundry_common::fmt::format_token;
 use foundry_compilers::artifacts::sourcemap::{Jump, SourceElement};
-use revm::interpreter::OpCode;
+use revm::bytecode::OpCode;
 use revm_inspectors::tracing::types::{CallTraceStep, DecodedInternalCall, DecodedTraceStep};
 pub use sources::{ArtifactData, ContractSources, SourceData};
 
@@ -158,10 +158,10 @@ impl<'a> DebugStepsWalker<'a> {
             })
             .unwrap_or_default();
 
-        self.node.trace.steps[start_idx].decoded = Some(DecodedTraceStep::InternalCall(
+        self.node.trace.steps[start_idx].decoded = Some(Box::new(DecodedTraceStep::InternalCall(
             DecodedInternalCall { func_name, args: inputs, return_data: outputs },
             self.current_step,
-        ));
+        )));
     }
 
     fn process(&mut self) {

@@ -610,7 +610,7 @@ impl InspectorStackRefMut<'_> {
 
         let env = EnvWithHandlerCfg::new_with_spec_id(ecx.env.clone(), ecx.spec_id());
         let res = self.with_stack(|inspector| {
-            let mut evm = crate::utils::new_evm_with_inspector(&mut ecx.db, env, inspector);
+            let mut evm = crate::evm::new_evm_with_inspector(&mut ecx.db, env, inspector);
 
             evm.context.evm.inner.journaled_state.state = {
                 let mut state = ecx.journaled_state.state.clone();

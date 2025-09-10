@@ -195,7 +195,7 @@ impl FuzzDictionary {
             // Try to decode log with events from contract abi.
             if let Some(abi) = abi {
                 for event in abi.events() {
-                    if let Ok(decoded_event) = event.decode_log(log, false) {
+                    if let Ok(decoded_event) = event.decode_log(log) {
                         samples.extend(decoded_event.indexed);
                         samples.extend(decoded_event.body);
                         log_decoded = true;
