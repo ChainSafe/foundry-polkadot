@@ -39,6 +39,8 @@ pub mod cmd;
 
 pub mod opts;
 
+pub mod genesis;
+
 #[macro_use]
 extern crate tracing;
 
@@ -83,9 +85,10 @@ pub fn run_command(args: Anvil) -> Result<()> {
         }
         return Ok(());
     }
-    let substrate_client = opts::SubstrateCli {};
 
     let (anvil_config, substrate_config) = args.node.into_node_config()?;
+
+    let substrate_client = opts::SubstrateCli { anvil_config: anvil_config.clone() };
 
     let tokio_runtime = build_runtime()?;
 

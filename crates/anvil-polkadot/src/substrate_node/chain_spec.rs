@@ -1,3 +1,4 @@
+use crate::{config::AnvilNodeConfig, genesis::GenesisConfig};
 use polkadot_sdk::{
     sc_executor::HostFunctions,
     sc_service::{self, ChainType, GenericChainSpec, Properties},
@@ -12,6 +13,7 @@ use substrate_runtime::WASM_BINARY;
 #[derive(Clone, Debug)]
 pub struct DevelopmentChainSpec<E = Option<()>, EHF = ()> {
     inner: sc_service::GenericChainSpec<E, EHF>,
+    genesis_config: GenesisConfig,
 }
 
 impl<E, EHF> BuildStorage for DevelopmentChainSpec<E, EHF>
@@ -47,7 +49,9 @@ fn props() -> Properties {
     properties
 }
 
-pub fn development_chain_spec() -> Result<DevelopmentChainSpec, String> {
+pub fn development_chain_spec(
+    anvil_config: AnvilNodeConfig,
+) -> Result<DevelopmentChainSpec, String> {
     let inner = GenericChainSpec::builder(
         WASM_BINARY.expect("Development wasm not available"),
         Default::default(),
@@ -58,5 +62,5 @@ pub fn development_chain_spec() -> Result<DevelopmentChainSpec, String> {
     .with_genesis_config_preset_name(sp_genesis_builder::DEV_RUNTIME_PRESET)
     .with_properties(props())
     .build();
-    Ok(DevelopmentChainSpec { inner })
+    Ok(DevelopmentChainSpec { inner, genesis_config: GenesisConfig::from(anvil_config) })
 }
