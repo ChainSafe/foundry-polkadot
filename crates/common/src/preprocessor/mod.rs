@@ -2,19 +2,17 @@ use foundry_compilers::{
     apply_updates,
     artifacts::SolcLanguage,
     error::Result,
-    multi::{MultiCompiler, MultiCompilerInput, MultiCompilerLanguage, SolidityCompiler},
+    multi::{MultiCompiler, MultiCompilerInput, MultiCompilerLanguage},
     project::Preprocessor,
     solc::{SolcCompiler, SolcVersionedInput},
-    Compiler, Language, ProjectPathsConfig,
+    Compiler, ProjectPathsConfig, SourceParser,
 };
-use solar::{
-    parse::{
-        ast::Span,
-        interface::{Session, SourceMap},
-    },
-    sema::{thread_local::ThreadLocal, ParsingContext},
+use solar::parse::{ast::Span, interface::SourceMap};
+use std::{
+    collections::HashSet,
+    ops::{ControlFlow, Range},
+    path::PathBuf,
 };
-use std::{collections::HashSet, ops::Range, path::PathBuf};
 
 mod data;
 use data::{collect_preprocessor_data, create_deploy_helpers};
@@ -45,10 +43,11 @@ impl Preprocessor<SolcCompiler> for TestOptimizerPreprocessor {
             return Ok(());
         }
 
-        let sess = solar_session_from_solc(input);
-        let _ = sess.enter(|| -> solar::parse::interface::Result {
-            // Set up the parsing context with the project paths.
-            let mut parsing_context = solar_pcx_from_solc_no_sources(&sess, input, paths);
+        let mut compiler =
+            foundry_compilers::resolver::parse::SolParser::new(paths.with_language_ref())
+                .into_compiler();
+        let _ = compiler.enter_mut(|compiler| -> solar::parse::interface::Result {
+            let mut pcx = compiler.parse();
 
             // Add the sources into the context.
             // Include all sources in the source map so as to not re-load them from disk, but only
@@ -56,45 +55,45 @@ impl Preprocessor<SolcCompiler> for TestOptimizerPreprocessor {
             let mut preprocessed_paths = vec![];
             let sources = &mut input.input.sources;
             for (path, source) in sources.iter() {
-                if let Ok(src_file) =
-                    sess.source_map().new_source_file(path.clone(), source.content.as_str())
+                if let Ok(src_file) = compiler
+                    .sess()
+                    .source_map()
+                    .new_source_file(path.clone(), source.content.as_str())
                 {
                     if paths.is_test_or_script(path) {
-                        parsing_context.add_file(src_file);
+                        pcx.add_file(src_file);
                         preprocessed_paths.push(path.clone());
                     }
                 }
             }
 
             // Parse and preprocess.
-            let hir_arena = ThreadLocal::new();
-            if let Some(gcx) = parsing_context.parse_and_lower(&hir_arena)? {
-                let hir = &gcx.get().hir;
-                // Collect tests and scripts dependencies and identify mock contracts.
-                let deps = PreprocessorDependencies::new(
-                    &sess,
-                    hir,
-                    &preprocessed_paths,
-                    &paths.paths_relative().sources,
-                    &paths.root,
-                    mocks,
-                );
-                // Collect data of source contracts referenced in tests and scripts.
-                let data = collect_preprocessor_data(&sess, hir, &deps.referenced_contracts);
+            pcx.parse();
+            let ControlFlow::Continue(()) = compiler.lower_asts()? else { return Ok(()) };
+            let gcx = compiler.gcx();
+            // Collect tests and scripts dependencies and identify mock contracts.
+            let deps = PreprocessorDependencies::new(
+                gcx,
+                &preprocessed_paths,
+                &paths.paths_relative().sources,
+                &paths.root,
+                mocks,
+            );
+            // Collect data of source contracts referenced in tests and scripts.
+            let data = collect_preprocessor_data(gcx, &deps.referenced_contracts);
 
-                // Extend existing sources with preprocessor deploy helper sources.
-                sources.extend(create_deploy_helpers(&data));
+            // Extend existing sources with preprocessor deploy helper sources.
+            sources.extend(create_deploy_helpers(&data));
 
-                // Generate and apply preprocessor source updates.
-                apply_updates(sources, remove_bytecode_dependencies(hir, &deps, &data));
-            }
+            // Generate and apply preprocessor source updates.
+            apply_updates(sources, remove_bytecode_dependencies(gcx, &deps, &data));
 
             Ok(())
         });
 
         // Warn if any diagnostics emitted during content parsing.
-        if let Err(err) = sess.emitted_errors().unwrap() {
-            warn!("failed preprocessing {err}");
+        if let Err(err) = compiler.sess().emitted_errors().unwrap() {
+            warn!("failed preprocessing:\n{err}");
         }
 
         Ok(())
@@ -113,7 +112,7 @@ impl Preprocessor<MultiCompiler> for TestOptimizerPreprocessor {
         let MultiCompilerInput::Solc(input) = input else { return Ok(()) };
 
         let Some(solc) = (match &compiler.solidity {
-            SolidityCompiler::Solc(solc) => Some(solc),
+            foundry_compilers::multi::SolidityCompiler::Solc(solc) => Some(solc),
             _ => None,
         }) else {
             return Ok(());
@@ -122,43 +121,4 @@ impl Preprocessor<MultiCompiler> for TestOptimizerPreprocessor {
         let paths = paths.clone().with_language::<SolcLanguage>();
         self.preprocess(solc, input, &paths, mocks)
     }
-}
-
-fn solar_session_from_solc(solc: &SolcVersionedInput) -> Session {
-    use solar::parse::interface::config;
-
-    Session::builder()
-        .with_buffer_emitter(Default::default())
-        .opts(config::Opts {
-            language: match solc.input.language {
-                SolcLanguage::Solidity => config::Language::Solidity,
-                SolcLanguage::Yul => config::Language::Yul,
-                _ => unimplemented!(),
-            },
-
-            // TODO: ...
-            /*
-            evm_version: solc.input.settings.evm_version,
-            */
-            ..Default::default()
-        })
-        .build()
-}
-
-fn solar_pcx_from_solc_no_sources<'sess>(
-    sess: &'sess Session,
-    solc: &SolcVersionedInput,
-    paths: &ProjectPathsConfig<impl Language>,
-) -> ParsingContext<'sess> {
-    let mut pcx = ParsingContext::new(sess);
-    pcx.file_resolver.set_current_dir(solc.cli_settings.base_path.as_ref().unwrap_or(&paths.root));
-    for remapping in &paths.remappings {
-        pcx.file_resolver.add_import_remapping(solar::sema::interface::config::ImportRemapping {
-            context: remapping.context.clone().unwrap_or_default(),
-            prefix: remapping.name.clone(),
-            path: remapping.path.clone(),
-        });
-    }
-    pcx.file_resolver.add_include_paths(solc.cli_settings.include_paths.iter().cloned());
-    pcx
 }
