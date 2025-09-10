@@ -16,7 +16,7 @@ use polkadot_sdk::{
     },
     sc_service,
 };
-use rand::thread_rng;
+use rand::rng;
 use serde_json::{json, Value};
 use std::{
     fmt::Write as FmtWrite,

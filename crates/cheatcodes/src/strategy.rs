@@ -8,7 +8,7 @@ use revm::{
 };
 
 use crate::{
-    inspector::{check_if_fixed_gas_limit, CommonCreateInput, Ecx, InnerEcx},
+    inspector::{check_if_fixed_gas_limit, CommonCreateInput, Ecx},
     script::Broadcast,
     BroadcastableTransaction, BroadcastableTransactions, CheatcodesExecutor, CheatsConfig,
     CheatsCtxt, DynCheatcode, Result,
@@ -68,7 +68,7 @@ pub trait CheatcodeInspectorStrategyRunner:
         _ctx: &mut dyn CheatcodeInspectorStrategyContext,
         config: Arc<CheatsConfig>,
         input: &dyn CommonCreateInput,
-        ecx_inner: InnerEcx,
+        ecx_inner: Ecx,
         broadcast: &Broadcast,
         broadcastable_transactions: &mut BroadcastableTransactions,
     );
@@ -80,7 +80,7 @@ pub trait CheatcodeInspectorStrategyRunner:
         _ctx: &mut dyn CheatcodeInspectorStrategyContext,
         _config: Arc<CheatsConfig>,
         input: &CallInputs,
-        ecx_inner: InnerEcx,
+        ecx_inner: Ecx,
         broadcast: &Broadcast,
         broadcastable_transactions: &mut BroadcastableTransactions,
         active_delegation: &mut Option<SignedAuthorization>,
@@ -127,7 +127,7 @@ impl CheatcodeInspectorStrategyRunner for EvmCheatcodeInspectorStrategyRunner {
         _ctx: &mut dyn CheatcodeInspectorStrategyContext,
         _config: Arc<CheatsConfig>,
         input: &dyn CommonCreateInput,
-        ecx_inner: InnerEcx,
+        ecx_inner: Ecx,
         broadcast: &Broadcast,
         broadcastable_transactions: &mut BroadcastableTransactions,
     ) {
@@ -154,7 +154,7 @@ impl CheatcodeInspectorStrategyRunner for EvmCheatcodeInspectorStrategyRunner {
         _ctx: &mut dyn CheatcodeInspectorStrategyContext,
         _config: Arc<CheatsConfig>,
         input: &CallInputs,
-        ecx_inner: InnerEcx,
+        ecx_inner: Ecx,
         broadcast: &Broadcast,
         broadcastable_transactions: &mut BroadcastableTransactions,
         active_delegation: &mut Option<SignedAuthorization>,
@@ -223,7 +223,7 @@ pub trait CheatcodeInspectorStrategyExt {
     fn revive_try_create(
         &self,
         _state: &mut crate::Cheatcodes,
-        _ecx: InnerEcx,
+        _ecx: Ecx,
         _input: &dyn CommonCreateInput,
         _executor: &mut dyn CheatcodesExecutor,
     ) -> Option<revm::interpreter::CreateOutcome> {
@@ -233,7 +233,7 @@ pub trait CheatcodeInspectorStrategyExt {
     fn revive_try_call(
         &self,
         _state: &mut crate::Cheatcodes,
-        _ecx: InnerEcx,
+        _ecx: Ecx,
         _input: &CallInputs,
         _executor: &mut dyn CheatcodesExecutor,
     ) -> Option<revm::interpreter::CallOutcome> {

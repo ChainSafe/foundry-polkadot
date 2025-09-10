@@ -1,7 +1,7 @@
 //! Implementations of [`Evm`](spec::Group::Evm) cheatcodes.
 
 use crate::{
-    inspector::{InnerEcx, RecordDebugStepInfo},
+    inspector::{Ecx, RecordDebugStepInfo},
     BroadcastableTransaction, Cheatcode, Cheatcodes, CheatcodesExecutor, CheatsCtxt, Error, Result,
     Vm::*,
 };
@@ -18,7 +18,11 @@ use foundry_evm_core::{
 use foundry_evm_traces::StackSnapshotType;
 use itertools::Itertools;
 use rand::Rng;
-use revm::primitives::{Account, Bytecode, SpecId, KECCAK_EMPTY};
+use revm::{
+    bytecode::Bytecode,
+    primitives::{hardfork::SpecId, KECCAK_EMPTY},
+    state::Account,
+};
 use std::{
     collections::{btree_map::Entry, BTreeMap},
     fmt::Display,
@@ -1152,7 +1156,7 @@ fn read_callers(state: &Cheatcodes, default_sender: &Address, call_depth: u64) -
 
 /// Ensures the `Account` is loaded and touched.
 pub(super) fn journaled_account<'a>(
-    ecx: InnerEcx<'a, '_, '_>,
+    ecx: Ecx<'a, '_, '_>,
     addr: Address,
 ) -> Result<&'a mut Account> {
     ecx.load_account(addr)?;

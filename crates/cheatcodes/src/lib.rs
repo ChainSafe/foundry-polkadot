@@ -47,7 +47,7 @@ mod evm;
 mod fs;
 
 mod inspector;
-pub use inspector::{CommonCreateInput, Ecx, InnerEcx};
+pub use inspector::{CommonCreateInput, Ecx};
 
 mod json;
 

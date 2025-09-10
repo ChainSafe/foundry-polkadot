@@ -11,7 +11,7 @@ use std::sync::{
 };
 
 fn shuffled<T>(mut vec: Vec<T>) -> Vec<T> {
-    vec.shuffle(&mut rand::thread_rng());
+    vec.shuffle(&mut rand::rng());
     vec
 }
 
@@ -41,7 +41,7 @@ static DRPC_KEYS: LazyLock<Vec<String>> = LazyLock::new(|| {
         keys.push(secret);
     }
 
-    keys.shuffle(&mut rand::thread_rng());
+    keys.shuffle(&mut rand::rng());
 
     keys
 });
@@ -77,7 +77,7 @@ static ETHERSCAN_KEYS: LazyLock<Vec<String>> = LazyLock::new(|| {
         .filter(|keys| !keys.is_empty())
         .unwrap_or_else(fallback_etherscan_keys);
 
-    keys.shuffle(&mut rand::thread_rng());
+    keys.shuffle(&mut rand::rng());
     keys
 });
 

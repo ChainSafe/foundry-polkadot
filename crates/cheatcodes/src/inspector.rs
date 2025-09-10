@@ -22,19 +22,20 @@ use crate::{
     Vm::{self, AccountAccess},
 };
 use alloy_consensus::BlobTransactionSidecar;
+use alloy_evm::eth::EthEvmContext;
 use alloy_primitives::{
     hex,
     map::{AddressHashMap, HashMap, HashSet},
     Address, Bytes, Log, TxKind, B256, U256,
 };
-use alloy_rpc_types::AccessList;
+use alloy_rpc_types::{AccessList, SignedAuthorization};
 use alloy_sol_types::{SolCall, SolInterface, SolValue};
 use foundry_common::{evm::Breakpoints, TransactionMaybeSigned, SELECTOR_LEN};
 use foundry_evm_core::{
     abi::Vm::stopExpectSafeMemoryCall,
     backend::{DatabaseError, DatabaseExt, RevertDiagnostic},
     constants::{CHEATCODE_ADDRESS, HARDHAT_CONSOLE_ADDRESS, MAGIC_ASSUME},
-    evm::new_evm_with_existing_context,
+    evm::{new_evm_with_existing_context, FoundryEvm},
     InspectorExt,
 };
 use foundry_evm_traces::{TracingInspector, TracingInspectorConfig};
@@ -44,16 +45,14 @@ use proptest::test_runner::{RngAlgorithm, TestRng, TestRunner};
 use rand::Rng;
 use revm::{
     bytecode::opcode as op,
+    context::{result::EVMError, BlockEnv, CreateScheme, LocalContext},
     handler::FrameResult,
     interpreter::{
-        CallInputs, CallOutcome, CallScheme, CreateInputs, CreateOutcome, EOFCreateInputs,
-        EOFCreateKind, Gas, InstructionResult, Interpreter, InterpreterAction, InterpreterResult,
+        CallInputs, CallOutcome, CallScheme, CreateInputs, CreateOutcome, FrameInput, Gas,
+        InstructionResult, Interpreter, InterpreterAction, InterpreterResult,
     },
-    primitives::{
-        BlockEnv, CreateScheme, EVMError, EvmStorageSlot, SignedAuthorization, SpecId,
-        EOF_MAGIC_BYTES,
-    },
-    EvmContext, InnerEvmContext, Inspector,
+    state::EvmStorageSlot,
+    Inspector, Journal,
 };
 use serde_json::Value;
 use std::{
@@ -69,8 +68,7 @@ use std::{
 mod utils;
 pub use utils::CommonCreateInput;
 
-pub type Ecx<'a, 'b, 'c> = &'a mut EvmContext<&'b mut (dyn DatabaseExt + 'c)>;
-pub type InnerEcx<'a, 'b, 'c> = &'a mut InnerEvmContext<&'b mut (dyn DatabaseExt + 'c)>;
+pub type Ecx<'a, 'b, 'c> = &'a mut EthEvmContext<&'b mut (dyn DatabaseExt + 'c)>;
 
 /// Helper trait for obtaining complete [revm::Inspector] instance from mutable reference to
 /// [Cheatcodes].
@@ -82,46 +80,23 @@ pub trait CheatcodesExecutor {
     /// [revm::Inspector].
     fn get_inspector<'a>(&'a mut self, cheats: &'a mut Cheatcodes) -> Box<dyn InspectorExt + 'a>;
 
-    /// Obtains [revm::Evm] instance and executes the given CREATE frame.
+    /// Obtains [FoundryEvm] instance and executes the given CREATE frame.
     fn exec_create(
         &mut self,
         inputs: CreateInputs,
         ccx: &mut CheatsCtxt,
     ) -> Result<CreateOutcome, EVMError<DatabaseError>> {
         with_evm(self, ccx, |evm| {
-            evm.context.evm.inner.journaled_state.depth += 1;
+            evm.inner.ctx.journaled_state.depth += 1;
 
-            // Handle EOF bytecode
-            let first_frame_or_result = if evm.handler.cfg.spec_id.is_enabled_in(SpecId::OSAKA) &&
-                inputs.scheme == CreateScheme::Create &&
-                inputs.init_code.starts_with(&EOF_MAGIC_BYTES)
-            {
-                evm.handler.execution().eofcreate(
-                    &mut evm.context,
-                    Box::new(EOFCreateInputs::new(
-                        inputs.caller,
-                        inputs.value,
-                        inputs.gas_limit,
-                        EOFCreateKind::Tx { initdata: inputs.init_code },
-                    )),
-                )?
-            } else {
-                evm.handler.execution().create(&mut evm.context, Box::new(inputs))?
-            };
+            let frame = FrameInput::Create(Box::new(inputs));
 
-            let mut result = match first_frame_or_result {
-                FrameOrResult::Frame(first_frame) => evm.run_the_loop(first_frame)?,
-                FrameOrResult::Result(result) => result,
-            };
-
-            evm.handler.execution().last_frame_return(&mut evm.context, &mut result)?;
-
-            let outcome = match result {
+            let outcome = match evm.run_execution(frame)? {
                 FrameResult::Call(_) => unreachable!(),
-                FrameResult::Create(create) | FrameResult::EOFCreate(create) => create,
+                FrameResult::Create(create) => create,
             };
 
-            evm.context.evm.inner.journaled_state.depth -= 1;
+            evm.inner.ctx.journaled_state.depth -= 1;
 
             Ok(outcome)
         })
@@ -132,12 +107,12 @@ pub trait CheatcodesExecutor {
     }
 
     /// Returns a mutable reference to the tracing inspector if it is available.
-    fn tracing_inspector(&mut self) -> Option<&mut Option<TracingInspector>> {
+    fn tracing_inspector(&mut self) -> Option<&mut TracingInspector> {
         None
     }
 }
 
-/// Constructs [revm::Evm] and runs a given closure with it.
+/// Constructs [FoundryEvm] and runs a given closure with it.
 fn with_evm<E, F, O>(
     executor: &mut E,
     ccx: &mut CheatsCtxt,
@@ -151,27 +126,29 @@ where
 {
     let mut inspector = executor.get_inspector(ccx.state);
     let error = std::mem::replace(&mut ccx.ecx.error, Ok(()));
-    let l1_block_info = std::mem::take(&mut ccx.ecx.l1_block_info);
 
-    let inner = revm::InnerEvmContext {
-        env: ccx.ecx.env.clone(),
-        journaled_state: std::mem::replace(
-            &mut ccx.ecx.journaled_state,
-            revm::JournaledState::new(Default::default(), Default::default()),
-        ),
-        db: &mut ccx.ecx.db as &mut dyn DatabaseExt,
+    let ctx = EthEvmContext {
+        block: ccx.ecx.block.clone(),
+        cfg: ccx.ecx.cfg.clone(),
+        tx: ccx.ecx.tx.clone(),
+        journaled_state: Journal {
+            inner: ccx.ecx.journaled_state.inner.clone(),
+            database: &mut *ccx.ecx.journaled_state.database as &mut dyn DatabaseExt,
+        },
+        local: LocalContext::default(),
+        chain: (),
         error,
-        l1_block_info,
     };
 
-    let mut evm = new_evm_with_existing_context(inner, &mut *inspector);
+    let mut evm = new_evm_with_existing_context(ctx, &mut *inspector);
 
     let res = f(&mut evm)?;
 
-    ccx.ecx.journaled_state = evm.context.evm.inner.journaled_state;
-    ccx.ecx.env = evm.context.evm.inner.env;
-    ccx.ecx.l1_block_info = evm.context.evm.inner.l1_block_info;
-    ccx.ecx.error = evm.context.evm.inner.error;
+    ccx.ecx.journaled_state.inner = evm.inner.ctx.journaled_state.inner;
+    ccx.ecx.block = evm.inner.ctx.block;
+    ccx.ecx.tx = evm.inner.ctx.tx;
+    ccx.ecx.cfg = evm.inner.ctx.cfg;
+    ccx.ecx.error = evm.inner.ctx.error;
 
     Ok(res)
 }
@@ -326,10 +303,10 @@ impl ArbitraryStorage {
     /// Saves arbitrary storage value for a given address:
     /// - store value in changed values cache.
     /// - update account's storage with given value.
-    pub fn save(&mut self, ecx: InnerEcx, address: Address, slot: U256, data: U256) {
+    pub fn save(&mut self, ecx: Ecx, address: Address, slot: U256, data: U256) {
         self.values.get_mut(&address).expect("missing arbitrary address entry").insert(slot, data);
-        if let Ok(mut account) = ecx.load_account(address) {
-            account.storage.insert(slot, EvmStorageSlot::new(data));
+        if let Ok(mut account) = ecx.journaled_state.load_account(address) {
+            account.storage.insert(slot, EvmStorageSlot::new(data, 0));
         }
     }
 
@@ -338,7 +315,7 @@ impl ArbitraryStorage {
     ///   existing value.
     /// - if no value was yet generated for given slot, then save new value in cache and update both
     ///   source and target storages.
-    pub fn copy(&mut self, ecx: InnerEcx, target: Address, slot: U256, new_value: U256) -> U256 {
+    pub fn copy(&mut self, ecx: Ecx, target: Address, slot: U256, new_value: U256) -> U256 {
         let source = self.copies.get(&target).expect("missing arbitrary copy target entry");
         let storage_cache = self.values.get_mut(source).expect("missing arbitrary source storage");
         let value = match storage_cache.get(&slot) {
@@ -346,15 +323,15 @@ impl ArbitraryStorage {
             None => {
                 storage_cache.insert(slot, new_value);
                 // Update source storage with new value.
-                if let Ok(mut source_account) = ecx.load_account(*source) {
-                    source_account.storage.insert(slot, EvmStorageSlot::new(new_value));
+                if let Ok(mut source_account) = ecx.journaled_state.load_account(*source) {
+                    source_account.storage.insert(slot, EvmStorageSlot::new(new_value, 0));
                 }
                 new_value
             }
         };
         // Update target storage with new value.
-        if let Ok(mut target_account) = ecx.load_account(target) {
-            target_account.storage.insert(slot, EvmStorageSlot::new(value));
+        if let Ok(mut target_account) = ecx.journaled_state.load_account(target) {
+            target_account.storage.insert(slot, EvmStorageSlot::new(value, 0));
         }
         value
     }
@@ -598,7 +575,7 @@ impl Cheatcodes {
         executor: &mut dyn CheatcodesExecutor,
     ) -> Result {
         // decode the cheatcode call
-        let decoded = Vm::VmCalls::abi_decode(&call.input, false).map_err(|e| {
+        let decoded = Vm::VmCalls::abi_decode(&call.input.bytes(ecx)).map_err(|e| {
             if let alloy_sol_types::Error::UnknownSelector { name: _, selector } = e {
                 let msg = format!(
                     "unknown cheatcode with selector {selector}; \
@@ -614,17 +591,11 @@ impl Cheatcodes {
 
         // ensure the caller is allowed to execute cheatcodes,
         // but only if the backend is in forking mode
-        ecx.db.ensure_cheatcode_access_forking_mode(&caller)?;
+        ecx.journaled_state.database.ensure_cheatcode_access_forking_mode(&caller)?;
 
         apply_dispatch(
             &decoded,
-            &mut CheatsCtxt {
-                state: self,
-                ecx: &mut ecx.inner,
-                precompiles: &mut ecx.precompiles,
-                gas_limit: call.gas_limit,
-                caller,
-            },
+            &mut CheatsCtxt { state: self, ecx, gas_limit: call.gas_limit, caller },
             executor,
         )
     }
@@ -634,9 +605,11 @@ impl Cheatcodes {
     ///
     /// There may be cheatcodes in the constructor of the new contract, in order to allow them
     /// automatically we need to determine the new address.
-    fn allow_cheatcodes_on_create(&self, ecx: InnerEcx, caller: Address, created_address: Address) {
-        if ecx.journaled_state.depth <= 1 || ecx.db.has_cheatcode_access(&caller) {
-            ecx.db.allow_cheatcode_access(created_address);
+    fn allow_cheatcodes_on_create(&self, ecx: Ecx, caller: Address, created_address: Address) {
+        if ecx.journaled_state.depth <= 1 ||
+            ecx.journaled_state.database.has_cheatcode_access(&caller)
+        {
+            ecx.journaled_state.database.allow_cheatcode_access(created_address);
         }
     }
 
@@ -948,7 +921,7 @@ where {
         // decreasing sender nonce to ensure that it matches on-chain nonce once we start
         // broadcasting.
         if curr_depth == 0 {
-            let sender = ecx.env.tx.caller;
+            let sender = ecx.tx.caller;
             let account = match super::evm::journaled_account(ecx, sender) {
                 Ok(account) => account,
                 Err(err) => {
@@ -989,8 +962,6 @@ where {
             };
         }
 
-        let ecx = &mut ecx.inner;
-
         if call.target_address == HARDHAT_CONSOLE_ADDRESS {
             return None;
         }
@@ -1006,7 +977,7 @@ where {
                 // The calldata is at most, as big as this call's input, and
                 if calldata.len() <= call.input.len() &&
                     // Both calldata match, taking the length of the assumed smaller one (which will have at least the selector), and
-                    *calldata == call.input[..calldata.len()] &&
+                    *calldata == call.input.bytes(ecx)[..calldata.len()] &&
                     // The value matches, if provided
                     expected
                         .value.is_none_or(|value| Some(value) == call.transfer_value()) &&
@@ -1022,19 +993,25 @@ where {
 
         // Handle mocked calls
         if let Some(mocks) = self.mocked_calls.get_mut(&call.bytecode_address) {
-            let ctx =
-                MockCallDataContext { calldata: call.input.clone(), value: call.transfer_value() };
+            let ctx = MockCallDataContext {
+                calldata: call.input.bytes(ecx),
+                value: call.transfer_value(),
+            };
 
-            if let Some(return_data_queue) = match mocks.get_mut(&ctx) {
-                Some(queue) => Some(queue),
-                None => mocks
-                    .iter_mut()
-                    .find(|(mock, _)| {
-                        call.input.get(..mock.calldata.len()) == Some(&mock.calldata[..]) &&
-                            mock.value.is_none_or(|value| Some(value) == call.transfer_value())
-                    })
-                    .map(|(_, v)| v),
-            } {
+            if let Some(return_data_queue) =
+                match mocks.get_mut(&ctx) {
+                    Some(queue) => Some(queue),
+                    None => mocks
+                        .iter_mut()
+                        .find(|(mock, _)| {
+                            call.input.bytes(ecx).get(..mock.calldata.len()) ==
+                                Some(&mock.calldata[..]) &&
+                                mock.value
+                                    .is_none_or(|value| Some(value) == call.transfer_value())
+                        })
+                        .map(|(_, v)| v),
+                }
+            {
                 if let Some(return_data) = if return_data_queue.len() == 1 {
                     // If the mocked calls stack has a single element in it, don't empty it
                     return_data_queue.front().map(|x| x.to_owned())
@@ -1190,9 +1167,6 @@ where {
                 CallScheme::CallCode => crate::Vm::AccountAccessKind::CallCode,
                 CallScheme::DelegateCall => crate::Vm::AccountAccessKind::DelegateCall,
                 CallScheme::StaticCall => crate::Vm::AccountAccessKind::StaticCall,
-                CallScheme::ExtCall => crate::Vm::AccountAccessKind::Call,
-                CallScheme::ExtStaticCall => crate::Vm::AccountAccessKind::StaticCall,
-                CallScheme::ExtDelegateCall => crate::Vm::AccountAccessKind::DelegateCall,
             };
             // Record this call by pushing it to a new pending vector; all subsequent calls at
             // that depth will be pushed to the same vector. When the call ends, the
@@ -1201,8 +1175,8 @@ where {
             // as "warm" if the call from which they were accessed is reverted
             recorded_account_diffs_stack.push(vec![AccountAccess {
                 chainInfo: crate::Vm::ChainInfo {
-                    forkId: ecx.db.active_fork_id().unwrap_or_default(),
-                    chainId: U256::from(ecx.env.cfg.chain_id),
+                    forkId: ecx.journaled_state.db().active_fork_id().unwrap_or_default(),
+                    chainId: U256::from(ecx.cfg.chain_id),
                 },
                 accessor: call.caller,
                 account: call.bytecode_address,
@@ -1211,7 +1185,7 @@ where {
                 oldBalance: old_balance,
                 newBalance: U256::ZERO, // updated on call_end
                 value: call.call_value(),
-                data: call.input.clone(),
+                data: call.input.bytes(ecx),
                 reverted: false,
                 deployedCode: Bytes::new(),
                 storageAccesses: vec![], // updated on step
@@ -1296,10 +1270,10 @@ impl Inspector<&mut dyn DatabaseExt> for Cheatcodes {
         // When the first interpreter is initialized we've circumvented the balance and gas checks,
         // so we apply our actual block data with the correct fees and all.
         if let Some(block) = self.block.take() {
-            ecx.env.block = block;
+            ecx.block = block;
         }
         if let Some(gas_price) = self.gas_price.take() {
-            ecx.env.tx.gas_price = gas_price;
+            ecx.tx.gas_price = gas_price;
         }
 
         // Record gas for current frame.
@@ -1325,7 +1299,7 @@ impl Inspector<&mut dyn DatabaseExt> for Cheatcodes {
             return;
         }
 
-        self.pc = interpreter.program_counter();
+        self.pc = interpreter.bytecode.pc();
 
         // `pauseGasMetering`: pause / resume interpreter gas.
         if self.gas_metering.paused {
@@ -1809,19 +1783,6 @@ impl Inspector<&mut dyn DatabaseExt> for Cheatcodes {
         outcome: CreateOutcome,
     ) -> CreateOutcome {
         self.create_end_common(ecx, Some(call), outcome)
-    }
-
-    fn eofcreate(&mut self, ecx: Ecx, call: &mut EOFCreateInputs) -> Option<CreateOutcome> {
-        self.create_common(ecx, call)
-    }
-
-    fn eofcreate_end(
-        &mut self,
-        ecx: Ecx,
-        _call: &EOFCreateInputs,
-        outcome: CreateOutcome,
-    ) -> CreateOutcome {
-        self.create_end_common(ecx, None, outcome)
     }
 }
 
@@ -2317,7 +2278,7 @@ fn disallowed_mem_write(
 
 // Determines if the gas limit on a given call was manually set in the script and should therefore
 // not be overwritten by later estimations
-pub fn check_if_fixed_gas_limit(ecx: InnerEcx, call_gas_limit: u64) -> bool {
+pub fn check_if_fixed_gas_limit(ecx: Ecx, call_gas_limit: u64) -> bool {
     // If the gas limit was not set in the source code it is set to the estimated gas left at the
     // time of the call, which should be rather close to configured gas limit.
     // TODO: Find a way to reliably make this determination.

@@ -41,7 +41,7 @@ use foundry_evm::{
 };
 use itertools::Itertools;
 use parking_lot::RwLock;
-use rand::thread_rng;
+use rand::rng;
 use revm::primitives::BlobExcessGasAndPrice;
 use serde_json::{json, Value};
 use std::{
