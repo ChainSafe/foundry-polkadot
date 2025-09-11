@@ -6,11 +6,11 @@ use foundry_cheatcodes::CheatcodesStrategy;
 use foundry_compilers::{
     compilers::resolc::dual_compiled_contracts::DualCompiledContracts, ProjectCompileOutput,
 };
-use foundry_evm_core::backend::{Backend, BackendResult, BackendStrategy, CowBackend};
-use revm::{
-    primitives::{EnvWithHandlerCfg, ResultAndState},
-    DatabaseRef,
+use foundry_evm_core::{
+    backend::{Backend, BackendResult, BackendStrategy, CowBackend},
+    Env,
 };
+use revm::{context::result::ResultAndState, DatabaseRef};
 
 use crate::inspectors::InspectorStack;
 
@@ -78,8 +78,8 @@ pub trait ExecutorStrategyRunner: Debug + Send + Sync + ExecutorStrategyExt {
         &self,
         ctx: &dyn ExecutorStrategyContext,
         backend: &mut CowBackend<'_>,
-        env: &mut EnvWithHandlerCfg,
-        executor_env: &EnvWithHandlerCfg,
+        env: &mut Env,
+        executor_env: &Env,
         inspector: &mut InspectorStack,
     ) -> Result<ResultAndState>;
 
@@ -88,8 +88,8 @@ pub trait ExecutorStrategyRunner: Debug + Send + Sync + ExecutorStrategyExt {
         &self,
         ctx: &mut dyn ExecutorStrategyContext,
         backend: &mut Backend,
-        env: &mut EnvWithHandlerCfg,
-        executor_env: &EnvWithHandlerCfg,
+        env: &mut Env,
+        executor_env: &Env,
         inspector: &mut InspectorStack,
     ) -> Result<ResultAndState>;
 }
@@ -153,8 +153,8 @@ impl ExecutorStrategyRunner for EvmExecutorStrategyRunner {
         &self,
         _ctx: &dyn ExecutorStrategyContext,
         backend: &mut CowBackend<'_>,
-        env: &mut EnvWithHandlerCfg,
-        _executor_env: &EnvWithHandlerCfg,
+        env: &mut Env,
+        _executor_env: &Env,
         inspector: &mut InspectorStack,
     ) -> Result<ResultAndState> {
         backend.inspect(env, inspector, Box::new(()))
@@ -164,8 +164,8 @@ impl ExecutorStrategyRunner for EvmExecutorStrategyRunner {
         &self,
         _ctx: &mut dyn ExecutorStrategyContext,
         backend: &mut Backend,
-        env: &mut EnvWithHandlerCfg,
-        _executor_env: &EnvWithHandlerCfg,
+        env: &mut Env,
+        _executor_env: &Env,
         inspector: &mut InspectorStack,
     ) -> Result<ResultAndState> {
         backend.inspect(env, inspector, Box::new(()))

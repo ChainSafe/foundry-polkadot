@@ -3,10 +3,12 @@ use alloy_sol_types::{SolEvent, SolInterface, SolValue};
 use foundry_common::{fmt::ConsoleFmt, ErrorExt};
 use foundry_evm_core::{abi::console, constants::HARDHAT_CONSOLE_ADDRESS, InspectorExt};
 use revm::{
+    context::ContextTr,
     interpreter::{
-        CallInputs, CallOutcome, Gas, InstructionResult, Interpreter, InterpreterResult,
+        interpreter::EthInterpreter, CallInputs, CallOutcome, Gas, InstructionResult, Interpreter,
+        InterpreterResult,
     },
-    Database, EvmContext, Inspector,
+    Inspector,
 };
 
 /// An inspector that collects logs during execution.
@@ -20,8 +22,11 @@ pub struct LogCollector {
 
 impl LogCollector {
     #[cold]
-    fn do_hardhat_log(&mut self, inputs: &CallInputs) -> Option<CallOutcome> {
-        if let Err(err) = self.hardhat_log(&inputs.input) {
+    fn do_hardhat_log<CTX>(&mut self, context: &mut CTX, inputs: &CallInputs) -> Option<CallOutcome>
+    where
+        CTX: ContextTr,
+    {
+        if let Err(err) = self.hardhat_log(&inputs.input.bytes(context)) {
             let result = InstructionResult::Revert;
             let output = err.abi_encode_revert();
             return Some(CallOutcome {
@@ -33,24 +38,23 @@ impl LogCollector {
     }
 
     fn hardhat_log(&mut self, data: &[u8]) -> alloy_sol_types::Result<()> {
-        let decoded = console::hh::ConsoleCalls::abi_decode(data, false)?;
+        let decoded = console::hh::ConsoleCalls::abi_decode(data)?;
         self.logs.push(hh_to_ds(&decoded));
         Ok(())
     }
 }
 
-impl<DB: Database> Inspector<DB> for LogCollector {
-    fn log(&mut self, _interp: &mut Interpreter, _context: &mut EvmContext<DB>, log: &Log) {
-        self.logs.push(log.clone());
+impl<CTX> Inspector<CTX, EthInterpreter> for LogCollector
+where
+    CTX: ContextTr,
+{
+    fn log(&mut self, _interp: &mut Interpreter, _context: &mut CTX, log: Log) {
+        self.logs.push(log);
     }
 
-    fn call(
-        &mut self,
-        _context: &mut EvmContext<DB>,
-        inputs: &mut CallInputs,
-    ) -> Option<CallOutcome> {
+    fn call(&mut self, context: &mut CTX, inputs: &mut CallInputs) -> Option<CallOutcome> {
         if inputs.target_address == HARDHAT_CONSOLE_ADDRESS {
-            return self.do_hardhat_log(inputs);
+            return self.do_hardhat_log(context, inputs);
         }
         None
     }
