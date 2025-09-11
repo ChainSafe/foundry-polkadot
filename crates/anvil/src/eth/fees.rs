@@ -9,9 +9,9 @@ use alloy_eips::{
 };
 use alloy_primitives::B256;
 use anvil_core::eth::transaction::TypedTransaction;
-use foundry_evm::revm::primitives::{BlobExcessGasAndPrice, SpecId};
 use futures::StreamExt;
 use parking_lot::{Mutex, RwLock};
+use revm::{context_interface::block::BlobExcessGasAndPrice, primitives::hardfork::SpecId};
 use std::{
     collections::BTreeMap,
     fmt,
@@ -54,7 +54,7 @@ pub struct FeeManager {
     /// Tracks the excess blob gas, and the base fee, for the next block post Cancun
     ///
     /// This value will be updated after a new block was mined
-    blob_excess_gas_and_price: Arc<RwLock<foundry_evm::revm::primitives::BlobExcessGasAndPrice>>,
+    blob_excess_gas_and_price: Arc<RwLock<BlobExcessGasAndPrice>>,
     /// The base price to use Pre London
     ///
     /// This will be constant value unless changed manually

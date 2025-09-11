@@ -152,7 +152,6 @@ impl<P: Provider<AnyNetwork>> CastTxBuilder<P, InitState> {
         let mut tx = WithOtherFields::<TransactionRequest>::default();
 
         let chain = utils::get_chain(config.chain, &provider).await?;
-        let etherscan_api_version = config.get_etherscan_api_version(Some(chain));
         let etherscan_api_key = config.get_etherscan_api_key(Some(chain));
         let legacy = tx_opts.legacy || chain.is_legacy();
 
@@ -265,7 +264,6 @@ impl<P: Provider<AnyNetwork>> CastTxBuilder<P, ToState> {
             blob: self.blob,
             chain: self.chain,
             etherscan_api_key: self.etherscan_api_key,
-            etherscan_api_version: self.etherscan_api_version,
             auth: self.auth,
             access_list: self.access_list,
             state: InputState { kind: self.state.to.into(), input, func },

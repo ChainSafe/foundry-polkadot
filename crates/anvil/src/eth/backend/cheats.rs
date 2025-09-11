@@ -73,3 +73,9 @@ pub struct CheatsState {
     /// If set to true will make the `is_impersonated` function always return true
     pub auto_impersonate_accounts: bool,
 }
+
+/// A custom ecrecover precompile that supports cheat-based signature overrides.
+#[derive(Clone, Debug)]
+pub struct CheatEcrecover {
+    cheats: Arc<CheatsManager>,
+}

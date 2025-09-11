@@ -3,10 +3,8 @@
 use crate::eth::backend::db::Db;
 use alloy_genesis::{Genesis, GenesisAccount};
 use alloy_primitives::{Address, U256};
-use foundry_evm::{
-    backend::DatabaseResult,
-    revm::primitives::{AccountInfo, Bytecode, KECCAK_EMPTY},
-};
+use foundry_evm::{backend::DatabaseResult, revm::primitives::KECCAK_EMPTY};
+use revm::state::{AccountInfo, Bytecode};
 use tokio::sync::RwLockWriteGuard;
 
 /// Genesis settings

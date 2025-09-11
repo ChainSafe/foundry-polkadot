@@ -1,7 +1,6 @@
-use crate::revm::primitives::Authorization;
 use alloy_chains::Chain;
 use alloy_dyn_abi::TypedData;
-use alloy_primitives::{hex, Address, PrimitiveSignature as Signature, B256, U256};
+use alloy_primitives::{hex, Address, Signature, B256, U256};
 use alloy_provider::Provider;
 use alloy_signer::{
     k256::{elliptic_curve::sec1::ToEncodedPoint, SecretKey},
@@ -17,7 +16,7 @@ use foundry_cli::{opts::RpcOpts, utils, utils::LoadConfig};
 use foundry_common::{fs, sh_println, shell};
 use foundry_config::Config;
 use foundry_wallets::{RawWalletOpts, WalletOpts, WalletSigner};
-use rand::rng;
+use rand_08::thread_rng as rng;
 use serde_json::json;
 use std::path::Path;
 use yansi::Paint;
@@ -264,7 +263,7 @@ impl WalletSubcommands {
     pub async fn run(self) -> Result<()> {
         match self {
             Self::New { path, account_name, unsafe_password, number, .. } => {
-                let mut rng = thread_rng();
+                let mut rng = rng();
 
                 let mut json_values = if shell::is_json() { Some(vec![]) } else { None };
                 if let Some(path) = path {
@@ -348,7 +347,7 @@ impl WalletSubcommands {
                     let entropy = Entropy::from_slice(hex::decode(entropy)?)?;
                     Mnemonic::<English>::new_from_entropy(entropy).to_phrase()
                 } else {
-                    let mut rng = thread_rng();
+                    let mut rng = rng();
                     Mnemonic::<English>::new_with_count(&mut rng, words)?.to_phrase()
                 };
 
@@ -525,7 +524,7 @@ flag to set your key via:
                     rpassword::prompt_password("Enter password: ")?
                 };
 
-                let mut rng = thread_rng();
+                let mut rng = rng();
                 let (wallet, _) = PrivateKeySigner::encrypt_keystore(
                     dir,
                     &mut rng,
@@ -692,7 +691,7 @@ flag to set your key via:
 
                 // Create a new keystore with the new password
                 let private_key = wallet.credential().to_bytes();
-                let mut rng = thread_rng();
+                let mut rng = rng();
                 let (wallet, _) = PrivateKeySigner::encrypt_keystore(
                     dir,
                     &mut rng,

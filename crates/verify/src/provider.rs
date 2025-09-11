@@ -9,8 +9,8 @@ use eyre::{OptionExt, Result};
 use foundry_common::compile::ProjectCompiler;
 use foundry_compilers::{
     artifacts::{output_selection::OutputSelection, Metadata, Source},
-    compilers::{multi::MultiCompilerParsedSource, solc::SolcCompiler},
-    multi::{MultiCompilerSettings, SolidityCompiler},
+    compilers::solc::SolcCompiler,
+    multi::{MultiCompilerParser, MultiCompilerSettings, SolidityCompiler},
     solc::Solc,
     Graph, Project,
 };
@@ -88,8 +88,7 @@ impl VerificationContext {
     pub fn get_target_imports(&self) -> Result<Vec<PathBuf>> {
         let mut sources = self.project.paths.read_input_files()?;
         sources.insert(self.target_path.clone(), Source::read(&self.target_path)?);
-        let graph =
-            Graph::<MultiCompilerParsedSource>::resolve_sources(&self.project.paths, sources)?;
+        let graph = Graph::<MultiCompilerParser>::resolve_sources(&self.project.paths, sources)?;
 
         Ok(graph.imports(&self.target_path).into_iter().map(Into::into).collect())
     }

@@ -35,6 +35,7 @@ alloy-rpc-types.workspace = true
 alloy-sol-types.workspace = true
 foundry-fork-db.workspace = true
 alloy-evm.workspace = true
+alloy-op-evm.workspace = true
 
 revm = { workspace = true, features = [
     "std",
@@ -48,6 +49,7 @@ revm = { workspace = true, features = [
     "blst",
 ] }
 revm-inspectors.workspace = true
+op-revm.workspace = true
 
 auto_impl.workspace = true
 eyre.workspace = true

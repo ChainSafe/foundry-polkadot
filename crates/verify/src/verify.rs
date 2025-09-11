@@ -19,7 +19,7 @@ use foundry_compilers::{artifacts::EvmVersion, compilers::solc::Solc, info::Cont
 use foundry_config::{figment, impl_figment_convert, impl_figment_convert_cast, Config, SolcReq};
 use itertools::Itertools;
 use reqwest::Url;
-use revm_primitives::HashSet;
+use revm::primitives::HashSet;
 use semver::BuildMetadata;
 use std::path::PathBuf;
 
@@ -45,7 +45,6 @@ impl Default for VerifierArgs {
             verifier: VerificationProviderType::Sourcify,
             verifier_api_key: None,
             verifier_url: None,
-            verifier_api_version: None,
         }
     }
 }
@@ -177,10 +176,6 @@ impl figment::Provider for VerifyArgs {
 
         if let Some(api_key) = &self.verifier.verifier_api_key {
             dict.insert("etherscan_api_key".into(), api_key.as_str().into());
-        }
-
-        if let Some(api_version) = &self.verifier.verifier_api_version {
-            dict.insert("etherscan_api_version".into(), api_version.to_string().into());
         }
 
         Ok(figment::value::Map::from([(Config::selected_profile(), dict)]))
@@ -450,10 +445,6 @@ impl figment::Provider for VerifyCheckArgs {
         let mut dict = self.etherscan.dict();
         if let Some(api_key) = &self.etherscan.key {
             dict.insert("etherscan_api_key".into(), api_key.as_str().into());
-        }
-
-        if let Some(api_version) = &self.etherscan.api_version {
-            dict.insert("etherscan_api_version".into(), api_version.to_string().into());
         }
 
         Ok(figment::value::Map::from([(Config::selected_profile(), dict)]))

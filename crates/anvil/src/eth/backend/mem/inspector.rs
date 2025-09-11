@@ -7,16 +7,14 @@ use foundry_evm::{
     decode::decode_console_logs,
     inspectors::{LogCollector, TracingInspector},
     revm::{
-        interpreter::{
-            CallInputs, CallOutcome, CreateInputs, CreateOutcome, EOFCreateInputs, Interpreter,
-        },
+        interpreter::{CallInputs, CallOutcome, CreateInputs, CreateOutcome, Interpreter},
         primitives::U256,
-        EvmContext,
     },
     traces::{
         render_trace_arena_inner, CallTraceDecoder, SparsedTraceArena, TracingInspectorConfig,
     },
 };
+use revm::{context::ContextTr, inspector::JournalExt, interpreter::interpreter::EthInterpreter};
 
 /// The [`revm::Inspector`] used when transacting in the evm
 #[derive(Clone, Debug, Default)]
@@ -104,32 +102,35 @@ fn print_traces(tracer: TracingInspector) {
     node_info!("{}", render_trace_arena_inner(&traces, false, true));
 }
 
-impl<DB: Database> revm::Inspector<DB> for Inspector {
-    fn initialize_interp(&mut self, interp: &mut Interpreter, ecx: &mut EvmContext<DB>) {
+impl<CTX> revm::Inspector<CTX, EthInterpreter> for Inspector
+where
+    CTX: ContextTr<Journal: JournalExt>,
+{
+    fn initialize_interp(&mut self, interp: &mut Interpreter, ecx: &mut CTX) {
         call_inspectors!([&mut self.tracer], |inspector| {
             inspector.initialize_interp(interp, ecx);
         });
     }
 
-    fn step(&mut self, interp: &mut Interpreter, ecx: &mut EvmContext<DB>) {
+    fn step(&mut self, interp: &mut Interpreter, ecx: &mut CTX) {
         call_inspectors!([&mut self.tracer], |inspector| {
             inspector.step(interp, ecx);
         });
     }
 
-    fn step_end(&mut self, interp: &mut Interpreter, ecx: &mut EvmContext<DB>) {
+    fn step_end(&mut self, interp: &mut Interpreter, ecx: &mut CTX) {
         call_inspectors!([&mut self.tracer], |inspector| {
             inspector.step_end(interp, ecx);
         });
     }
 
-    fn log(&mut self, interp: &mut Interpreter, ecx: &mut EvmContext<DB>, log: &Log) {
+    fn log(&mut self, interp: &mut Interpreter, ecx: &mut CTX, log: alloy_primitives::Log) {
         call_inspectors!([&mut self.tracer, &mut self.log_collector], |inspector| {
             inspector.log(interp, ecx, log);
         });
     }
 
-    fn call(&mut self, ecx: &mut EvmContext<DB>, inputs: &mut CallInputs) -> Option<CallOutcome> {
+    fn call(&mut self, ecx: &mut CTX, inputs: &mut CallInputs) -> Option<CallOutcome> {
         call_inspectors!(
             #[ret]
             [&mut self.tracer, &mut self.log_collector],
@@ -138,24 +139,13 @@ impl<DB: Database> revm::Inspector<DB> for Inspector {
         None
     }
 
-    fn call_end(
-        &mut self,
-        ecx: &mut EvmContext<DB>,
-        inputs: &CallInputs,
-        outcome: CallOutcome,
-    ) -> CallOutcome {
+    fn call_end(&mut self, ecx: &mut CTX, inputs: &CallInputs, outcome: &mut CallOutcome) {
         if let Some(tracer) = &mut self.tracer {
-            return tracer.call_end(ecx, inputs, outcome);
+            tracer.call_end(ecx, inputs, outcome);
         }
-
-        outcome
     }
 
-    fn create(
-        &mut self,
-        ecx: &mut EvmContext<DB>,
-        inputs: &mut CreateInputs,
-    ) -> Option<CreateOutcome> {
+    fn create(&mut self, ecx: &mut CTX, inputs: &mut CreateInputs) -> Option<CreateOutcome> {
         if let Some(tracer) = &mut self.tracer {
             if let Some(out) = tracer.create(ecx, inputs) {
                 return Some(out);
@@ -164,51 +154,16 @@ impl<DB: Database> revm::Inspector<DB> for Inspector {
         None
     }
 
-    fn create_end(
-        &mut self,
-        ecx: &mut EvmContext<DB>,
-        inputs: &CreateInputs,
-        outcome: CreateOutcome,
-    ) -> CreateOutcome {
+    fn create_end(&mut self, ecx: &mut CTX, inputs: &CreateInputs, outcome: &mut CreateOutcome) {
         if let Some(tracer) = &mut self.tracer {
-            return tracer.create_end(ecx, inputs, outcome);
+            tracer.create_end(ecx, inputs, outcome);
         }
-
-        outcome
-    }
-
-    #[inline]
-    fn eofcreate(
-        &mut self,
-        ecx: &mut EvmContext<DB>,
-        inputs: &mut EOFCreateInputs,
-    ) -> Option<CreateOutcome> {
-        if let Some(tracer) = &mut self.tracer {
-            if let Some(out) = tracer.eofcreate(ecx, inputs) {
-                return Some(out);
-            }
-        }
-        None
-    }
-
-    #[inline]
-    fn eofcreate_end(
-        &mut self,
-        ecx: &mut EvmContext<DB>,
-        inputs: &EOFCreateInputs,
-        outcome: CreateOutcome,
-    ) -> CreateOutcome {
-        if let Some(tracer) = &mut self.tracer {
-            return tracer.eofcreate_end(ecx, inputs, outcome);
-        }
-
-        outcome
     }
 
     #[inline]
     fn selfdestruct(&mut self, contract: Address, target: Address, value: U256) {
         if let Some(tracer) = &mut self.tracer {
-            revm::Inspector::<DB>::selfdestruct(tracer, contract, target, value);
+            revm::Inspector::<CTX, EthInterpreter>::selfdestruct(tracer, contract, target, value);
         }
     }
 }

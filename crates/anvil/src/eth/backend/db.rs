@@ -1,6 +1,6 @@
 //! Helper types for working with [revm](foundry_evm::revm)
 
-use crate::{mem::storage::MinedTransaction, revm::primitives::AccountInfo};
+use crate::mem::storage::MinedTransaction;
 use alloy_consensus::Header;
 use alloy_primitives::{keccak256, Address, Bytes, B256, U256, U64};
 use alloy_rpc_types::BlockId;
@@ -15,10 +15,14 @@ use foundry_evm::{
         StateSnapshot,
     },
     revm::{
-        db::{CacheDB, DatabaseRef, DbAccount},
-        primitives::{BlockEnv, Bytecode, HashMap, KECCAK_EMPTY},
+        database::{CacheDB, DatabaseRef, DbAccount},
+        primitives::{HashMap, KECCAK_EMPTY},
         Database, DatabaseCommit,
     },
+};
+use revm::{
+    context::BlockEnv,
+    state::{AccountInfo, Bytecode},
 };
 use serde::{
     de::{MapAccess, Visitor},

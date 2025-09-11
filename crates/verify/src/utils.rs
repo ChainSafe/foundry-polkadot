@@ -21,11 +21,12 @@ use foundry_evm::{
     opts::EvmOpts,
     traces::TraceMode,
 };
+use foundry_evm_core::Env;
 use reqwest::Url;
-use revm_primitives::{
-    db::Database,
-    env::{EnvWithHandlerCfg, HandlerCfg},
-    Bytecode, Env, SpecId, TxKind,
+use revm::{
+    primitives::{hardfork::SpecId, TxKind},
+    state::Bytecode,
+    Database,
 };
 use semver::Version;
 use serde::{Deserialize, Serialize};
@@ -335,12 +336,12 @@ pub async fn get_tracing_executor(
 }
 
 pub fn configure_env_block(env: &mut Env, block: &AnyRpcBlock) {
-    env.block.timestamp = U256::from(block.header.timestamp);
-    env.block.coinbase = block.header.beneficiary;
-    env.block.difficulty = block.header.difficulty;
-    env.block.prevrandao = Some(block.header.mix_hash.unwrap_or_default());
-    env.block.basefee = U256::from(block.header.base_fee_per_gas.unwrap_or_default());
-    env.block.gas_limit = U256::from(block.header.gas_limit);
+    env.evm_env.block_env.timestamp = U256::from(block.header.timestamp);
+    env.evm_env.block_env.beneficiary = block.header.beneficiary;
+    env.evm_env.block_env.difficulty = block.header.difficulty;
+    env.evm_env.block_env.prevrandao = Some(block.header.mix_hash.unwrap_or_default());
+    env.evm_env.block_env.basefee = block.header.base_fee_per_gas.unwrap_or_default();
+    env.evm_env.block_env.gas_limit = block.header.gas_limit;
 }
 
 pub fn deploy_contract(
@@ -349,14 +350,19 @@ pub fn deploy_contract(
     spec_id: SpecId,
     to: Option<TxKind>,
 ) -> Result<Address, eyre::ErrReport> {
-    let env_with_handler = EnvWithHandlerCfg::new(Box::new(env.clone()), HandlerCfg::new(spec_id));
+    let env = Env::new_with_spec_id(
+        env.evm_env.cfg_env.clone(),
+        env.evm_env.block_env.clone(),
+        env.tx.clone(),
+        spec_id,
+    );
 
     if to.is_some_and(|to| to.is_call()) {
         let TxKind::Call(to) = to.unwrap() else { unreachable!() };
         if to != DEFAULT_CREATE2_DEPLOYER {
             eyre::bail!("Transaction `to` address is not the default create2 deployer i.e the tx is not a contract creation tx.");
         }
-        let result = executor.transact_with_env(env_with_handler)?;
+        let result = executor.transact_with_env(env)?;
 
         trace!(transact_result = ?result.exit_reason);
         if result.result.len() != 20 {
@@ -367,7 +373,7 @@ pub fn deploy_contract(
 
         Ok(Address::from_slice(&result.result))
     } else {
-        let deploy_result = executor.deploy_with_env(env_with_handler, None)?;
+        let deploy_result = executor.deploy_with_env(env, None)?;
         trace!(deploy_result = ?deploy_result.raw.exit_reason);
         Ok(deploy_result.address)
     }

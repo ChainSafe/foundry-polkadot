@@ -6,8 +6,9 @@ use crate::{
     config::PruneStateHistoryConfig,
     eth::{
         backend::{
-            cheats::CheatsManager,
+            cheats::{CheatEcrecover, CheatsManager},
             db::{Db, MaybeFullDatabase, SerializableState},
+            env::Env,
             executor::{ExecutedTransactions, TransactionExecutor},
             fork::ClientFork,
             genesis::GenesisConfig,
@@ -31,7 +32,7 @@ use crate::{
         inspector::Inspector,
         storage::{BlockchainStorage, InMemoryBlockStates, MinedBlockOutcome},
     },
-    revm::{db::DatabaseRef, primitives::AccountInfo},
+    revm::{database::DatabaseRef, state::AccountInfo},
     ForkChoice, NodeConfig, PrecompileFactory,
 };
 use alloy_chains::NamedChain;
@@ -42,6 +43,10 @@ use alloy_consensus::{
     Transaction as TransactionTrait, TxEnvelope,
 };
 use alloy_eips::{eip1559::BaseFeeParams, eip4844::MAX_BLOBS_PER_BLOCK};
+use alloy_evm::{
+    eth::EthEvmContext,
+    precompiles::{DynPrecompile, PrecompilesMap},
+};
 use alloy_network::{
     AnyHeader, AnyRpcBlock, AnyRpcHeader, AnyRpcTransaction, AnyTxEnvelope, AnyTxType,
     EthereumWallet, UnknownTxEnvelope, UnknownTypedTransaction,
@@ -90,24 +95,25 @@ use foundry_evm::{
     constants::DEFAULT_CREATE2_DEPLOYER_RUNTIME_CODE,
     decode::RevertDecoder,
     inspectors::AccessListInspector,
-    revm::{
-        db::CacheDB,
-        interpreter::InstructionResult,
-        primitives::{
-            BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ExecutionResult, Output, SpecId,
-            TxEnv, KECCAK_EMPTY,
-        },
-    },
+    revm::{database::CacheDB, interpreter::InstructionResult, primitives::KECCAK_EMPTY},
     traces::TracingInspectorConfig,
 };
+use foundry_evm_core::{either_evm::EitherEvm, precompiles::EC_RECOVER};
 use futures::channel::mpsc::{unbounded, UnboundedSender};
 use op_alloy_consensus::{TxDeposit, DEPOSIT_TX_TYPE_ID};
+use op_revm::OpContext;
 use parking_lot::{Mutex, RwLock};
 use revm::{
-    db::WrapDatabaseRef,
+    context::{
+        result::{ExecutionResult, Output, ResultAndState},
+        BlockEnv, CfgEnv, TxEnv,
+    },
+    context_interface::block::BlobExcessGasAndPrice,
+    database::WrapDatabaseRef,
     interpreter::Host,
-    primitives::{BlobExcessGasAndPrice, HashMap, OptimismFields, ResultAndState},
-    DatabaseCommit,
+    precompile::secp256r1::{P256VERIFY, P256VERIFY_BASE_GAS_FEE},
+    primitives::{hardfork::SpecId, HashMap},
+    Database, DatabaseCommit,
 };
 use revm_inspectors::transfer::TransferInspector;
 use std::{
@@ -190,7 +196,7 @@ pub struct Backend {
     /// Historic states of previous blocks.
     states: Arc<RwLock<InMemoryBlockStates>>,
     /// Env data of the chain
-    env: Arc<RwLock<EnvWithHandlerCfg>>,
+    env: Arc<RwLock<Env>>,
     /// This is set if this is currently forked off another client.
     fork: Arc<RwLock<Option<ClientFork>>>,
     /// Provides time related info, like timestamp.
@@ -230,7 +236,7 @@ impl Backend {
     #[expect(clippy::too_many_arguments)]
     pub async fn with_genesis(
         db: Arc<AsyncRwLock<Box<dyn Db>>>,
-        env: Arc<RwLock<EnvWithHandlerCfg>>,
+        env: Arc<RwLock<Env>>,
         genesis: GenesisConfig,
         fees: FeeManager,
         fork: Arc<RwLock<Option<ClientFork>>>,
@@ -571,8 +577,8 @@ impl Backend {
                         gas_limit: U256::from(gas_limit),
                         difficulty: fork_block.header.difficulty,
                         prevrandao: Some(fork_block.header.mix_hash.unwrap_or_default()),
-                        // Keep previous `coinbase` and `basefee` value
-                        coinbase: env.block.coinbase,
+                        // Keep previous `beneficiary` and `basefee` value
+                        beneficiary: env.block.beneficiary,
                         basefee: env.block.basefee,
                         ..env.block.clone()
                     };
@@ -656,7 +662,7 @@ impl Backend {
     }
 
     /// The env data of the blockchain
-    pub fn env(&self) -> &Arc<RwLock<EnvWithHandlerCfg>> {
+    pub fn env(&self) -> &Arc<RwLock<Env>> {
         &self.env
     }
 
@@ -676,12 +682,12 @@ impl Backend {
         env.block.number = number;
     }
 
-    /// Returns the client coinbase address.
-    pub fn coinbase(&self) -> Address {
-        self.env.read().block.coinbase
+    /// Returns the client beneficiary address.
+    pub fn beneficiary(&self) -> Address {
+        self.env.read().block.beneficiary
     }
 
-    /// Returns the client coinbase address.
+    /// Returns the client beneficiary address.
     pub fn chain_id(&self) -> U256 {
         U256::from(self.env.read().cfg.chain_id)
     }
@@ -700,9 +706,9 @@ impl Backend {
         Ok(self.get_account(address).await?.nonce)
     }
 
-    /// Sets the coinbase address
-    pub fn set_coinbase(&self, address: Address) {
-        self.env.write().block.coinbase = address;
+    /// Sets the beneficiary address
+    pub fn set_beneficiary(&self, address: Address) {
+        self.env.write().block.beneficiary = address;
     }
 
     /// Sets the nonce of the given address
@@ -900,8 +906,8 @@ impl Backend {
                 // ensures prevrandao is set
                 prevrandao: Some(block.header.mix_hash.unwrap_or_default()),
                 gas_limit: U256::from(block.header.gas_limit),
-                // Keep previous `coinbase` and `basefee` value
-                coinbase: env.block.coinbase,
+                // Keep previous `beneficiary` and `basefee` value
+                beneficiary: env.block.beneficiary,
                 basefee: env.block.basefee,
                 ..Default::default()
             };
@@ -1060,7 +1066,7 @@ impl Backend {
     }
 
     /// Returns the environment for the next block
-    fn next_env(&self) -> EnvWithHandlerCfg {
+    fn next_env(&self) -> Env {
         let mut env = self.env.read().clone();
         // increase block number for this block
         env.block.number = env.block.number.saturating_add(U256::from(1));
@@ -1070,23 +1076,36 @@ impl Backend {
     }
 
     /// Creates an EVM instance with optionally injected precompiles.
-    #[expect(clippy::type_complexity)]
-    fn new_evm_with_inspector_ref<'i, 'db>(
+    fn new_evm_with_inspector_ref<'db, I, DB>(
         &self,
-        db: &'db dyn DatabaseRef<Error = DatabaseError>,
-        env: EnvWithHandlerCfg,
-        inspector: &'i mut dyn revm::Inspector<
-            WrapDatabaseRef<&'db dyn DatabaseRef<Error = DatabaseError>>,
-        >,
-    ) -> revm::Evm<
-        '_,
-        &'i mut dyn revm::Inspector<WrapDatabaseRef<&'db dyn DatabaseRef<Error = DatabaseError>>>,
-        WrapDatabaseRef<&'db dyn DatabaseRef<Error = DatabaseError>>,
-    > {
-        let mut evm = new_evm_with_inspector_ref(db, env, inspector, self.odyssey);
+        db: &'db DB,
+        env: &Env,
+        inspector: &'db mut I,
+    ) -> EitherEvm<WrapDatabaseRef<&'db DB>, &'db mut I, PrecompilesMap>
+    where
+        DB: DatabaseRef + ?Sized,
+        I: revm::Inspector<EthEvmContext<WrapDatabaseRef<&'db DB>>>
+            + revm::Inspector<OpContext<WrapDatabaseRef<&'db DB>>>,
+        WrapDatabaseRef<&'db DB>: Database<Error = DatabaseError>,
+    {
+        let mut evm = new_evm_with_inspector_ref(db, env, inspector);
+
+        if self.odyssey {
+            inject_precompiles(&mut evm, vec![(P256VERIFY, P256VERIFY_BASE_GAS_FEE)]);
+        }
+
         if let Some(factory) = &self.precompile_factory {
             inject_precompiles(&mut evm, factory.precompiles());
         }
+
+        let cheats = Arc::new(self.cheats.clone());
+        if cheats.has_recover_overrides() {
+            let cheat_ecrecover = CheatEcrecover::new(Arc::clone(&cheats));
+            evm.precompiles_mut().apply_precompile(&EC_RECOVER, move |_| {
+                Some(DynPrecompile::new_stateful(move |input| cheat_ecrecover.call(input)))
+            });
+        }
+
         evm
     }
 
@@ -1155,13 +1174,12 @@ impl Backend {
 
         let storage = self.blockchain.storage.read();
 
-        let cfg_env = CfgEnvWithHandlerCfg::new(env.cfg.clone(), env.handler_cfg);
         let executor = TransactionExecutor {
             db: &mut cache_db,
             validator: self,
             pending: pool_transactions.into_iter(),
             block_env: env.block.clone(),
-            cfg_env,
+            cfg_env: env.evm_env.cfg_env,
             parent_hash: storage.best_hash,
             gas_used: 0,
             blob_gas_used: 0,
@@ -1245,7 +1263,7 @@ impl Backend {
                     validator: self,
                     pending: pool_transactions.into_iter(),
                     block_env: env.block.clone(),
-                    cfg_env: CfgEnvWithHandlerCfg::new(env.cfg.clone(), env.handler_cfg),
+                    cfg_env: env.evm_env.cfg_env,
                     parent_hash: best_hash,
                     gas_used: 0,
                     blob_gas_used: 0,
@@ -1410,7 +1428,9 @@ impl Backend {
         request: WithOtherFields<TransactionRequest>,
         fee_details: FeeDetails,
         block_env: BlockEnv,
-    ) -> EnvWithHandlerCfg {
+    ) -> Env {
+        let tx_type = request.minimal_tx_type() as u8;
+
         let WithOtherFields::<TransactionRequest> {
             inner:
                 TransactionRequest {
@@ -1462,6 +1482,7 @@ impl Backend {
         env.tx =
             TxEnv {
                 caller,
+                tx_type,
                 gas_limit,
                 gas_price: U256::from(gas_price),
                 gas_priority_fee: max_priority_fee_per_gas.map(U256::from),
@@ -1474,7 +1495,7 @@ impl Backend {
                         }
                     })
                     .map(U256::from),
-                transact_to: match to {
+                kind: match to {
                     Some(addr) => TxKind::Call(*addr),
                     None => TxKind::Create,
                 },
@@ -1485,7 +1506,6 @@ impl Backend {
                 nonce: None,
                 access_list: access_list.unwrap_or_default().into(),
                 blob_hashes,
-                optimism: OptimismFields { enveloped_tx: Some(Bytes::new()), ..Default::default() },
                 authorization_list: authorization_list.map(Into::into),
             };
 
@@ -1556,8 +1576,8 @@ impl Backend {
                     if let Some(gas_limit) = overrides.gas_limit {
                         block_env.gas_limit = U256::from(gas_limit);
                     }
-                    if let Some(coinbase) = overrides.coinbase {
-                        block_env.coinbase = coinbase;
+                    if let Some(beneficiary) = overrides.beneficiary {
+                        block_env.beneficiary = beneficiary;
                     }
                     if let Some(random) = overrides.random {
                         block_env.prevrandao = Some(random);
@@ -1679,7 +1699,7 @@ impl Backend {
                     receipts_root: calculate_receipt_root(&transactions_envelopes),
                     parent_hash: Default::default(),
                     ommers_hash: Default::default(),
-                    beneficiary: block_env.coinbase,
+                    beneficiary: block_env.beneficiary,
                     state_root: Default::default(),
                     difficulty: Default::default(),
                     number: block_env.number.to(),
@@ -2280,7 +2300,7 @@ impl Backend {
                         let block = block.block;
                         let block = BlockEnv {
                             number: U256::from(block.header.number),
-                            coinbase: block.header.beneficiary,
+                            beneficiary: block.header.beneficiary,
                             timestamp: U256::from(block.header.timestamp),
                             difficulty: block.header.difficulty,
                             prevrandao: Some(block.header.mix_hash),
@@ -2307,7 +2327,7 @@ impl Backend {
                 if let Some(state) = self.states.write().get(&block_hash) {
                     let block = BlockEnv {
                         number: block_number,
-                        coinbase: block.header.beneficiary,
+                        beneficiary: block.header.beneficiary,
                         timestamp: U256::from(block.header.timestamp),
                         difficulty: block.header.difficulty,
                         prevrandao: block.header.mix_hash,
@@ -3021,7 +3041,7 @@ impl TransactionValidator for Backend {
         &self,
         pending: &PendingTransaction,
         account: &AccountInfo,
-        env: &EnvWithHandlerCfg,
+        env: &Env,
     ) -> Result<(), InvalidTransactionError> {
         let tx = &pending.transaction;
 
@@ -3154,7 +3174,7 @@ impl TransactionValidator for Backend {
         &self,
         tx: &PendingTransaction,
         account: &AccountInfo,
-        env: &EnvWithHandlerCfg,
+        env: &Env,
     ) -> Result<(), InvalidTransactionError> {
         self.validate_pool_transaction_for(tx, account, env)?;
         if tx.nonce() > account.nonce {

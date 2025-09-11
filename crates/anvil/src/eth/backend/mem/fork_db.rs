@@ -3,7 +3,7 @@ use crate::{
         Db, MaybeForkedDatabase, MaybeFullDatabase, SerializableAccountRecord, SerializableBlock,
         SerializableHistoricalStates, SerializableState, SerializableTransaction, StateDb,
     },
-    revm::primitives::AccountInfo,
+    revm::state::AccountInfo,
 };
 use alloy_primitives::{map::HashMap, Address, B256, U256, U64};
 use alloy_rpc_types::BlockId;
@@ -12,9 +12,9 @@ use foundry_evm::{
         BlockchainDb, DatabaseError, DatabaseResult, RevertStateSnapshotAction, StateSnapshot,
     },
     fork::database::ForkDbStateSnapshot,
-    revm::{primitives::BlockEnv, Database},
+    revm::Database,
 };
-use revm::{db::DbAccount, DatabaseRef};
+use revm::{context::BlockEnv, database::DbAccount, DatabaseRef};
 
 pub use foundry_evm::fork::database::ForkedDatabase;
 

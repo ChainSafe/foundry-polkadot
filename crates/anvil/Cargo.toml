@@ -27,6 +27,7 @@ foundry-cli.workspace = true
 foundry-common.workspace = true
 foundry-config.workspace = true
 foundry-evm.workspace = true
+foundry-evm-core.workspace = true
 
 # evm support
 revm = { workspace = true, features = [
@@ -36,6 +37,7 @@ revm = { workspace = true, features = [
     "c-kzg",
 ] }
 revm-inspectors.workspace = true
+op-revm.workspace = true
 alloy-primitives = { workspace = true, features = ["serde"] }
 alloy-consensus = { workspace = true, features = ["k256", "kzg"] }
 alloy-contract = { workspace = true, features = ["pubsub"] }
@@ -47,6 +49,7 @@ alloy-signer-local = { workspace = true, features = ["mnemonic"] }
 alloy-sol-types = { workspace = true, features = ["std"] }
 alloy-dyn-abi = { workspace = true, features = ["std", "eip712"] }
 alloy-rpc-types = { workspace = true, features = ["anvil", "trace", "txpool"] }
+op-alloy-rpc-types.workspace = true
 alloy-serde.workspace = true
 alloy-provider = { workspace = true, features = [
     "reqwest",
@@ -59,6 +62,7 @@ alloy-transport.workspace = true
 alloy-chains.workspace = true
 alloy-genesis.workspace = true
 alloy-trie.workspace = true
+alloy-evm.workspace = true
 op-alloy-consensus = { workspace = true, features = ["serde"] }
 
 # axum related
@@ -84,6 +88,7 @@ yansi.workspace = true
 tempfile.workspace = true
 itertools.workspace = true
 rand.workspace = true
+rand_08.workspace = true
 eyre.workspace = true
 
 # cli

@@ -2,6 +2,7 @@ use crate::{
     eth::{
         backend::{
             db::{Db, SerializableState},
+            env::Env,
             fork::{ClientFork, ClientForkConfig},
             genesis::GenesisConfig,
             mem::fork_db::ForkedDatabase,
@@ -36,13 +37,17 @@ use foundry_config::Config;
 use foundry_evm::{
     backend::{BlockchainDb, BlockchainDbMeta, SharedBackend},
     constants::DEFAULT_CREATE2_DEPLOYER,
-    revm::primitives::{BlockEnv, CfgEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, SpecId, TxEnv},
     utils::apply_chain_and_block_specific_env_changes,
 };
 use itertools::Itertools;
+use op_revm::OpTransaction;
 use parking_lot::RwLock;
 use rand::rng;
-use revm::primitives::BlobExcessGasAndPrice;
+use revm::{
+    context::{BlockEnv, CfgEnv, TxEnv},
+    context_interface::block::BlobExcessGasAndPrice,
+    primitives::hardfork::SpecId,
+};
 use serde_json::{json, Value};
 use std::{
     fmt::Write as FmtWrite,
@@ -1018,8 +1023,9 @@ impl NodeConfig {
     pub(crate) async fn setup(&mut self) -> Result<mem::Backend> {
         // configure the revm environment
 
-        let mut cfg =
-            CfgEnvWithHandlerCfg::new_with_spec_id(CfgEnv::default(), self.get_hardfork().into());
+        let mut cfg = CfgEnv::default();
+        cfg.spec = self.get_hardfork().into();
+
         cfg.chain_id = self.get_chain_id();
         cfg.limit_contract_code_size = self.code_size_limit;
         // EIP-3607 rejects transactions from senders with deployed code.
@@ -1033,16 +1039,19 @@ impl NodeConfig {
             cfg.memory_limit = value;
         }
 
-        let env = revm::primitives::Env {
-            cfg: cfg.cfg_env,
-            block: BlockEnv {
+        let mut env = Env::new(
+            cfg,
+            BlockEnv {
                 gas_limit: U256::from(self.gas_limit()),
                 basefee: U256::from(self.get_base_fee()),
                 ..Default::default()
             },
-            tx: TxEnv { chain_id: self.get_chain_id().into(), ..Default::default() },
-        };
-        let mut env = EnvWithHandlerCfg::new(Box::new(env), cfg.handler_cfg);
+            OpTransaction {
+                base: TxEnv { chain_id: self.get_chain_id().into(), ..Default::default() },
+                ..Default::default()
+            },
+            self.enable_optimism,
+        );
 
         let fees = FeeManager::new(
             cfg.handler_cfg.spec_id,
@@ -1129,7 +1138,7 @@ impl NodeConfig {
     pub async fn setup_fork_db(
         &mut self,
         eth_rpc_url: String,
-        env: &mut EnvWithHandlerCfg,
+        env: &mut Env,
         fees: &FeeManager,
     ) -> Result<(Arc<TokioRwLock<Box<dyn Db>>>, Option<ClientFork>)> {
         let (db, config) = self.setup_fork_db_config(eth_rpc_url, env, fees).await?;
@@ -1146,7 +1155,7 @@ impl NodeConfig {
     pub async fn setup_fork_db_config(
         &mut self,
         eth_rpc_url: String,
-        env: &mut EnvWithHandlerCfg,
+        env: &mut Env,
         fees: &FeeManager,
     ) -> Result<(ForkedDatabase, ClientForkConfig)> {
         debug!(target: "node", ?eth_rpc_url, "setting up fork db");
@@ -1229,7 +1238,7 @@ latest block number: {latest_block}"
             prevrandao: Some(block.header.mix_hash.unwrap_or_default()),
             gas_limit: U256::from(gas_limit),
             // Keep previous `coinbase` and `basefee` value
-            coinbase: env.block.coinbase,
+            beneficiary: env.block.coinbase,
             basefee: env.block.basefee,
             ..Default::default()
         };
@@ -1501,7 +1510,7 @@ impl AccountGenerator {
         Self {
             chain_id: CHAIN_ID,
             amount,
-            phrase: Mnemonic::<English>::new(&mut thread_rng()).to_phrase(),
+            phrase: Mnemonic::<English>::new(&mut rng()).to_phrase(),
             derivation_path: None,
         }
     }

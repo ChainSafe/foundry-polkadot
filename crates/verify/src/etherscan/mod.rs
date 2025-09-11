@@ -269,7 +269,7 @@ impl EtherscanVerificationProvider {
         let etherscan_key =
             etherscan_key.or_else(|| etherscan_config.as_ref().map(|c| c.key.clone()));
 
-        let mut builder = Client::builder().with_api_version(api_version);
+        let mut builder = Client::builder();
 
         builder = if let Some(api_url) = api_url {
             // we don't want any trailing slashes because this can cause cloudflare issues: <https://github.com/foundry-rs/foundry/pull/6079>
@@ -280,7 +280,7 @@ impl EtherscanVerificationProvider {
             } else {
                 base_url.unwrap_or(api_url)
             };
-            builder.with_chain_id(chain).with_api_url(api_url)?.with_url(base_url)?
+            builder.chain(chain)?.with_api_url(api_url)?.with_url(base_url)?
         } else {
             builder.chain(chain)?
         };

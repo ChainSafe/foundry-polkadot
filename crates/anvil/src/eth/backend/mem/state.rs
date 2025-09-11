@@ -8,8 +8,10 @@ use alloy_trie::{HashBuilder, Nibbles};
 use foundry_evm::{
     backend::DatabaseError,
     revm::{
-        db::{CacheDB, DatabaseRef, DbAccount},
-        primitives::{AccountInfo, Bytecode, HashMap},
+        bytecode::Bytecode,
+        database::{CacheDB, DatabaseRef, DbAccount},
+        primitives::HashMap,
+        state::AccountInfo,
     },
 };
 

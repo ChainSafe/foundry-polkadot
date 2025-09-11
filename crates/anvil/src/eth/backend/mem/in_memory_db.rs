@@ -6,15 +6,16 @@ use crate::{
         SerializableHistoricalStates, SerializableState, SerializableTransaction, StateDb,
     },
     mem::state::state_root,
-    revm::{db::DbAccount, primitives::AccountInfo},
+    revm::{database::DbAccount, state::AccountInfo},
 };
 use alloy_primitives::{map::HashMap, Address, B256, U256, U64};
 use alloy_rpc_types::BlockId;
 use foundry_evm::backend::{BlockchainDb, DatabaseResult, StateSnapshot};
 
 // reexport for convenience
-pub use foundry_evm::{backend::MemDb, revm::db::DatabaseRef};
-use foundry_evm::{backend::RevertStateSnapshotAction, revm::primitives::BlockEnv};
+use foundry_evm::backend::RevertStateSnapshotAction;
+pub use foundry_evm::{backend::MemDb, revm::database::DatabaseRef};
+use revm::context::BlockEnv;
 
 impl Db for MemDb {
     fn insert_account(&mut self, address: Address, account: AccountInfo) {

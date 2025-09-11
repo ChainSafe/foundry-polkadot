@@ -1,6 +1,6 @@
 use crate::{
     eth::{
-        backend::{db::Db, validate::TransactionValidator},
+        backend::{db::Db, env::Env, validate::TransactionValidator},
         error::InvalidTransactionError,
         pool::transactions::PoolTransaction,
     },
@@ -12,6 +12,7 @@ use alloy_consensus::{
     constants::EMPTY_WITHDRAWALS, proofs::calculate_receipt_root, Receipt, ReceiptWithBloom,
 };
 use alloy_eips::eip7685::EMPTY_REQUESTS_HASH;
+use alloy_evm::{eth::EthEvmContext, precompiles::PrecompilesMap, EthEvm};
 use alloy_primitives::{Bloom, BloomInput, Log, B256};
 use anvil_core::eth::{
     block::{Block, BlockInfo, PartialHeader},
@@ -20,19 +21,23 @@ use anvil_core::eth::{
     },
 };
 use foundry_evm::{
-    backend::DatabaseError,
-    revm::{
-        interpreter::InstructionResult,
-        primitives::{
-            BlockEnv, CfgEnvWithHandlerCfg, EVMError, EnvWithHandlerCfg, ExecutionResult, Output,
-            SpecId,
-        },
-    },
-    traces::CallTraceNode,
-    utils::odyssey_handler_register,
+    backend::DatabaseError, revm, revm::interpreter::InstructionResult, traces::CallTraceNode,
 };
-use revm::db::WrapDatabaseRef;
-use std::sync::Arc;
+use foundry_evm_core::either_evm::EitherEvm;
+use op_alloy_rpc_types::L1BlockInfo;
+use op_revm::{precompiles::OpPrecompiles, OpContext, OpEvm};
+use revm::{
+    context::{
+        result::{EVMError, ExecutionResult, Output},
+        BlockEnv, CfgEnv, LocalContext,
+    },
+    database::WrapDatabaseRef,
+    handler::{instructions::EthInstructions, EthPrecompiles},
+    precompile::{PrecompileSpecId, Precompiles},
+    primitives::hardfork::SpecId,
+    Database, DatabaseRef, Journal,
+};
+use std::{fmt::Debug, sync::Arc};
 
 /// Represents an executed transaction (transacted on the DB)
 #[derive(Debug)]
@@ -100,7 +105,7 @@ pub struct TransactionExecutor<'a, Db: ?Sized, V: TransactionValidator> {
     pub pending: std::vec::IntoIter<Arc<PoolTransaction>>,
     pub block_env: BlockEnv,
     /// The configuration environment and spec id
-    pub cfg_env: CfgEnvWithHandlerCfg,
+    pub cfg_env: CfgEnv,
     pub parent_hash: B256,
     /// Cumulative gas used by all executed transactions
     pub gas_used: u64,
@@ -241,14 +246,14 @@ impl<DB: Db + ?Sized, V: TransactionValidator> TransactionExecutor<'_, DB, V> {
         ExecutedTransactions { block, included, invalid }
     }
 
-    fn env_for(&self, tx: &PendingTransaction) -> EnvWithHandlerCfg {
+    fn env_for(&self, tx: &PendingTransaction) -> Env {
         let mut tx_env = tx.to_revm_tx_env();
         if self.cfg_env.handler_cfg.is_optimism {
             tx_env.optimism.enveloped_tx =
                 Some(alloy_rlp::encode(&tx.transaction.transaction).into());
         }
 
-        EnvWithHandlerCfg::new_with_cfg_env(self.cfg_env.clone(), self.block_env.clone(), tx_env)
+        Env::new_with_cfg_env(self.cfg_env.clone(), self.block_env.clone(), tx_env)
     }
 }
 
@@ -318,7 +323,7 @@ impl<DB: Db + ?Sized, V: TransactionValidator> Iterator for &mut TransactionExec
         }
 
         let exec_result = {
-            let mut evm = new_evm_with_inspector(&mut *self.db, env, &mut inspector, self.odyssey);
+            let mut evm = new_evm_with_inspector(&mut *self.db, env, &mut inspector);
             if let Some(factory) = &self.precompile_factory {
                 inject_precompiles(&mut evm, factory.precompiles());
             }
@@ -406,31 +411,89 @@ fn build_logs_bloom(logs: Vec<Log>, bloom: &mut Bloom) {
     }
 }
 
-/// Creates a database with given database and inspector
-pub fn new_evm_with_inspector<DB: revm::Database>(
+/// Creates a database with given database and inspector, optionally enabling odyssey features.
+pub fn new_evm_with_inspector<DB, I>(
     db: DB,
-    env: EnvWithHandlerCfg,
-    inspector: &mut dyn revm::Inspector<DB>,
-) -> revm::Evm<'_, &mut dyn revm::Inspector<DB>, DB> {
-    let EnvWithHandlerCfg { env, handler_cfg } = env;
+    env: &Env,
+    inspector: I,
+) -> EitherEvm<DB, I, PrecompilesMap>
+where
+    DB: Database<Error = DatabaseError> + Debug,
+    I: revm::Inspector<EthEvmContext<DB>> + revm::Inspector<OpContext<DB>>,
+{
+    if env.is_optimism {
+        let op_cfg = env.evm_env.cfg_env.clone().with_spec(op_revm::OpSpecId::ISTHMUS);
+        let op_context = OpContext {
+            journaled_state: {
+                let mut journal = Journal::new(db);
+                // Converting SpecId into OpSpecId
+                journal.set_spec_id(env.evm_env.cfg_env.spec);
+                journal
+            },
+            block: env.evm_env.block_env.clone(),
+            cfg: op_cfg.clone(),
+            tx: env.tx.clone(),
+            chain: L1BlockInfo::default(),
+            local: LocalContext::default(),
+            error: Ok(()),
+        };
 
-    let mut handler = revm::Handler::new(handler_cfg);
+        let op_precompiles = OpPrecompiles::new_with_spec(op_cfg.spec).precompiles();
+        let op_evm = op_revm::OpEvm(revm::context::Evm::new_with_inspector(
+            op_context,
+            inspector,
+            EthInstructions::default(),
+            PrecompilesMap::from_static(op_precompiles),
+        ));
 
-    handler.append_handler_register_plain(revm::inspector_handle_register);
+        let op = OpEvm::new(op_evm, true);
 
-    let context = revm::Context::new(revm::EvmContext::new_with_env(db, env), inspector);
+        EitherEvm::Op(op)
+    } else {
+        let spec = env.evm_env.cfg_env.spec;
+        let eth_context = EthEvmContext {
+            journaled_state: {
+                let mut journal = Journal::new(db);
+                journal.set_spec_id(spec);
+                journal
+            },
+            block: env.evm_env.block_env.clone(),
+            cfg: env.evm_env.cfg_env.clone(),
+            tx: env.tx.base.clone(),
+            chain: (),
+            local: LocalContext::default(),
+            error: Ok(()),
+        };
 
-    revm::Evm::new(context, handler)
+        let eth_precompiles = EthPrecompiles {
+            precompiles: Precompiles::new(PrecompileSpecId::from_spec_id(spec)),
+            spec,
+        }
+        .precompiles;
+        let eth_evm = revm::context::Evm::new_with_inspector(
+            eth_context,
+            inspector,
+            EthInstructions::default(),
+            PrecompilesMap::from_static(eth_precompiles),
+        );
+
+        let eth = EthEvm::new(eth_evm, true);
+
+        EitherEvm::Eth(eth)
+    }
 }
 
 /// Creates a new EVM with the given inspector and wraps the database in a `WrapDatabaseRef`.
-pub fn new_evm_with_inspector_ref<'a, DB>(
-    db: DB,
-    env: EnvWithHandlerCfg,
-    inspector: &mut dyn revm::Inspector<WrapDatabaseRef<DB>>,
-) -> revm::Evm<'a, &mut dyn revm::Inspector<WrapDatabaseRef<DB>>, WrapDatabaseRef<DB>>
+pub fn new_evm_with_inspector_ref<'db, DB, I>(
+    db: &'db DB,
+    env: &Env,
+    inspector: &'db mut I,
+) -> EitherEvm<WrapDatabaseRef<&'db DB>, &'db mut I, PrecompilesMap>
 where
-    DB: revm::DatabaseRef,
+    DB: DatabaseRef<Error = DatabaseError> + Debug + 'db + ?Sized,
+    I: revm::Inspector<EthEvmContext<WrapDatabaseRef<&'db DB>>>
+        + revm::Inspector<OpContext<WrapDatabaseRef<&'db DB>>>,
+    WrapDatabaseRef<&'db DB>: Database<Error = DatabaseError>,
 {
     new_evm_with_inspector(WrapDatabaseRef(db), env, inspector)
 }
