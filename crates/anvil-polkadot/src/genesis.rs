@@ -9,8 +9,6 @@ use std::collections::BTreeMap;
 /// Genesis settings
 #[derive(Clone, Debug, Default)]
 pub struct GenesisConfig {
-    /// The chain id of the Substrate chain, if provided
-    pub chain_id: Option<u64>,
     /// The initial timestamp for the genesis block
     pub timestamp: Option<u64>,
     /// The genesis block author address, if provided.
@@ -26,7 +24,6 @@ pub struct GenesisConfig {
 impl From<AnvilNodeConfig> for GenesisConfig {
     fn from(anvil_config: AnvilNodeConfig) -> Self {
         Self {
-            chain_id: anvil_config.get_chain_id(),
             timestamp: anvil_config.get_genesis_timestamp(),
             coinbase: anvil_config.genesis.as_ref().map(|g| g.coinbase),
             balance: anvil_config.genesis_balance,

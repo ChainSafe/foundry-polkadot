@@ -23,7 +23,7 @@ where
 {
     fn assimilate_storage(&self, storage: &mut Storage) -> Result<(), String> {
         self.inner.assimilate_storage(storage)
-        // TODO: inject genesis values
+        // TODO: inject other genesis values from `genesis_config`
     }
 }
 
@@ -57,7 +57,7 @@ pub fn development_chain_spec(
         Default::default(),
     )
     .with_name("Development")
-    .with_id("dev")
+    .with_id(anvil_config.get_chain_id())
     .with_chain_type(ChainType::Development)
     .with_genesis_config_preset_name(sp_genesis_builder::DEV_RUNTIME_PRESET)
     .with_properties(props())
