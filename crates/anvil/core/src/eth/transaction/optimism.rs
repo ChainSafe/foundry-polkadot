@@ -11,7 +11,7 @@ impl From<DepositTransaction> for TxDeposit {
             from: tx.from,
             source_hash: tx.source_hash,
             to: tx.kind,
-            mint: Some(tx.mint.to::<u128>()),
+            mint: tx.mint.to::<u128>(),
             value: tx.value,
             gas_limit: tx.gas_limit,
             is_system_transaction: tx.is_system_tx,

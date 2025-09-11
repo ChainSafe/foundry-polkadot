@@ -6564,7 +6564,6 @@ dependencies = [
  "dotenvy",
  "eyre",
  "forge-fmt",
- "foundry-block-explorers",
  "foundry-common",
  "foundry-compilers",
  "foundry-config",

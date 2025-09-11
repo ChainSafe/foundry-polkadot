@@ -12,6 +12,7 @@ use foundry_evm::{
         ExecutorStrategyRunner,
     },
 };
+use foundry_evm_core::Env;
 use polkadot_sdk::{
     frame_support::traits::{fungible::Mutate, Currency},
     pallet_balances,
@@ -20,7 +21,7 @@ use polkadot_sdk::{
     sp_io,
 };
 use revive_env::{AccountId, ExtBuilder, Runtime, System};
-use revm::primitives::{EnvWithHandlerCfg, ResultAndState};
+use revm::context::result::ResultAndState;
 
 use crate::{
     backend::{get_backend_ref, ReviveBackendStrategyBuilder, ReviveInspectContext},
@@ -151,8 +152,8 @@ impl ExecutorStrategyRunner for ReviveExecutorStrategyRunner {
         &self,
         ctx: &dyn ExecutorStrategyContext,
         backend: &mut foundry_evm::backend::CowBackend<'_>,
-        env: &mut EnvWithHandlerCfg,
-        executor_env: &EnvWithHandlerCfg,
+        env: &mut Env,
+        executor_env: &Env,
         inspector: &mut foundry_evm::inspectors::InspectorStack,
     ) -> eyre::Result<ResultAndState> {
         let ctx = get_context_ref(ctx);
@@ -167,8 +168,8 @@ impl ExecutorStrategyRunner for ReviveExecutorStrategyRunner {
         &self,
         ctx: &mut dyn ExecutorStrategyContext,
         backend: &mut foundry_evm::backend::Backend,
-        env: &mut EnvWithHandlerCfg,
-        executor_env: &EnvWithHandlerCfg,
+        env: &mut Env,
+        executor_env: &Env,
         inspector: &mut foundry_evm::inspectors::InspectorStack,
     ) -> eyre::Result<ResultAndState> {
         let ctx = get_context_ref_mut(ctx);

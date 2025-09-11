@@ -5,6 +5,7 @@ use std::{
 };
 
 use alloy_primitives::{Address, Bytes, B256, U256};
+use alloy_rpc_types::SignedAuthorization;
 use foundry_common::sh_err;
 use foundry_compilers::resolc::dual_compiled_contracts::DualCompiledContracts;
 use revive_env::{AccountId, Runtime, System};
@@ -12,7 +13,7 @@ use revive_env::{AccountId, Runtime, System};
 use foundry_cheatcodes::{
     Broadcast, BroadcastableTransactions, CheatcodeInspectorStrategy,
     CheatcodeInspectorStrategyContext, CheatcodeInspectorStrategyRunner, CheatsConfig, CheatsCtxt,
-    CommonCreateInput, Ecx, EvmCheatcodeInspectorStrategyRunner, Ecx, Result, Vm::pvmCall,
+    CommonCreateInput, Ecx, EvmCheatcodeInspectorStrategyRunner, Result, Vm::pvmCall,
 };
 
 use polkadot_sdk::{
@@ -29,11 +30,12 @@ use polkadot_sdk::{
 };
 
 use revm::{
+    bytecode::opcode as op,
+    context::{CreateScheme, JournalTr},
     interpreter::{
-        opcode as op, CallInputs, CallOutcome, CreateOutcome, Gas, InstructionResult, Interpreter,
-        InterpreterResult,
+        interpreter_types::Jumps, CallInputs, CallOutcome, CreateOutcome, Gas, InstructionResult,
+        Interpreter, InterpreterResult,
     },
-    primitives::{CreateScheme, SignedAuthorization},
 };
 pub trait PvmCheatcodeInspectorStrategyBuilder {
     fn new_pvm(
@@ -209,11 +211,10 @@ impl CheatcodeInspectorStrategyRunner for PvmCheatcodeInspectorStrategyRunner {
             return false;
         }
 
-        let address = match interpreter.current_opcode() {
-            op::SELFBALANCE => interpreter.contract().target_address,
+        let address = match interpreter.bytecode.opcode() {
+            op::SELFBALANCE => interpreter.input.target_address,
             op::BALANCE => {
                 if interpreter.stack.is_empty() {
-                    interpreter.instruction_result = InstructionResult::StackUnderflow;
                     return true;
                 }
 
@@ -229,14 +230,11 @@ impl CheatcodeInspectorStrategyRunner for PvmCheatcodeInspectorStrategyRunner {
         let balance = U256::from_limbs(balance.0);
 
         // Skip the current BALANCE instruction since we've already handled it
-        match interpreter.stack.push(balance) {
-            Ok(_) => unsafe {
-                interpreter.instruction_pointer = interpreter.instruction_pointer.add(1);
-            },
-            Err(e) => {
-                interpreter.instruction_result = e;
-            }
-        };
+        if interpreter.stack.push(balance) {
+            interpreter.bytecode.relative_jump(1);
+        } else {
+            // stack overflow; nothing else to do here
+        }
 
         false // Let EVM handle all operations
     }
@@ -250,10 +248,10 @@ fn select_pvm(ctx: &mut PvmCheatcodeInspectorStrategyContext, data: Ecx<'_, '_, 
 
     tracing::info!("switching to PVM");
     ctx.using_pvm = true;
-    let persistent_accounts = data.db.persistent_accounts().clone();
+    let persistent_accounts = data.journaled_state.database.persistent_accounts().clone();
 
     for address in persistent_accounts {
-        let acc = data.load_account(address).expect("just loaded above");
+        let acc = data.journaled_state.load_account(address).expect("just loaded above");
         let amount = acc.data.info.balance;
         let nonce = acc.data.info.nonce;
 
@@ -310,10 +308,20 @@ impl foundry_cheatcodes::CheatcodeInspectorStrategyExt for PvmCheatcodeInspector
 
         if let Some(CreateScheme::Create) = input.scheme() {
             let caller = input.caller();
-            let nonce =
-                ecx.load_account(input.caller()).expect("to load caller account").info.nonce;
+            let nonce = ecx
+                .journaled_state
+                .load_account(input.caller())
+                .expect("to load caller account")
+                .info
+                .nonce;
             let address = caller.create(nonce);
-            if ecx.db.get_test_contract_address().map(|addr| address == addr).unwrap_or_default() {
+            if ecx
+                .journaled_state
+                .database
+                .get_test_contract_address()
+                .map(|addr| address == addr)
+                .unwrap_or_default()
+            {
                 tracing::info!(
                     "running create in EVM, instead of PVM (Test Contract) {:#?}",
                     address
@@ -447,7 +455,8 @@ impl foundry_cheatcodes::CheatcodeInspectorStrategyExt for PvmCheatcodeInspector
         }
 
         if ecx
-            .db
+            .journaled_state
+            .database
             .get_test_contract_address()
             .map(|addr| call.bytecode_address == addr)
             .unwrap_or_default()
@@ -489,7 +498,7 @@ impl foundry_cheatcodes::CheatcodeInspectorStrategyExt for PvmCheatcodeInspector
                 evm_value,
                 gas_limit,
                 storage_deposit_limit,
-                call.input.to_vec(),
+                call.input.bytes(ecx).to_vec(),
             )
         });
 

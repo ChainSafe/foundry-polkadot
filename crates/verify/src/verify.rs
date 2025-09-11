@@ -10,7 +10,6 @@ use alloy_primitives::Address;
 use alloy_provider::Provider;
 use clap::{Parser, ValueHint};
 use eyre::Result;
-use foundry_block_explorers::EtherscanApiVersion;
 use foundry_cli::{
     opts::{EtherscanOpts, RpcOpts},
     utils::{self, LoadConfig},
@@ -38,10 +37,6 @@ pub struct VerifierArgs {
     /// The verifier URL, if using a custom provider.
     #[arg(long, help_heading = "Verifier options", env = "VERIFIER_URL")]
     pub verifier_url: Option<String>,
-
-    /// The verifier API version, if using a custom provider.
-    #[arg(long, help_heading = "Verifier options", env = "VERIFIER_API_VERSION")]
-    pub verifier_api_version: Option<EtherscanApiVersion>,
 }
 
 impl Default for VerifierArgs {

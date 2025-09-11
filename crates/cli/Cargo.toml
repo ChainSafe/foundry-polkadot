@@ -21,7 +21,6 @@ foundry-evm.workspace = true
 foundry-wallets.workspace = true
 
 foundry-compilers = { workspace = true, features = ["full"] }
-foundry-block-explorers.workspace = true
 
 revive-strategy = { workspace = true }
 

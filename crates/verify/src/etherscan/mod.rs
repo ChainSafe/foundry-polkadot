@@ -13,7 +13,7 @@ use foundry_block_explorers::{
     errors::EtherscanError,
     utils::lookup_compiler_version,
     verify::{CodeFormat, VerifyContract},
-    Client, EtherscanApiVersion,
+    Client,
 };
 use foundry_cli::{
     opts::EtherscanOpts,
@@ -259,23 +259,7 @@ impl EtherscanVerificationProvider {
             (verifier_type.is_sourcify() && etherscan_key.is_some());
         let etherscan_config = config.get_etherscan_config_with_chain(Some(chain))?;
 
-        let api_version = verifier_args.verifier_api_version.unwrap_or_else(|| {
-            if is_etherscan {
-                etherscan_config.as_ref().map(|c| c.api_version).unwrap_or_default()
-            } else {
-                EtherscanApiVersion::V1
-            }
-        });
-
-        let etherscan_api_url = verifier_url
-            .or_else(|| {
-                if api_version == EtherscanApiVersion::V2 {
-                    None
-                } else {
-                    etherscan_config.as_ref().map(|c| c.api_url.as_str())
-                }
-            })
-            .map(str::to_owned);
+        let etherscan_api_url = verifier_url.map(str::to_owned);
 
         let api_url = etherscan_api_url.as_deref();
         let base_url = etherscan_config
@@ -582,7 +566,6 @@ mod tests {
         let etherscan = EtherscanVerificationProvider::default();
         let client = etherscan.client(&args.etherscan, &args.verifier, &config).unwrap();
         assert_eq!(client.etherscan_api_url().as_str(), "https://verifier-url.com/");
-        assert_eq!(*client.etherscan_api_version(), EtherscanApiVersion::V2);
         assert!(format!("{client:?}").contains("dummykey"));
     }
 
