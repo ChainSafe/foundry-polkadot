@@ -1,6 +1,7 @@
 use crate::{Cheatcode, Cheatcodes, CheatsCtxt, Error, Result};
 use alloy_primitives::Address;
 use foundry_evm_core::constants::MAGIC_ASSUME;
+use revm::context::JournalTr;
 use spec::Vm::{
     assumeCall, assumeNoRevert_0Call, assumeNoRevert_1Call, assumeNoRevert_2Call, PotentialRevert,
 };
@@ -9,7 +10,7 @@ use std::fmt::Debug;
 #[derive(Clone, Debug)]
 pub struct AssumeNoRevert {
     /// The call depth at which the cheatcode was added.
-    pub depth: u64,
+    pub depth: usize,
     /// Acceptable revert parameters for the next call, to be thrown out if they are encountered;
     /// reverts with parameters not specified here will count as normal reverts and not rejects
     /// towards the counter.
@@ -84,7 +85,7 @@ impl Cheatcode for assumeNoRevert_2Call {
 
 fn assume_no_revert(
     state: &mut Cheatcodes,
-    depth: u64,
+    depth: usize,
     parameters: Vec<AcceptableRevertParameters>,
 ) -> Result {
     ensure!(

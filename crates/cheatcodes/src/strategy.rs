@@ -1,11 +1,8 @@
 use std::{any::Any, fmt::Debug, sync::Arc};
 
 use alloy_primitives::TxKind;
-use alloy_rpc_types::{TransactionInput, TransactionRequest};
-use revm::{
-    interpreter::{CallInputs, Interpreter},
-    primitives::SignedAuthorization,
-};
+use alloy_rpc_types::{SignedAuthorization, TransactionInput, TransactionRequest};
+use revm::interpreter::{CallInputs, Interpreter};
 
 use crate::{
     inspector::{check_if_fixed_gas_limit, CommonCreateInput, Ecx},
@@ -133,9 +130,9 @@ impl CheatcodeInspectorStrategyRunner for EvmCheatcodeInspectorStrategyRunner {
     ) {
         let is_fixed_gas_limit = check_if_fixed_gas_limit(ecx_inner, input.gas_limit());
 
-        let account = &ecx_inner.journaled_state.state()[&broadcast.new_origin];
+        let account = &ecx_inner.journaled_state.state[&broadcast.new_origin];
         broadcastable_transactions.push_back(BroadcastableTransaction {
-            rpc: ecx_inner.db.active_fork_url(),
+            rpc: ecx_inner.journaled_state.database.active_fork_url(),
             transaction: TransactionRequest {
                 from: Some(broadcast.new_origin),
                 to: None,
@@ -154,22 +151,23 @@ impl CheatcodeInspectorStrategyRunner for EvmCheatcodeInspectorStrategyRunner {
         _ctx: &mut dyn CheatcodeInspectorStrategyContext,
         _config: Arc<CheatsConfig>,
         input: &CallInputs,
-        ecx_inner: Ecx,
+        ecx: Ecx,
         broadcast: &Broadcast,
         broadcastable_transactions: &mut BroadcastableTransactions,
         active_delegation: &mut Option<SignedAuthorization>,
     ) {
-        let is_fixed_gas_limit = check_if_fixed_gas_limit(ecx_inner, input.gas_limit);
+        let is_fixed_gas_limit = check_if_fixed_gas_limit(ecx, input.gas_limit);
 
-        let account = ecx_inner.journaled_state.state().get_mut(&broadcast.new_origin).unwrap();
+        let req_input = TransactionInput::new(input.input.bytes(ecx));
+        let account = ecx.journaled_state.state().get_mut(&broadcast.new_origin).unwrap();
 
         let mut tx_req = TransactionRequest {
             from: Some(broadcast.new_origin),
             to: Some(TxKind::from(Some(input.target_address))),
             value: input.transfer_value(),
-            input: TransactionInput::new(input.input.clone()),
+            input: req_input,
             nonce: Some(account.info.nonce),
-            chain_id: Some(ecx_inner.env.cfg.chain_id),
+            chain_id: Some(ecx.cfg.chain_id),
             gas: if is_fixed_gas_limit { Some(input.gas_limit) } else { None },
             ..Default::default()
         };
@@ -187,7 +185,7 @@ impl CheatcodeInspectorStrategyRunner for EvmCheatcodeInspectorStrategyRunner {
         }
 
         broadcastable_transactions.push_back(BroadcastableTransaction {
-            rpc: ecx_inner.db.active_fork_url(),
+            rpc: ecx.journaled_state.database.active_fork_url(),
             transaction: tx_req.into(),
         });
         debug!(target: "cheatcodes", tx=?broadcastable_transactions.back().unwrap(), "broadcastable call");
