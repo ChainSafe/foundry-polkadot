@@ -383,7 +383,7 @@ impl<'a> InvariantExecutor<'a> {
                 }
 
                 // Collect coverage from last fuzzed call.
-                invariant_test.merge_coverage(call_result.coverage.clone());
+                invariant_test.merge_coverage(call_result.line_coverage.clone());
 
                 if discarded {
                     current_run.inputs.pop();
@@ -557,7 +557,7 @@ impl<'a> InvariantExecutor<'a> {
         }
 
         self.executor.inspector_mut().fuzzer =
-            Some(Fuzzer { call_generator, fuzz_state: fuzz_state.clone(), collect: true });
+            Some(Fuzzer { call_generator, fuzz_state: fuzz_state.clone(), collect: true }.into());
 
         // Let's make sure the invariant is sound before actually starting the run:
         // We'll assert the invariant in its initial state, and if it fails, we'll

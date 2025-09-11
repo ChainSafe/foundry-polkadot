@@ -821,8 +821,10 @@ pub struct RawCallResult {
     pub labels: AddressHashMap<String>,
     /// The traces of the call
     pub traces: Option<SparsedTraceArena>,
-    /// The coverage info collected during the call
-    pub coverage: Option<HitMaps>,
+    /// The line coverage info collected during the call
+    pub line_coverage: Option<HitMaps>,
+    /// The edge coverage info collected during the call
+    pub edge_coverage: Option<Vec<u8>>,
     /// Scripted transactions generated from this call
     pub transactions: Option<BroadcastableTransactions>,
     /// The changeset of the state.
@@ -830,11 +832,12 @@ pub struct RawCallResult {
     /// The `revm::Env` after the call
     pub env: Env,
     /// The cheatcode states after execution
-    pub cheatcodes: Option<Cheatcodes>,
+    pub cheatcodes: Option<Box<Cheatcodes>>,
     /// The raw output of the execution
     pub out: Option<Output>,
     /// The chisel state
-    pub chisel_state: Option<(Vec<U256>, Vec<u8>, InstructionResult)>,
+    pub chisel_state: Option<(Vec<U256>, Vec<u8>, Option<InstructionResult>)>,
+    pub reverter: Option<Address>,
 }
 
 impl Default for RawCallResult {
@@ -850,13 +853,15 @@ impl Default for RawCallResult {
             logs: Vec::new(),
             labels: HashMap::default(),
             traces: None,
-            coverage: None,
+            line_coverage: None,
+            edge_coverage: None,
             transactions: None,
             state_changeset: HashMap::default(),
             env: Env::default(),
             cheatcodes: Default::default(),
             out: None,
             chisel_state: None,
+            reverter: None,
         }
     }
 }
@@ -982,8 +987,16 @@ fn convert_executed_result(
         _ => Bytes::new(),
     };
 
-    let InspectorData { mut logs, labels, traces, coverage, cheatcodes, chisel_state } =
-        inspector.collect();
+    let InspectorData {
+        mut logs,
+        labels,
+        traces,
+        line_coverage,
+        edge_coverage,
+        cheatcodes,
+        chisel_state,
+        reverter,
+    } = inspector.collect();
 
     if logs.is_empty() {
         logs = exec_logs;
@@ -1005,13 +1018,15 @@ fn convert_executed_result(
         logs,
         labels,
         traces,
-        coverage,
+        line_coverage,
+        edge_coverage,
         transactions,
         state_changeset,
         env,
         cheatcodes,
         out,
         chisel_state,
+        reverter,
     })
 }
 

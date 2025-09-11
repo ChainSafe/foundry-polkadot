@@ -258,7 +258,7 @@ impl FuzzedExecutor {
             Ok(FuzzOutcome::Case(CaseOutcome {
                 case: FuzzCase { calldata, gas: call.gas_used, stipend: call.stipend },
                 traces: call.traces,
-                coverage: call.coverage,
+                coverage: call.line_coverage,
                 breakpoints,
                 logs: call.logs,
                 deprecated_cheatcodes,

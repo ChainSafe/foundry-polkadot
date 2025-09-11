@@ -52,7 +52,7 @@ pub fn replay_run(
 
         logs.extend(call_result.logs);
         traces.push((TraceKind::Execution, call_result.traces.clone().unwrap()));
-        HitMaps::merge_opt(coverage, call_result.coverage);
+        HitMaps::merge_opt(coverage, call_result.line_coverage);
 
         // Identify newly generated contracts, if they exist.
         ided_contracts

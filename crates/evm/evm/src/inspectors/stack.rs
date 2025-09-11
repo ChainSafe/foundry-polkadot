@@ -1,18 +1,22 @@
 use super::{
-    Cheatcodes, CheatsConfig, ChiselState, Fuzzer, LineCoverageCollector, LogCollector,
-    ScriptExecutionInspector, TracingInspector,
+    Cheatcodes, CheatsConfig, ChiselState, CustomPrintTracer, Fuzzer, LineCoverageCollector,
+    LogCollector, RevertDiagnostic, ScriptExecutionInspector, TracingInspector,
 };
-use alloy_evm::eth::EthEvmContext;
+use alloy_evm::{eth::EthEvmContext, Evm};
 use alloy_primitives::{map::AddressHashMap, Address, Bytes, Log, TxKind, U256};
 use foundry_cheatcodes::{CheatcodesExecutor, Wallets};
 use foundry_evm_core::{
     backend::{DatabaseExt, JournaledState},
-    Env, InspectorExt,
+    evm::new_evm_with_inspector,
+    ContextExt, Env, InspectorExt,
 };
 use foundry_evm_coverage::HitMaps;
 use foundry_evm_traces::{SparsedTraceArena, TraceMode};
 use revm::{
-    context::{result::ExecutionResult, BlockEnv, CreateScheme},
+    context::{
+        result::{ExecutionResult, Output},
+        BlockEnv, CreateScheme,
+    },
     interpreter::{
         CallInputs, CallOutcome, CallScheme, CreateInputs, CreateOutcome, Gas, InstructionResult,
         Interpreter, InterpreterResult,
