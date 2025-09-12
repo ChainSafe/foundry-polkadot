@@ -152,9 +152,12 @@ jobs:
           ext=""
           [[ "$TARGET" == *windows* ]] && ext=".exe"
 
-          flags="--target $TARGET --profile $PROFILE --bins --no-default-features --features aws-kms,cli,asm-keccak"
+          flags=(--target $TARGET --profile $PROFILE --bins
+            --no-default-features --features aws-kms,gcp-kms,cli,asm-keccak)
+
+          # `jemalloc` is not fully supported on MSVC or aarch64 Linux.
           if [[ "$TARGET" != *msvc* && "$TARGET" != "aarch64-unknown-linux-gnu" ]]; then
-            flags="$flags --features jemalloc"
+            flags+=(--features jemalloc)
           fi
 
           if [[ "$TARGET" == "x86_64-unknown-linux-musl" ]]; then
@@ -202,6 +205,7 @@ jobs:
             mv "foundry_${VERSION_NAME}_${PLATFORM_NAME}_${ARCH}.zip" ../../../
             echo "file_name=foundry_${VERSION_NAME}_${PLATFORM_NAME}_${ARCH}.zip" >> $GITHUB_OUTPUT
           fi
+          echo "foundry_attestation=foundry_${VERSION_NAME}_${PLATFORM_NAME}_${ARCH}.attestation.txt" >> $GITHUB_OUTPUT
 
       - name: Build man page
         id: man
@@ -219,9 +223,21 @@ jobs:
           tar -czvf "foundry_man_${VERSION_NAME}.tar.gz" forge.1.gz cast.1.gz
           echo "foundry_man=foundry_man_${VERSION_NAME}.tar.gz" >> $GITHUB_OUTPUT
 
+      - name: Binaries attestation
+        id: attestation
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            ${{ env.cast_bin_path }}
+            ${{ env.forge_bin_path }}
+
+      - name: Record attestation URL
+        run: |
+          echo "${{ steps.attestation.outputs.attestation-url }}" > ${{ steps.artifacts.outputs.foundry_attestation }}
+
       # Creates the release for this specific version
       - name: Create release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v2.2.2
         with:
           name: ${{ needs.prepare.outputs.release_name }}
           tag_name: ${{ needs.prepare.outputs.tag_name }}
@@ -229,20 +245,14 @@ jobs:
           body: ${{ needs.prepare.outputs.changelog }}
           files: |
             ${{ steps.artifacts.outputs.file_name }}
+            ${{ steps.artifacts.outputs.foundry_attestation }}
             ${{ steps.man.outputs.foundry_man }}
-
-      - name: Binaries attestation
-        uses: actions/attest-build-provenance@v2
-        with:
-          subject-path: |
-            ${{ env.cast_bin_path }}
-            ${{ env.forge_bin_path }}
 
       # If this is a nightly release, it also updates the release
       # tagged `nightly` for compatibility with `foundryup`
       - name: Update nightly release
         if: ${{ env.IS_NIGHTLY == 'true' }}
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v2.2.2
         with:
           name: "Nightly"
           tag_name: "nightly"
@@ -250,6 +260,7 @@ jobs:
           body: ${{ needs.prepare.outputs.changelog }}
           files: |
             ${{ steps.artifacts.outputs.file_name }}
+            ${{ steps.artifacts.outputs.foundry_attestation }}
             ${{ steps.man.outputs.foundry_man }}
 
   cleanup:

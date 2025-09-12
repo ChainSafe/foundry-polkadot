@@ -142,9 +142,10 @@ impl ExecutorStrategyRunner for EvmExecutorStrategyRunner {
         address: Address,
         nonce: u64,
     ) -> BackendResult<()> {
-        let mut account = executor.backend().basic_ref(address)?.unwrap_or_default();
+        let mut account = self.backend().basic_ref(address)?.unwrap_or_default();
         account.nonce = nonce;
         executor.backend_mut().insert_account_info(address, account);
+        executor.env_mut().tx.nonce = nonce;
         Ok(())
     }
 

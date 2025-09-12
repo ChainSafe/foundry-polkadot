@@ -167,7 +167,7 @@ jobs:
         with:
           python-version: 3.11
       - name: Install Vyper
-        run: pip --version && pip install vyper==0.4.0
+        run: pip --version && pip install vyper==0.4.3
       - name: Install Resolc
         run: |
           cargo install rvm-rs
