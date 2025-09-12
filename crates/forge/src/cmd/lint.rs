@@ -8,7 +8,7 @@ use foundry_cli::{
     opts::{BuildOpts, solar_pcx_from_build_opts},
     utils::{FoundryPathExt, LoadConfig},
 };
-use foundry_compilers::{solc::SolcLanguage, utils::SOLC_EXTENSIONS};
+use foundry_compilers::{multi::SolidityCompiler, solc::SolcLanguage, utils::SOLC_EXTENSIONS};
 use foundry_config::{filter::expand_globs, lint::Severity};
 use std::path::PathBuf;
 
@@ -100,7 +100,7 @@ impl LintArgs {
             None => config.lint.severity,
         };
 
-        if project.compiler.solc.is_none() {
+        if !matches!(project.compiler.solidity, SolidityCompiler::Solc(_)) {
             return Err(eyre!("Linting not supported for this language"));
         }
 

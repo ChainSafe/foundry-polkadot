@@ -47,7 +47,7 @@ mod evm;
 mod fs;
 
 mod inspector;
-pub use inspector::{CommonCreateInput, Ecx, InnerEcx};
+pub use inspector::{CommonCreateInput, Ecx};
 
 mod json;
 
@@ -152,7 +152,7 @@ pub struct CheatsCtxt<'cheats, 'evm, 'db, 'db2> {
     /// The cheatcodes inspector state.
     pub state: &'cheats mut Cheatcodes,
     /// The EVM data.
-    pub(crate) ecx: &'evm mut EthEvmContext<&'db mut (dyn DatabaseExt + 'db2)>,
+    pub ecx: &'evm mut EthEvmContext<&'db mut (dyn DatabaseExt + 'db2)>,
     /// The original `msg.sender`.
     pub(crate) caller: Address,
     /// Gas limit of the current cheatcode call.

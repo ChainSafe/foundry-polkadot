@@ -853,8 +853,13 @@ impl Cheatcodes {
                     let is_fixed_gas_limit = check_if_fixed_gas_limit(&ecx, call.gas_limit);
 
                     let input = TransactionInput::new(call.input.bytes(ecx));
-                    let account =
-                        ecx.journaled_state.inner.state().get_mut(&broadcast.new_origin).unwrap();
+                    let account = ecx
+                        .journaled_state
+                        .inner
+                        .state()
+                        .get_mut(&broadcast.new_origin)
+                        .unwrap()
+                        .clone();
 
                     let mut tx_req = TransactionRequest {
                         from: Some(broadcast.new_origin),
@@ -883,18 +888,19 @@ impl Cheatcodes {
                             });
                         }
 
-                                            self.strategy.runner.record_broadcastable_call_transactions(
-                        self.strategy.context.as_mut(),
-                        self.config.clone(),
-                        call,
-                        ecx,
-                        broadcast,
-                        &mut self.broadcastable_transactions,
-                        &mut self.active_delegation,
-                    );
+                        self.strategy.runner.record_broadcastable_call_transactions(
+                            self.strategy.context.as_mut(),
+                            self.config.clone(),
+                            call,
+                            ecx,
+                            broadcast,
+                            &mut self.broadcastable_transactions,
+                            &mut self.active_delegations,
+                        );
                         tx_req.set_blob_sidecar(blob_sidecar);
                     }
-
+                    let account =
+                        ecx.journaled_state.inner.state().get_mut(&broadcast.new_origin).unwrap();
                     // Apply active EIP-7702 delegations, if any.
                     if !active_delegations.is_empty() {
                         for auth in &active_delegations {
@@ -1634,22 +1640,15 @@ impl Inspector<EthEvmContext<&mut dyn DatabaseExt>> for Cheatcodes {
 
             if curr_depth == broadcast.depth {
                 input.set_caller(broadcast.new_origin);
-                let is_fixed_gas_limit = check_if_fixed_gas_limit(&ecx, input.gas_limit());
 
-                let account = &ecx.journaled_state.inner.state()[&broadcast.new_origin];
-                self.broadcastable_transactions.push_back(BroadcastableTransaction {
-                    rpc: ecx.journaled_state.database.active_fork_url(),
-                    transaction: TransactionRequest {
-                        from: Some(broadcast.new_origin),
-                        to: None,
-                        value: Some(input.value()),
-                        input: TransactionInput::new(input.init_code()),
-                        nonce: Some(account.info.nonce),
-                        gas: if is_fixed_gas_limit { Some(input.gas_limit()) } else { None },
-                        ..Default::default()
-                    }
-                    .into(),
-                });
+                self.strategy.runner.record_broadcastable_create_transactions(
+                    self.strategy.context.as_mut(),
+                    self.config.clone(),
+                    &input,
+                    ecx,
+                    broadcast,
+                    &mut self.broadcastable_transactions,
+                );
 
                 input.log_debug(self, &input.scheme().unwrap_or(CreateScheme::Create));
             }
@@ -1687,7 +1686,7 @@ impl Inspector<EthEvmContext<&mut dyn DatabaseExt>> for Cheatcodes {
             &mut TransparentCheatcodesExecutor,
         ) {
             return Some(result);
-        }        
+        }
 
         None
     }
@@ -2340,7 +2339,7 @@ fn disallowed_mem_write(
 
 // Determines if the gas limit on a given call was manually set in the script and should therefore
 // not be overwritten by later estimations
-fn check_if_fixed_gas_limit(ecx: &Ecx, call_gas_limit: u64) -> bool {
+pub fn check_if_fixed_gas_limit(ecx: &Ecx, call_gas_limit: u64) -> bool {
     // If the gas limit was not set in the source code it is set to the estimated gas left at the
     // time of the call, which should be rather close to configured gas limit.
     // TODO: Find a way to reliably make this determination.

@@ -9,35 +9,36 @@
 extern crate tracing;
 
 use crate::cache::StorageCachingConfig;
-use alloy_primitives::{address, map::AddressHashMap, Address, FixedBytes, B256, U256};
+use alloy_primitives::{Address, B256, FixedBytes, U256, address, map::AddressHashMap};
 use eyre::{ContextCompat, WrapErr};
 use figment::{
+    Error, Figment, Metadata, Profile, Provider,
     providers::{Env, Format, Serialized, Toml},
     value::{Dict, Map, Value},
-    Error, Figment, Metadata, Profile, Provider,
 };
 use filter::GlobMatcher;
 use foundry_compilers::{
+    ArtifactOutput, ConfigurableArtifacts, Graph, Project, ProjectPathsConfig,
+    RestrictionsWithVersion, VyperLanguage,
     artifacts::{
+        BytecodeHash, DebuggingSettings, EvmVersion, Libraries, ModelCheckerSettings,
+        ModelCheckerTarget, Optimizer, OptimizerDetails, RevertStrings, Settings, SettingsMetadata,
+        Severity,
         output_selection::{ContractOutputSelection, OutputSelection},
         remappings::{RelativeRemapping, Remapping},
-        serde_helpers, BytecodeHash, DebuggingSettings, EvmVersion, Libraries,
-        ModelCheckerSettings, ModelCheckerTarget, Optimizer, OptimizerDetails, RevertStrings,
-        Settings, SettingsMetadata, Severity,
+        serde_helpers,
     },
     cache::SOLIDITY_FILES_CACHE_FILENAME,
     compilers::{
+        Compiler,
         multi::{MultiCompiler, MultiCompilerSettings, SolidityCompiler},
         solc::{Solc, SolcCompiler},
         vyper::{Vyper, VyperSettings},
-        Compiler,
     },
     error::SolcError,
     multi::{MultiCompilerParsedSource, MultiCompilerRestrictions},
     resolc::Resolc,
     solc::{CliSettings, SolcSettings},
-    ArtifactOutput, ConfigurableArtifacts, Graph, Project, ProjectPathsConfig,
-    RestrictionsWithVersion, VyperLanguage,
 };
 use regex::Regex;
 use revm::primitives::hardfork::SpecId;
@@ -765,7 +766,8 @@ impl Config {
         // normalize defaults
         figment = self.normalize_defaults(figment);
 
-        Figment::from(self).merge(figment).select(profile)
+        let result = Figment::from(self).merge(figment).select(profile);
+        result
     }
 
     /// The config supports relative paths and tracks the root path separately see
@@ -1401,11 +1403,7 @@ impl Config {
         &'a self,
         fallback: impl Into<Cow<'a, str>>,
     ) -> Result<Cow<'a, str>, UnresolvedEnvVarError> {
-        if let Some(url) = self.get_rpc_url() {
-            url
-        } else {
-            Ok(fallback.into())
-        }
+        if let Some(url) = self.get_rpc_url() { url } else { Ok(fallback.into()) }
     }
 
     /// Returns the configured rpc or `"http://localhost:8545"` if no `eth_rpc_url` is set
@@ -1533,20 +1531,12 @@ impl Config {
 
     /// Returns the remapping for the project's _test_ directory, but only if it exists
     pub fn get_test_dir_remapping(&self) -> Option<Remapping> {
-        if self.root.join(&self.test).exists() {
-            get_dir_remapping(&self.test)
-        } else {
-            None
-        }
+        if self.root.join(&self.test).exists() { get_dir_remapping(&self.test) } else { None }
     }
 
     /// Returns the remapping for the project's _script_ directory, but only if it exists
     pub fn get_script_dir_remapping(&self) -> Option<Remapping> {
-        if self.root.join(&self.script).exists() {
-            get_dir_remapping(&self.script)
-        } else {
-            None
-        }
+        if self.root.join(&self.script).exists() { get_dir_remapping(&self.script) } else { None }
     }
 
     /// Returns the `Optimizer` based on the configured settings
@@ -2418,7 +2408,7 @@ impl Default for Config {
             allow_paths: vec![],
             include_paths: vec![],
             force: false,
-            evm_version: EvmVersion::Prague,
+            evm_version: EvmVersion::Cancun,
             gas_reports: vec!["*".to_string()],
             gas_reports_ignore: vec![],
             gas_reports_include_tests: false,
@@ -2588,11 +2578,7 @@ impl SolcReq {
 impl<T: AsRef<str>> From<T> for SolcReq {
     fn from(s: T) -> Self {
         let s = s.as_ref();
-        if let Ok(v) = Version::from_str(s) {
-            Self::Version(v)
-        } else {
-            Self::Local(s.into())
-        }
+        if let Ok(v) = Version::from_str(s) { Self::Version(v) } else { Self::Local(s.into()) }
     }
 }
 
@@ -2679,16 +2665,16 @@ mod tests {
         etherscan::ResolvedEtherscanConfigs,
         fmt::IndentStyle,
     };
+    use NamedChain::Moonbeam;
     use endpoints::{RpcAuth, RpcEndpointConfig};
     use figment::error::Kind::InvalidType;
     use foundry_compilers::artifacts::{
-        vyper::VyperOptimizationMode, ModelCheckerEngine, YulDetails,
+        ModelCheckerEngine, YulDetails, vyper::VyperOptimizationMode,
     };
     use similar_asserts::assert_eq;
     use soldeer_core::remappings::RemappingsLocation;
     use std::{fs::File, io::Write};
     use tempfile::tempdir;
-    use NamedChain::Moonbeam;
 
     // Helper function to clear `__warnings` in config, since it will be populated during loading
     // from file, causing testing problem when comparing to those created from `default()`, etc.
@@ -2938,28 +2924,22 @@ mod tests {
             )?;
 
             let config = Config::load().unwrap();
-            assert_eq!(
-                config.remappings,
-                vec![
-                    Remapping::from_str("file-ds-test/=lib/ds-test/").unwrap().into(),
-                    Remapping::from_str("file-other/=lib/other/").unwrap().into(),
-                ],
-            );
+            assert_eq!(config.remappings, vec![
+                Remapping::from_str("file-ds-test/=lib/ds-test/").unwrap().into(),
+                Remapping::from_str("file-other/=lib/other/").unwrap().into(),
+            ],);
 
             jail.set_env("DAPP_REMAPPINGS", "ds-test=lib/ds-test/\nother/=lib/other/");
             let config = Config::load().unwrap();
 
-            assert_eq!(
-                config.remappings,
-                vec![
-                    // From environment (should have precedence over remapping.txt)
-                    Remapping::from_str("ds-test=lib/ds-test/").unwrap().into(),
-                    Remapping::from_str("other/=lib/other/").unwrap().into(),
-                    // From remapping.txt (should have less precedence than remapping.txt)
-                    Remapping::from_str("file-ds-test/=lib/ds-test/").unwrap().into(),
-                    Remapping::from_str("file-other/=lib/other/").unwrap().into(),
-                ],
-            );
+            assert_eq!(config.remappings, vec![
+                // From environment (should have precedence over remapping.txt)
+                Remapping::from_str("ds-test=lib/ds-test/").unwrap().into(),
+                Remapping::from_str("other/=lib/other/").unwrap().into(),
+                // From remapping.txt (should have less precedence than remapping.txt)
+                Remapping::from_str("file-ds-test/=lib/ds-test/").unwrap().into(),
+                Remapping::from_str("file-other/=lib/other/").unwrap().into(),
+            ],);
 
             Ok(())
         });
@@ -2989,13 +2969,10 @@ mod tests {
             )?;
 
             let config = Config::load().unwrap();
-            assert_eq!(
-                config.remappings,
-                vec![
-                    Remapping::from_str("ds-test/=lib/ds-test/").unwrap().into(),
-                    Remapping::from_str("other/=lib/other/").unwrap().into(),
-                ],
-            );
+            assert_eq!(config.remappings, vec![
+                Remapping::from_str("ds-test/=lib/ds-test/").unwrap().into(),
+                Remapping::from_str("other/=lib/other/").unwrap().into(),
+            ],);
 
             jail.set_env("DAPP_REMAPPINGS", "ds-test/=lib/ds-test/src/\nenv-lib/=lib/env-lib/");
             let config = Config::load().unwrap();
@@ -3004,24 +2981,18 @@ mod tests {
             // - ds-test from environment (lib/ds-test/src/)
             // - other from remappings.txt (lib/other/)
             // - env-lib from environment (lib/env-lib/)
-            assert_eq!(
-                config.remappings,
-                vec![
-                    Remapping::from_str("ds-test/=lib/ds-test/src/").unwrap().into(),
-                    Remapping::from_str("env-lib/=lib/env-lib/").unwrap().into(),
-                    Remapping::from_str("other/=lib/other/").unwrap().into(),
-                ],
-            );
+            assert_eq!(config.remappings, vec![
+                Remapping::from_str("ds-test/=lib/ds-test/src/").unwrap().into(),
+                Remapping::from_str("env-lib/=lib/env-lib/").unwrap().into(),
+                Remapping::from_str("other/=lib/other/").unwrap().into(),
+            ],);
 
             // contains additional remapping to the source dir
-            assert_eq!(
-                config.get_all_remappings().collect::<Vec<_>>(),
-                vec![
-                    Remapping::from_str("ds-test/=lib/ds-test/src/").unwrap(),
-                    Remapping::from_str("env-lib/=lib/env-lib/").unwrap(),
-                    Remapping::from_str("other/=lib/other/").unwrap(),
-                ],
-            );
+            assert_eq!(config.get_all_remappings().collect::<Vec<_>>(), vec![
+                Remapping::from_str("ds-test/=lib/ds-test/src/").unwrap(),
+                Remapping::from_str("env-lib/=lib/env-lib/").unwrap(),
+                Remapping::from_str("other/=lib/other/").unwrap(),
+            ],);
 
             Ok(())
         });
@@ -3063,13 +3034,10 @@ mod tests {
             )?;
 
             let config = Config::load().unwrap();
-            assert_eq!(
-                config,
-                Config {
-                    gas_limit: gas.into(),
-                    ..Config::default().normalized_optimizer_settings()
-                }
-            );
+            assert_eq!(config, Config {
+                gas_limit: gas.into(),
+                ..Config::default().normalized_optimizer_settings()
+            });
 
             Ok(())
         });
@@ -3121,9 +3089,11 @@ mod tests {
             )?;
 
             let config = Config::load().unwrap();
-            assert!(config
-                .get_etherscan_config_with_chain(Some(NamedChain::BinanceSmartChain.into()))
-                .is_err());
+            assert!(
+                config
+                    .get_etherscan_config_with_chain(Some(NamedChain::BinanceSmartChain.into()))
+                    .is_err()
+            );
 
             unsafe {
                 std::env::set_var(env_key, env_value);
@@ -3185,26 +3155,20 @@ mod tests {
             assert_eq!(
                 configs,
                 ResolvedEtherscanConfigs::new([
-                    (
-                        "mainnet",
-                        ResolvedEtherscanConfig {
-                            api_url: mainnet_urls.0.to_string(),
-                            chain: Some(NamedChain::Mainnet.into()),
-                            browser_url: Some(mainnet_urls.1.to_string()),
-                            api_version: EtherscanApiVersion::V2,
-                            key: "FX42Z3BBJJEWXWGYV2X1CIPRSCN".to_string(),
-                        }
-                    ),
-                    (
-                        "moonbeam",
-                        ResolvedEtherscanConfig {
-                            api_url: mb_urls.0.to_string(),
-                            chain: Some(Moonbeam.into()),
-                            browser_url: Some(mb_urls.1.to_string()),
-                            api_version: EtherscanApiVersion::V2,
-                            key: "123456789".to_string(),
-                        }
-                    ),
+                    ("mainnet", ResolvedEtherscanConfig {
+                        api_url: mainnet_urls.0.to_string(),
+                        chain: Some(NamedChain::Mainnet.into()),
+                        browser_url: Some(mainnet_urls.1.to_string()),
+                        api_version: EtherscanApiVersion::V2,
+                        key: "FX42Z3BBJJEWXWGYV2X1CIPRSCN".to_string(),
+                    }),
+                    ("moonbeam", ResolvedEtherscanConfig {
+                        api_url: mb_urls.0.to_string(),
+                        chain: Some(Moonbeam.into()),
+                        browser_url: Some(mb_urls.1.to_string()),
+                        api_version: EtherscanApiVersion::V2,
+                        key: "123456789".to_string(),
+                    }),
                 ])
             );
 
@@ -3240,26 +3204,20 @@ mod tests {
             assert_eq!(
                 configs,
                 ResolvedEtherscanConfigs::new([
-                    (
-                        "mainnet",
-                        ResolvedEtherscanConfig {
-                            api_url: mainnet_urls.0.to_string(),
-                            chain: Some(NamedChain::Mainnet.into()),
-                            browser_url: Some(mainnet_urls.1.to_string()),
-                            api_version: EtherscanApiVersion::V2,
-                            key: "FX42Z3BBJJEWXWGYV2X1CIPRSCN".to_string(),
-                        }
-                    ),
-                    (
-                        "moonbeam",
-                        ResolvedEtherscanConfig {
-                            api_url: mb_urls.0.to_string(),
-                            chain: Some(Moonbeam.into()),
-                            browser_url: Some(mb_urls.1.to_string()),
-                            api_version: EtherscanApiVersion::V1,
-                            key: "123456789".to_string(),
-                        }
-                    ),
+                    ("mainnet", ResolvedEtherscanConfig {
+                        api_url: mainnet_urls.0.to_string(),
+                        chain: Some(NamedChain::Mainnet.into()),
+                        browser_url: Some(mainnet_urls.1.to_string()),
+                        api_version: EtherscanApiVersion::V2,
+                        key: "FX42Z3BBJJEWXWGYV2X1CIPRSCN".to_string(),
+                    }),
+                    ("moonbeam", ResolvedEtherscanConfig {
+                        api_url: mb_urls.0.to_string(),
+                        chain: Some(Moonbeam.into()),
+                        browser_url: Some(mb_urls.1.to_string()),
+                        api_version: EtherscanApiVersion::V1,
+                        key: "123456789".to_string(),
+                    }),
                 ])
             );
 
@@ -3739,51 +3697,48 @@ mod tests {
             )?;
 
             let config = Config::load().unwrap();
-            assert_eq!(
-                config,
-                Config {
-                    src: "some-source".into(),
-                    out: "some-out".into(),
-                    cache: true,
-                    eth_rpc_url: Some("https://example.com/".to_string()),
-                    remappings: vec![Remapping::from_str("ds-test=lib/ds-test/").unwrap().into()],
-                    verbosity: 3,
-                    via_ir: true,
-                    rpc_storage_caching: StorageCachingConfig {
-                        chains: CachedChains::Chains(vec![
-                            Chain::mainnet(),
-                            Chain::optimism_mainnet(),
-                            Chain::from_id(999999)
-                        ]),
-                        endpoints: CachedEndpoints::All,
-                    },
-                    use_literal_content: false,
-                    bytecode_hash: BytecodeHash::Ipfs,
-                    cbor_metadata: true,
-                    revert_strings: Some(RevertStrings::Strip),
-                    allow_paths: vec![PathBuf::from("allow"), PathBuf::from("paths")],
-                    rpc_endpoints: RpcEndpoints::new([
-                        ("optimism", RpcEndpointUrl::Url("https://example.com/".to_string())),
-                        ("mainnet", RpcEndpointUrl::Env("${RPC_MAINNET}".to_string())),
-                        (
-                            "mainnet_2",
-                            RpcEndpointUrl::Env(
-                                "https://eth-mainnet.alchemyapi.io/v2/${API_KEY}".to_string()
-                            )
-                        ),
-                        (
-                            "mainnet_3",
-                            RpcEndpointUrl::Env(
-                                "https://eth-mainnet.alchemyapi.io/v2/${API_KEY}/${ANOTHER_KEY}"
-                                    .to_string()
-                            )
-                        ),
+            assert_eq!(config, Config {
+                src: "some-source".into(),
+                out: "some-out".into(),
+                cache: true,
+                eth_rpc_url: Some("https://example.com/".to_string()),
+                remappings: vec![Remapping::from_str("ds-test=lib/ds-test/").unwrap().into()],
+                verbosity: 3,
+                via_ir: true,
+                rpc_storage_caching: StorageCachingConfig {
+                    chains: CachedChains::Chains(vec![
+                        Chain::mainnet(),
+                        Chain::optimism_mainnet(),
+                        Chain::from_id(999999)
                     ]),
-                    build_info_path: Some("build-info".into()),
-                    always_use_create_2_factory: true,
-                    ..Config::default().normalized_optimizer_settings()
-                }
-            );
+                    endpoints: CachedEndpoints::All,
+                },
+                use_literal_content: false,
+                bytecode_hash: BytecodeHash::Ipfs,
+                cbor_metadata: true,
+                revert_strings: Some(RevertStrings::Strip),
+                allow_paths: vec![PathBuf::from("allow"), PathBuf::from("paths")],
+                rpc_endpoints: RpcEndpoints::new([
+                    ("optimism", RpcEndpointUrl::Url("https://example.com/".to_string())),
+                    ("mainnet", RpcEndpointUrl::Env("${RPC_MAINNET}".to_string())),
+                    (
+                        "mainnet_2",
+                        RpcEndpointUrl::Env(
+                            "https://eth-mainnet.alchemyapi.io/v2/${API_KEY}".to_string()
+                        )
+                    ),
+                    (
+                        "mainnet_3",
+                        RpcEndpointUrl::Env(
+                            "https://eth-mainnet.alchemyapi.io/v2/${API_KEY}/${ANOTHER_KEY}"
+                                .to_string()
+                        )
+                    ),
+                ]),
+                build_info_path: Some("build-info".into()),
+                always_use_create_2_factory: true,
+                ..Config::default().normalized_optimizer_settings()
+            });
 
             Ok(())
         });
@@ -3801,10 +3756,9 @@ mod tests {
             )?;
 
             let config = Config::load_with_root(jail.directory()).unwrap();
-            assert_eq!(
-                config.remappings,
-                vec![Remapping::from_str("nested/=lib/nested/").unwrap().into()]
-            );
+            assert_eq!(config.remappings, vec![
+                Remapping::from_str("nested/=lib/nested/").unwrap().into()
+            ]);
 
             Ok(())
         });
@@ -3889,10 +3843,9 @@ mod tests {
 
             assert_eq!(config.ignored_file_paths, vec![PathBuf::from("something")]);
             assert_eq!(config.fuzz.seed, Some(U256::from(1000)));
-            assert_eq!(
-                config.remappings,
-                vec![Remapping::from_str("nested/=lib/nested/").unwrap().into()]
-            );
+            assert_eq!(config.remappings, vec![
+                Remapping::from_str("nested/=lib/nested/").unwrap().into()
+            ]);
 
             assert_eq!(
                 config.rpc_endpoints,
@@ -4007,18 +3960,15 @@ mod tests {
             )?;
 
             let config = Config::load().unwrap();
-            assert_eq!(
-                config,
-                Config {
-                    src: "some-source".into(),
-                    out: "some-out".into(),
-                    cache: true,
-                    eth_rpc_url: Some("https://example.com/".to_string()),
-                    auto_detect_solc: false,
-                    evm_version: EvmVersion::Berlin,
-                    ..Config::default().normalized_optimizer_settings()
-                }
-            );
+            assert_eq!(config, Config {
+                src: "some-source".into(),
+                out: "some-out".into(),
+                cache: true,
+                eth_rpc_url: Some("https://example.com/".to_string()),
+                auto_detect_solc: false,
+                evm_version: EvmVersion::Berlin,
+                ..Config::default().normalized_optimizer_settings()
+            });
 
             Ok(())
         });
@@ -4038,10 +3988,10 @@ mod tests {
 
             let config = Config::load().unwrap();
 
-            assert_eq!(
-                config.extra_output,
-                vec![ContractOutputSelection::Metadata, ContractOutputSelection::IrOptimized]
-            );
+            assert_eq!(config.extra_output, vec![
+                ContractOutputSelection::Metadata,
+                ContractOutputSelection::IrOptimized
+            ]);
             assert_eq!(config.extra_output_files, vec![ContractOutputSelection::Metadata]);
 
             Ok(())
@@ -4062,27 +4012,21 @@ mod tests {
             )?;
 
             let config = Config::load().unwrap();
-            assert_eq!(
-                config,
-                Config {
-                    src: "mysrc".into(),
-                    out: "myout".into(),
-                    verbosity: 3,
-                    ..Config::default().normalized_optimizer_settings()
-                }
-            );
+            assert_eq!(config, Config {
+                src: "mysrc".into(),
+                out: "myout".into(),
+                verbosity: 3,
+                ..Config::default().normalized_optimizer_settings()
+            });
 
             jail.set_env("FOUNDRY_SRC", r"other-src");
             let config = Config::load().unwrap();
-            assert_eq!(
-                config,
-                Config {
-                    src: "other-src".into(),
-                    out: "myout".into(),
-                    verbosity: 3,
-                    ..Config::default().normalized_optimizer_settings()
-                }
-            );
+            assert_eq!(config, Config {
+                src: "other-src".into(),
+                out: "myout".into(),
+                verbosity: 3,
+                ..Config::default().normalized_optimizer_settings()
+            });
 
             jail.set_env("FOUNDRY_PROFILE", "foo");
             let val: Result<String, _> = Config::figment().extract_inner("profile");
@@ -4112,28 +4056,22 @@ mod tests {
             assert_eq!(loaded.evm_version, EvmVersion::Berlin);
             let base = loaded.into_basic();
             let default = Config::default();
-            assert_eq!(
-                base,
-                BasicConfig {
-                    profile: Config::DEFAULT_PROFILE,
-                    src: "mysrc".into(),
-                    out: "myout".into(),
-                    libs: default.libs.clone(),
-                    remappings: default.remappings.clone(),
-                }
-            );
+            assert_eq!(base, BasicConfig {
+                profile: Config::DEFAULT_PROFILE,
+                src: "mysrc".into(),
+                out: "myout".into(),
+                libs: default.libs.clone(),
+                remappings: default.remappings.clone(),
+            });
             jail.set_env("FOUNDRY_PROFILE", r"other");
             let base = Config::figment().extract::<BasicConfig>().unwrap();
-            assert_eq!(
-                base,
-                BasicConfig {
-                    profile: Config::DEFAULT_PROFILE,
-                    src: "other-src".into(),
-                    out: "myout".into(),
-                    libs: default.libs.clone(),
-                    remappings: default.remappings,
-                }
-            );
+            assert_eq!(base, BasicConfig {
+                profile: Config::DEFAULT_PROFILE,
+                src: "other-src".into(),
+                out: "myout".into(),
+                libs: default.libs.clone(),
+                remappings: default.remappings,
+            });
             Ok(())
         });
     }
@@ -4281,37 +4219,32 @@ mod tests {
                 "[src/DssSpell.sol:DssExecLib:0x8De6DDbCd5053d32292AAA0D2105A32d108484a6]",
             );
             let config = Config::load().unwrap();
-            assert_eq!(
-                config.libraries,
-                vec!["src/DssSpell.sol:DssExecLib:0x8De6DDbCd5053d32292AAA0D2105A32d108484a6"
-                    .to_string()]
-            );
+            assert_eq!(config.libraries, vec![
+                "src/DssSpell.sol:DssExecLib:0x8De6DDbCd5053d32292AAA0D2105A32d108484a6"
+                    .to_string()
+            ]);
 
             jail.set_env(
                 "DAPP_LIBRARIES",
                 "src/DssSpell.sol:DssExecLib:0x8De6DDbCd5053d32292AAA0D2105A32d108484a6",
             );
             let config = Config::load().unwrap();
-            assert_eq!(
-                config.libraries,
-                vec!["src/DssSpell.sol:DssExecLib:0x8De6DDbCd5053d32292AAA0D2105A32d108484a6"
-                    .to_string(),]
-            );
+            assert_eq!(config.libraries, vec![
+                "src/DssSpell.sol:DssExecLib:0x8De6DDbCd5053d32292AAA0D2105A32d108484a6"
+                    .to_string(),
+            ]);
 
             jail.set_env(
                 "DAPP_LIBRARIES",
                 "src/DssSpell.sol:DssExecLib:0x8De6DDbCd5053d32292AAA0D2105A32d108484a6,src/DssSpell.sol:DssExecLib:0x8De6DDbCd5053d32292AAA0D2105A32d108484a6",
             );
             let config = Config::load().unwrap();
-            assert_eq!(
-                config.libraries,
-                vec![
-                    "src/DssSpell.sol:DssExecLib:0x8De6DDbCd5053d32292AAA0D2105A32d108484a6"
-                        .to_string(),
-                    "src/DssSpell.sol:DssExecLib:0x8De6DDbCd5053d32292AAA0D2105A32d108484a6"
-                        .to_string()
-                ]
-            );
+            assert_eq!(config.libraries, vec![
+                "src/DssSpell.sol:DssExecLib:0x8De6DDbCd5053d32292AAA0D2105A32d108484a6"
+                    .to_string(),
+                "src/DssSpell.sol:DssExecLib:0x8De6DDbCd5053d32292AAA0D2105A32d108484a6"
+                    .to_string()
+            ]);
 
             Ok(())
         });
@@ -4552,14 +4485,14 @@ mod tests {
                 loaded.model_checker,
                 Some(ModelCheckerSettings {
                     contracts: BTreeMap::from([
-                        (
-                            format!("{}", dir.join("a.sol").display()),
-                            vec!["A1".to_string(), "A2".to_string()]
-                        ),
-                        (
-                            format!("{}", dir.join("b.sol").display()),
-                            vec!["B1".to_string(), "B2".to_string()]
-                        ),
+                        (format!("{}", dir.join("a.sol").display()), vec![
+                            "A1".to_string(),
+                            "A2".to_string()
+                        ]),
+                        (format!("{}", dir.join("b.sol").display()), vec![
+                            "B1".to_string(),
+                            "B2".to_string()
+                        ]),
                     ]),
                     engine: Some(ModelCheckerEngine::CHC),
                     targets: Some(vec![
@@ -4594,16 +4527,13 @@ mod tests {
             "#,
             )?;
             let loaded = Config::load().unwrap().sanitized();
-            assert_eq!(
-                loaded.fmt,
-                FormatterConfig {
-                    line_length: 100,
-                    tab_width: 2,
-                    bracket_spacing: true,
-                    style: IndentStyle::Space,
-                    ..Default::default()
-                }
-            );
+            assert_eq!(loaded.fmt, FormatterConfig {
+                line_length: 100,
+                tab_width: 2,
+                bracket_spacing: true,
+                style: IndentStyle::Space,
+                ..Default::default()
+            });
 
             Ok(())
         });
@@ -4621,14 +4551,11 @@ mod tests {
                 ",
             )?;
             let loaded = Config::load().unwrap().sanitized();
-            assert_eq!(
-                loaded.lint,
-                LinterConfig {
-                    severity: vec![LintSeverity::High, LintSeverity::Med],
-                    exclude_lints: vec!["incorrect-shift".into()],
-                    ..Default::default()
-                }
-            );
+            assert_eq!(loaded.lint, LinterConfig {
+                severity: vec![LintSeverity::High, LintSeverity::Med],
+                exclude_lints: vec!["incorrect-shift".into()],
+                ..Default::default()
+            });
 
             Ok(())
         });
@@ -4647,16 +4574,13 @@ mod tests {
             )?;
 
             let loaded = Config::load().unwrap().sanitized();
-            assert_eq!(
-                loaded.invariant,
-                InvariantConfig {
-                    runs: 512,
-                    depth: 10,
-                    failure_persist_dir: Some(PathBuf::from("cache/invariant")),
-                    corpus_dir: None,
-                    ..Default::default()
-                }
-            );
+            assert_eq!(loaded.invariant, InvariantConfig {
+                runs: 512,
+                depth: 10,
+                failure_persist_dir: Some(PathBuf::from("cache/invariant")),
+                corpus_dir: None,
+                ..Default::default()
+            });
 
             Ok(())
         });
@@ -4701,16 +4625,13 @@ mod tests {
         ";
         assert_eq!(
             parse_with_profile::<BasicConfig>(foundry_str).unwrap().unwrap(),
-            (
-                Config::DEFAULT_PROFILE,
-                BasicConfig {
-                    profile: Config::DEFAULT_PROFILE,
-                    src: "src".into(),
-                    out: "out".into(),
-                    libs: vec!["lib".into()],
-                    remappings: vec![]
-                }
-            )
+            (Config::DEFAULT_PROFILE, BasicConfig {
+                profile: Config::DEFAULT_PROFILE,
+                src: "src".into(),
+                out: "out".into(),
+                libs: vec!["lib".into()],
+                remappings: vec![]
+            })
         );
     }
 
@@ -4728,13 +4649,10 @@ mod tests {
             let loaded = Config::load().unwrap().sanitized();
             assert_eq!(loaded.src.file_name().unwrap(), "my-src");
             assert_eq!(loaded.out.file_name().unwrap(), "my-out");
-            assert_eq!(
-                loaded.warnings,
-                vec![Warning::UnknownSection {
-                    unknown_section: Profile::new("default"),
-                    source: Some("foundry.toml".into())
-                }]
-            );
+            assert_eq!(loaded.warnings, vec![Warning::UnknownSection {
+                unknown_section: Profile::new("default"),
+                source: Some("foundry.toml".into())
+            }]);
 
             Ok(())
         });
@@ -4952,14 +4870,11 @@ mod tests {
             )?;
 
             let config = Config::load().unwrap();
-            assert_eq!(
-                config.ignored_error_codes,
-                vec![
-                    SolidityErrorCode::SpdxLicenseNotProvided,
-                    SolidityErrorCode::Unreachable,
-                    SolidityErrorCode::Other(1337)
-                ]
-            );
+            assert_eq!(config.ignored_error_codes, vec![
+                SolidityErrorCode::SpdxLicenseNotProvided,
+                SolidityErrorCode::Unreachable,
+                SolidityErrorCode::Other(1337)
+            ]);
 
             Ok(())
         });
@@ -5046,14 +4961,11 @@ mod tests {
             )?;
 
             let config = Config::load().unwrap();
-            assert_eq!(
-                config.vyper,
-                VyperConfig {
-                    optimize: Some(VyperOptimizationMode::Codesize),
-                    path: Some("/path/to/vyper".into()),
-                    experimental_codegen: Some(true),
-                }
-            );
+            assert_eq!(config.vyper, VyperConfig {
+                optimize: Some(VyperOptimizationMode::Codesize),
+                path: Some("/path/to/vyper".into()),
+                experimental_codegen: Some(true),
+            });
 
             Ok(())
         });

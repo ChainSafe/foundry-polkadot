@@ -1,27 +1,28 @@
 use super::{install, watch::WatchArgs};
 use clap::Parser;
-use eyre::{eyre, Result};
+use eyre::{Result, eyre};
 use forge_lint::{linter::Linter, sol::SolidityLinter};
 use foundry_cli::{
-    opts::{solar_pcx_from_build_opts, BuildOpts},
-    utils::{cache_local_signatures, LoadConfig},
+    opts::{BuildOpts, solar_pcx_from_build_opts},
+    utils::{LoadConfig, cache_local_signatures},
 };
 use foundry_common::{compile::ProjectCompiler, shell};
 use foundry_compilers::{
-    compilers::{multi::MultiCompilerLanguage, Language},
+    CompilationError, FileFilter, Project, ProjectCompileOutput,
+    compilers::{Language, multi::MultiCompilerLanguage},
+    multi::SolidityCompiler,
     solc::SolcLanguage,
     utils::source_files_iter,
-    CompilationError, FileFilter, Project, ProjectCompileOutput,
 };
 use foundry_config::{
+    Config, SkipBuildFilters,
     figment::{
-        self,
+        self, Metadata, Profile, Provider,
         error::Kind::InvalidType,
         value::{Dict, Map, Value},
-        Metadata, Profile, Provider,
     },
     filter::expand_globs,
-    revive, Config, SkipBuildFilters,
+    revive,
 };
 use serde::Serialize;
 use std::path::PathBuf;
@@ -129,7 +130,7 @@ impl BuildArgs {
 
     fn lint(&self, project: &Project, config: &Config, files: Option<&[PathBuf]>) -> Result<()> {
         let format_json = shell::is_json();
-        if project.compiler.solc.is_some() && !shell::is_quiet() {
+        if matches!(project.compiler.solidity, SolidityCompiler::Solc(_)) && !shell::is_quiet() {
             let linter = SolidityLinter::new(config.project_paths())
                 .with_json_emitter(format_json)
                 .with_description(!format_json)

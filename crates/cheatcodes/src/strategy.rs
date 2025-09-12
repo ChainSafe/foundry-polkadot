@@ -1,17 +1,20 @@
 use std::{any::Any, fmt::Debug, sync::Arc};
 
+use alloy_evm::eth::EthEvmContext;
 use alloy_primitives::TxKind;
 use alloy_rpc_types::{TransactionInput, TransactionRequest};
+use foundry_evm_core::backend::DatabaseExt;
 use revm::{
+    Database,
+    context::transaction::SignedAuthorization,
     interpreter::{CallInputs, Interpreter},
-    primitives::SignedAuthorization,
 };
 
 use crate::{
-    inspector::{check_if_fixed_gas_limit, CommonCreateInput, Ecx, InnerEcx},
-    script::Broadcast,
     BroadcastableTransaction, BroadcastableTransactions, CheatcodesExecutor, CheatsConfig,
     CheatsCtxt, DynCheatcode, Result,
+    inspector::{CommonCreateInput, Ecx, check_if_fixed_gas_limit},
+    script::Broadcast,
 };
 
 /// Context for [CheatcodeInspectorStrategy].
@@ -68,7 +71,7 @@ pub trait CheatcodeInspectorStrategyRunner:
         _ctx: &mut dyn CheatcodeInspectorStrategyContext,
         config: Arc<CheatsConfig>,
         input: &dyn CommonCreateInput,
-        ecx_inner: InnerEcx,
+        ecx: Ecx,
         broadcast: &Broadcast,
         broadcastable_transactions: &mut BroadcastableTransactions,
     );
@@ -80,10 +83,10 @@ pub trait CheatcodeInspectorStrategyRunner:
         _ctx: &mut dyn CheatcodeInspectorStrategyContext,
         _config: Arc<CheatsConfig>,
         input: &CallInputs,
-        ecx_inner: InnerEcx,
+        ecx: Ecx,
         broadcast: &Broadcast,
         broadcastable_transactions: &mut BroadcastableTransactions,
-        active_delegation: &mut Option<SignedAuthorization>,
+        active_delegation: &mut Vec<SignedAuthorization>,
     );
 
     /// Hook for pre initialize_interp.
@@ -127,15 +130,15 @@ impl CheatcodeInspectorStrategyRunner for EvmCheatcodeInspectorStrategyRunner {
         _ctx: &mut dyn CheatcodeInspectorStrategyContext,
         _config: Arc<CheatsConfig>,
         input: &dyn CommonCreateInput,
-        ecx_inner: InnerEcx,
+        ecx: Ecx,
         broadcast: &Broadcast,
         broadcastable_transactions: &mut BroadcastableTransactions,
     ) {
-        let is_fixed_gas_limit = check_if_fixed_gas_limit(ecx_inner, input.gas_limit());
+        let is_fixed_gas_limit = check_if_fixed_gas_limit(&ecx, input.gas_limit());
 
-        let account = &ecx_inner.journaled_state.state()[&broadcast.new_origin];
+        let account = ecx.journaled_state.state()[&broadcast.new_origin].clone();
         broadcastable_transactions.push_back(BroadcastableTransaction {
-            rpc: ecx_inner.db.active_fork_url(),
+            rpc: ecx.journaled_state.database.active_fork_url(),
             transaction: TransactionRequest {
                 from: Some(broadcast.new_origin),
                 to: None,
@@ -154,29 +157,30 @@ impl CheatcodeInspectorStrategyRunner for EvmCheatcodeInspectorStrategyRunner {
         _ctx: &mut dyn CheatcodeInspectorStrategyContext,
         _config: Arc<CheatsConfig>,
         input: &CallInputs,
-        ecx_inner: InnerEcx,
+        ecx: Ecx,
         broadcast: &Broadcast,
         broadcastable_transactions: &mut BroadcastableTransactions,
-        active_delegation: &mut Option<SignedAuthorization>,
+        active_delegations: &mut Vec<SignedAuthorization>,
     ) {
-        let is_fixed_gas_limit = check_if_fixed_gas_limit(ecx_inner, input.gas_limit);
-
-        let account = ecx_inner.journaled_state.state().get_mut(&broadcast.new_origin).unwrap();
+        let is_fixed_gas_limit = check_if_fixed_gas_limit(&ecx, input.gas_limit);
+        let transaction_input = TransactionInput::new(input.input.bytes(ecx).clone());
+        let account = ecx.journaled_state.state().get_mut(&broadcast.new_origin).unwrap();
 
         let mut tx_req = TransactionRequest {
             from: Some(broadcast.new_origin),
             to: Some(TxKind::from(Some(input.target_address))),
             value: input.transfer_value(),
-            input: TransactionInput::new(input.input.clone()),
+            input: transaction_input,
             nonce: Some(account.info.nonce),
-            chain_id: Some(ecx_inner.env.cfg.chain_id),
+            chain_id: Some(ecx.cfg.chain_id),
             gas: if is_fixed_gas_limit { Some(input.gas_limit) } else { None },
             ..Default::default()
         };
 
         // Handle delegation if present
-        if let Some(auth_list) = active_delegation.take() {
-            tx_req.authorization_list = Some(vec![auth_list]);
+        if !active_delegations.is_empty() {
+            tx_req.authorization_list = Some(active_delegations.clone());
+            active_delegations.clear();
             tx_req.sidecar = None;
 
             // Increment nonce to reflect the signed authorization.
@@ -187,7 +191,7 @@ impl CheatcodeInspectorStrategyRunner for EvmCheatcodeInspectorStrategyRunner {
         }
 
         broadcastable_transactions.push_back(BroadcastableTransaction {
-            rpc: ecx_inner.db.active_fork_url(),
+            rpc: ecx.journaled_state.database.active_fork_url(),
             transaction: tx_req.into(),
         });
         debug!(target: "cheatcodes", tx=?broadcastable_transactions.back().unwrap(), "broadcastable call");
@@ -223,7 +227,7 @@ pub trait CheatcodeInspectorStrategyExt {
     fn revive_try_create(
         &self,
         _state: &mut crate::Cheatcodes,
-        _ecx: InnerEcx,
+        _ecx: Ecx,
         _input: &dyn CommonCreateInput,
         _executor: &mut dyn CheatcodesExecutor,
     ) -> Option<revm::interpreter::CreateOutcome> {
@@ -233,7 +237,7 @@ pub trait CheatcodeInspectorStrategyExt {
     fn revive_try_call(
         &self,
         _state: &mut crate::Cheatcodes,
-        _ecx: InnerEcx,
+        _ecx: Ecx,
         _input: &CallInputs,
         _executor: &mut dyn CheatcodesExecutor,
     ) -> Option<revm::interpreter::CallOutcome> {

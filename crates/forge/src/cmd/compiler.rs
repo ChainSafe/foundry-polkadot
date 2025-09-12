@@ -2,7 +2,7 @@ use clap::{Parser, Subcommand, ValueHint};
 use eyre::Result;
 use foundry_common::shell;
 use foundry_compilers::{
-    artifacts::EvmVersion, multi::MultiCompilerInput, Compiler, CompilerInput, Graph,
+    Compiler, CompilerInput, Graph, artifacts::EvmVersion, multi::MultiCompilerInput,
 };
 use foundry_config::Config;
 use semver::Version;

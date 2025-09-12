@@ -43,7 +43,7 @@ impl Preprocessor<SolcCompiler> for TestOptimizerPreprocessor {
         }
 
         let sess = solar_session_from_solc(input);
-        let _ = sess.enter_parallel(|| -> solar_parse::interface::Result {
+        let _ = sess.enter(|| -> solar_parse::interface::Result {
             // Set up the parsing context with the project paths.
             let mut parsing_context = solar_pcx_from_solc_no_sources(&sess, input, paths);
 
