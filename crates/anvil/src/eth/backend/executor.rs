@@ -1,6 +1,9 @@
 use crate::{
     eth::{
-        backend::{db::Db, env::Env, validate::TransactionValidator},
+        backend::{
+            db::Db, env::Env, mem::op_haltreason_to_instruction_result,
+            validate::TransactionValidator,
+        },
         error::InvalidTransactionError,
         pool::transactions::PoolTransaction,
     },
@@ -12,7 +15,8 @@ use alloy_consensus::{
     constants::EMPTY_WITHDRAWALS, proofs::calculate_receipt_root, Receipt, ReceiptWithBloom,
 };
 use alloy_eips::eip7685::EMPTY_REQUESTS_HASH;
-use alloy_evm::{eth::EthEvmContext, precompiles::PrecompilesMap, EthEvm};
+use alloy_evm::{eth::EthEvmContext, precompiles::PrecompilesMap, EthEvm, Evm};
+use alloy_op_evm::OpEvm;
 use alloy_primitives::{Bloom, BloomInput, Log, B256};
 use anvil_core::eth::{
     block::{Block, BlockInfo, PartialHeader},
@@ -24,12 +28,11 @@ use foundry_evm::{
     backend::DatabaseError, revm, revm::interpreter::InstructionResult, traces::CallTraceNode,
 };
 use foundry_evm_core::either_evm::EitherEvm;
-use op_alloy_rpc_types::L1BlockInfo;
-use op_revm::{precompiles::OpPrecompiles, OpContext, OpEvm};
+use op_revm::{precompiles::OpPrecompiles, L1BlockInfo, OpContext};
 use revm::{
     context::{
         result::{EVMError, ExecutionResult, Output},
-        BlockEnv, CfgEnv, LocalContext,
+        Block as _, BlockEnv, CfgEnv, JournalTr, LocalContext,
     },
     database::WrapDatabaseRef,
     handler::{instructions::EthInstructions, EthPrecompiles},
@@ -113,6 +116,7 @@ pub struct TransactionExecutor<'a, Db: ?Sized, V: TransactionValidator> {
     pub blob_gas_used: u64,
     pub enable_steps_tracing: bool,
     pub odyssey: bool,
+    pub optimism: bool,
     pub print_logs: bool,
     pub print_traces: bool,
     /// Precompiles to inject to the EVM.
@@ -129,22 +133,22 @@ impl<DB: Db + ?Sized, V: TransactionValidator> TransactionExecutor<'_, DB, V> {
         let mut cumulative_gas_used = 0u64;
         let mut invalid = Vec::new();
         let mut included = Vec::new();
-        let gas_limit = self.block_env.gas_limit.to::<u64>();
+        let gas_limit = self.block_env.gas_limit;
         let parent_hash = self.parent_hash;
-        let block_number = self.block_env.number.to::<u64>();
+        let block_number = self.block_env.number;
         let difficulty = self.block_env.difficulty;
-        let beneficiary = self.block_env.coinbase;
-        let timestamp = self.block_env.timestamp.to::<u64>();
-        let base_fee = if self.cfg_env.handler_cfg.spec_id.is_enabled_in(SpecId::LONDON) {
-            Some(self.block_env.basefee.to::<u64>())
+        let beneficiary = self.block_env.beneficiary;
+        let timestamp = self.block_env.timestamp;
+        let base_fee = if self.cfg_env.spec.is_enabled_in(SpecId::LONDON) {
+            Some(self.block_env.basefee)
         } else {
             None
         };
 
-        let is_shanghai = self.cfg_env.handler_cfg.spec_id >= SpecId::SHANGHAI;
-        let is_cancun = self.cfg_env.handler_cfg.spec_id >= SpecId::CANCUN;
-        let is_prague = self.cfg_env.handler_cfg.spec_id >= SpecId::PRAGUE;
-        let excess_blob_gas = if is_cancun { self.block_env.get_blob_excess_gas() } else { None };
+        let is_shanghai = self.cfg_env.spec >= SpecId::SHANGHAI;
+        let is_cancun = self.cfg_env.spec >= SpecId::CANCUN;
+        let is_prague = self.cfg_env.spec >= SpecId::PRAGUE;
+        let excess_blob_gas = if is_cancun { self.block_env.blob_excess_gas() } else { None };
         let mut cumulative_blob_gas_used = if is_cancun { Some(0u64) } else { None };
 
         for tx in self.into_iter() {
@@ -226,10 +230,10 @@ impl<DB: Db + ?Sized, V: TransactionValidator> TransactionExecutor<'_, DB, V> {
             receipts_root,
             logs_bloom: bloom,
             difficulty,
-            number: block_number,
+            number: block_number.saturating_to(),
             gas_limit,
             gas_used: cumulative_gas_used,
-            timestamp,
+            timestamp: timestamp.saturating_to(),
             extra_data: Default::default(),
             mix_hash: Default::default(),
             nonce: Default::default(),
@@ -248,12 +252,12 @@ impl<DB: Db + ?Sized, V: TransactionValidator> TransactionExecutor<'_, DB, V> {
 
     fn env_for(&self, tx: &PendingTransaction) -> Env {
         let mut tx_env = tx.to_revm_tx_env();
-        if self.cfg_env.handler_cfg.is_optimism {
-            tx_env.optimism.enveloped_tx =
-                Some(alloy_rlp::encode(&tx.transaction.transaction).into());
+
+        if self.optimism {
+            tx_env.enveloped_tx = Some(alloy_rlp::encode(&tx.transaction.transaction).into());
         }
 
-        Env::new_with_cfg_env(self.cfg_env.clone(), self.block_env.clone(), tx_env)
+        Env::new(self.cfg_env.clone(), self.block_env.clone(), tx_env, self.optimism)
     }
 }
 
@@ -285,16 +289,17 @@ impl<DB: Db + ?Sized, V: TransactionValidator> Iterator for &mut TransactionExec
         let env = self.env_for(&transaction.pending_transaction);
 
         // check that we comply with the block's gas limit, if not disabled
-        let max_gas = self.gas_used.saturating_add(env.tx.gas_limit);
-        if !env.cfg.disable_block_gas_limit && max_gas > env.block.gas_limit.to::<u64>() {
-            return Some(TransactionExecutionOutcome::Exhausted(transaction))
+        let max_gas = self.gas_used.saturating_add(env.tx.base.gas_limit);
+        if !env.evm_env.cfg_env.disable_block_gas_limit && max_gas > env.evm_env.block_env.gas_limit
+        {
+            return Some(TransactionExecutionOutcome::Exhausted(transaction));
         }
 
         // check that we comply with the block's blob gas limit
         let max_blob_gas = self.blob_gas_used.saturating_add(
             transaction.pending_transaction.transaction.transaction.blob_gas().unwrap_or(0),
         );
-        if max_blob_gas > alloy_eips::eip4844::MAX_DATA_GAS_PER_BLOCK {
+        if max_blob_gas > alloy_eips::eip4844::MAX_DATA_GAS_PER_BLOCK_DENCUN {
             return Some(TransactionExecutionOutcome::BlobGasExhausted(transaction))
         }
 
@@ -323,14 +328,14 @@ impl<DB: Db + ?Sized, V: TransactionValidator> Iterator for &mut TransactionExec
         }
 
         let exec_result = {
-            let mut evm = new_evm_with_inspector(&mut *self.db, env, &mut inspector);
+            let mut evm = new_evm_with_inspector(&mut *self.db, &env, &mut inspector);
             if let Some(factory) = &self.precompile_factory {
                 inject_precompiles(&mut evm, factory.precompiles());
             }
 
             trace!(target: "backend", "[{:?}] executing", transaction.hash());
             // transact and commit the transaction
-            match evm.transact_commit() {
+            match evm.transact_commit(env.tx) {
                 Ok(exec_result) => exec_result,
                 Err(err) => {
                     warn!(target: "backend", "[{:?}] failed to execute: {:?}", transaction.hash(), err);
@@ -367,7 +372,9 @@ impl<DB: Db + ?Sized, V: TransactionValidator> Iterator for &mut TransactionExec
             ExecutionResult::Revert { gas_used, output } => {
                 (InstructionResult::Revert, gas_used, Some(Output::Call(output)), None)
             }
-            ExecutionResult::Halt { reason, gas_used } => (reason.into(), gas_used, None, None),
+            ExecutionResult::Halt { reason, gas_used } => {
+                (op_haltreason_to_instruction_result(reason), gas_used, None, None)
+            }
         };
 
         if exit_reason == InstructionResult::OutOfGas {

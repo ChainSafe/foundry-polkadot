@@ -21,6 +21,7 @@ use alloy_serde::{OtherFields, WithOtherFields};
 use bytes::BufMut;
 use foundry_evm::traces::CallTraceNode;
 use op_alloy_consensus::{TxDeposit, DEPOSIT_TX_TYPE_ID};
+use op_revm::OpTransaction;
 use revm::{context::TxEnv, interpreter::InstructionResult};
 use serde::{Deserialize, Serialize};
 use std::ops::{Deref, Mul};
@@ -398,7 +399,9 @@ impl PendingTransaction {
 
     /// Converts the [PendingTransaction] into the [TxEnv] context that [`revm`](foundry_evm)
     /// expects.
-    pub fn to_revm_tx_env(&self) -> TxEnv {
+    ///
+    /// Base [`TxEnv`] is encapsulated in the [`op_revm::OpTransaction`]
+    pub fn to_revm_tx_env(&self) -> OpTransaction<TxEnv> {
         fn transact_to(kind: &TxKind) -> TxKind {
             match kind {
                 TxKind::Call(c) => TxKind::Call(*c),
@@ -411,7 +414,7 @@ impl PendingTransaction {
             TypedTransaction::Legacy(tx) => {
                 let chain_id = tx.tx().chain_id;
                 let TxLegacy { nonce, gas_price, gas_limit, value, to, input, .. } = tx.tx();
-                TxEnv {
+                OpTransaction::new(TxEnv {
                     caller,
                     kind: transact_to(to),
                     data: input.clone(),
@@ -423,7 +426,7 @@ impl PendingTransaction {
                     gas_limit: *gas_limit,
                     access_list: vec![].into(),
                     ..Default::default()
-                }
+                })
             }
             TypedTransaction::EIP2930(tx) => {
                 let TxEip2930 {
@@ -437,7 +440,7 @@ impl PendingTransaction {
                     access_list,
                     ..
                 } = tx.tx();
-                TxEnv {
+                OpTransaction::new(TxEnv {
                     caller,
                     kind: transact_to(to),
                     data: input.clone(),
@@ -449,7 +452,7 @@ impl PendingTransaction {
                     gas_limit: *gas_limit,
                     access_list: access_list.clone(),
                     ..Default::default()
-                }
+                })
             }
             TypedTransaction::EIP1559(tx) => {
                 let TxEip1559 {
@@ -464,7 +467,7 @@ impl PendingTransaction {
                     access_list,
                     ..
                 } = tx.tx();
-                TxEnv {
+                OpTransaction::new(TxEnv {
                     caller,
                     kind: transact_to(to),
                     data: input.clone(),
@@ -476,7 +479,7 @@ impl PendingTransaction {
                     gas_limit: *gas_limit,
                     access_list: access_list.clone(),
                     ..Default::default()
-                }
+                })
             }
             TypedTransaction::EIP4844(tx) => {
                 let TxEip4844 {
@@ -493,7 +496,7 @@ impl PendingTransaction {
                     blob_versioned_hashes,
                     ..
                 } = tx.tx().tx();
-                TxEnv {
+                OpTransaction::new(TxEnv {
                     caller,
                     kind: TxKind::Call(*to),
                     data: input.clone(),
@@ -507,7 +510,7 @@ impl PendingTransaction {
                     gas_limit: *gas_limit,
                     access_list: access_list.clone(),
                     ..Default::default()
-                }
+                })
             }
             TypedTransaction::EIP7702(tx) => {
                 let TxEip7702 {
@@ -537,12 +540,13 @@ impl PendingTransaction {
                     ..Default::default()
                 };
                 tx.set_signed_authorization(authorization_list.clone());
-                tx
+
+                OpTransaction::new(tx)
             }
             TypedTransaction::Deposit(tx) => {
                 let chain_id = tx.chain_id();
                 let DepositTransaction { nonce, gas_limit, value, kind, input, .. } = tx;
-                TxEnv {
+                OpTransaction::new(TxEnv {
                     caller,
                     kind: transact_to(kind),
                     data: input.clone(),
@@ -554,7 +558,7 @@ impl PendingTransaction {
                     gas_limit: { *gas_limit },
                     access_list: vec![].into(),
                     ..Default::default()
-                }
+                })
             }
         }
     }

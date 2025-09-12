@@ -27,7 +27,7 @@ impl Db for MemDb {
     }
 
     fn insert_block_hash(&mut self, number: U256, hash: B256) {
-        self.inner.block_hashes.insert(number, hash);
+        self.inner.cache.block_hashes.insert(number, hash);
     }
 
     fn dump_state(
@@ -40,6 +40,7 @@ impl Db for MemDb {
     ) -> DatabaseResult<Option<SerializableState>> {
         let accounts = self
             .inner
+            .cache
             .accounts
             .clone()
             .into_iter()
@@ -93,7 +94,7 @@ impl Db for MemDb {
     }
 
     fn maybe_state_root(&self) -> Option<B256> {
-        Some(state_root(&self.inner.accounts))
+        Some(state_root(&self.inner.cache.accounts))
     }
 
     fn current_state(&self) -> StateDb {
@@ -107,7 +108,7 @@ impl MaybeFullDatabase for MemDb {
     }
 
     fn maybe_as_full_db(&self) -> Option<&HashMap<Address, DbAccount>> {
-        Some(&self.inner.accounts)
+        Some(&self.inner.cache.accounts)
     }
 
     fn clear_into_state_snapshot(&mut self) -> StateSnapshot {

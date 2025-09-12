@@ -155,7 +155,7 @@ pub fn build_typed_transaction(
                 value,
                 input,
                 source_hash,
-                mint: mint.map_or(U256::ZERO, U256::from),
+                mint: U256::from(mint),
                 is_system_tx: is_system_transaction,
                 nonce: 0,
             })

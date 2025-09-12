@@ -36,6 +36,8 @@ alloy-sol-types.workspace = true
 foundry-fork-db.workspace = true
 alloy-evm.workspace = true
 alloy-op-evm.workspace = true
+alloy-chains.workspace = true
+alloy-hardforks.workspace = true
 
 revm = { workspace = true, features = [
     "std",

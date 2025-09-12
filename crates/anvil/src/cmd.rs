@@ -1,10 +1,11 @@
 use crate::{
     config::{ForkChoice, DEFAULT_MNEMONIC},
     eth::{backend::db::SerializableState, pool::transactions::TransactionOrder, EthApi},
-    hardfork::OptimismHardfork,
-    AccountGenerator, EthereumHardfork, NodeConfig, CHAIN_ID,
+    AccountGenerator, NodeConfig, CHAIN_ID,
 };
 use alloy_genesis::Genesis;
+use alloy_hardforks::EthereumHardfork;
+use alloy_op_hardforks::OpHardfork;
 use alloy_primitives::{utils::Unit, B256, U256};
 use alloy_signer_local::coins_bip39::{English, Mnemonic};
 use anvil_server::ServerConfig;
@@ -13,7 +14,7 @@ use core::fmt;
 use foundry_common::shell;
 use foundry_config::{Chain, Config, FigmentProviders};
 use futures::FutureExt;
-use rand::{rngs::StdRng, SeedableRng};
+use rand_08::{rngs::StdRng, SeedableRng};
 use std::{
     future::Future,
     net::IpAddr,
@@ -219,7 +220,7 @@ impl NodeArgs {
         let hardfork = match &self.hardfork {
             Some(hf) => {
                 if self.evm.optimism {
-                    Some(OptimismHardfork::from_str(hf)?.into())
+                    Some(OpHardfork::from_str(hf)?.into())
                 } else {
                     Some(EthereumHardfork::from_str(hf)?.into())
                 }
@@ -293,7 +294,7 @@ impl NodeArgs {
         if let Some(ref mnemonic) = self.mnemonic {
             gen = gen.phrase(mnemonic);
         } else if let Some(count) = self.mnemonic_random {
-            let mut rng = rand_08::rng();
+            let mut rng = rand_08::thread_rng();
             let mnemonic = match Mnemonic::<English>::new_with_count(&mut rng, count) {
                 Ok(mnemonic) => mnemonic.to_phrase(),
                 Err(_) => DEFAULT_MNEMONIC.to_string(),
@@ -521,7 +522,7 @@ pub struct AnvilEvmArgs {
 
     /// The block gas limit.
     #[arg(long, alias = "block-gas-limit", help_heading = "Environment config")]
-    pub gas_limit: Option<u128>,
+    pub gas_limit: Option<u64>,
 
     /// Disable the `call.gas_limit <= block.gas_limit` constraint.
     #[arg(
@@ -839,7 +840,7 @@ mod tests {
         let args: NodeArgs =
             NodeArgs::parse_from(["anvil", "--optimism", "--hardfork", "Regolith"]);
         let config = args.into_node_config().unwrap();
-        assert_eq!(config.hardfork, Some(OptimismHardfork::Regolith.into()));
+        assert_eq!(config.hardfork, Some(OpHardfork::Regolith.into()));
     }
 
     #[test]

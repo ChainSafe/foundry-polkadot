@@ -575,7 +575,7 @@ impl EthApi {
     /// Handler for ETH RPC call: `eth_coinbase`
     pub fn author(&self) -> Result<Address> {
         node_info!("eth_coinbase");
-        Ok(self.backend.coinbase())
+        Ok(self.backend.beneficiary())
     }
 
     /// Returns true if client is actively mining new blocks.
@@ -1920,7 +1920,7 @@ impl EthApi {
     /// Handler for RPC call: `anvil_setCoinbase`
     pub async fn anvil_set_coinbase(&self, address: Address) -> Result<()> {
         node_info!("anvil_setCoinbase");
-        self.backend.set_coinbase(address);
+        self.backend.set_beneficiary(address);
         Ok(())
     }
 
@@ -1962,11 +1962,11 @@ impl EthApi {
         let env = self.backend.env().read();
         let fork_config = self.backend.get_fork();
         let tx_order = self.transaction_order.read();
-        let hard_fork: &str = env.handler_cfg.spec_id.into();
+        let hard_fork: &str = env.evm_env.cfg_env.spec.into();
 
         Ok(NodeInfo {
             current_block_number: self.backend.best_number(),
-            current_block_timestamp: env.block.timestamp.try_into().unwrap_or(u64::MAX),
+            current_block_timestamp: env.evm_env.block_env.timestamp.saturating_to(),
             current_block_hash: self.backend.best_hash(),
             hard_fork: hard_fork.to_string(),
             transaction_order: match *tx_order {
@@ -2750,8 +2750,7 @@ impl EthApi {
 
         // get the highest possible gas limit, either the request's set value or the currently
         // configured gas limit
-        let mut highest_gas_limit =
-            request.gas.map_or(block_env.gas_limit.to::<u128>(), |g| g as u128);
+        let mut highest_gas_limit = request.gas.map_or(block_env.gas_limit.into(), |g| g as u128);
 
         let gas_price = fees.gas_price.unwrap_or_default();
         // If we have non-zero gas price, cap gas limit by sender balance
@@ -3242,21 +3241,28 @@ impl TryFrom<Result<(InstructionResult, Option<Output>, u128, State)>> for GasEs
             }
             Err(err) => Err(err),
             Ok((exit, output, gas, _)) => match exit {
-                return_ok!() | InstructionResult::CallOrCreate => Ok(Self::Success(gas)),
+                return_ok!() => Ok(Self::Success(gas)),
 
+                // Revert opcodes:
                 InstructionResult::Revert => Ok(Self::Revert(output.map(|o| o.into_data()))),
+                InstructionResult::CallTooDeep |
+                InstructionResult::OutOfFunds |
+                InstructionResult::CreateInitCodeStartingEF00 |
+                InstructionResult::InvalidEOFInitCode |
+                InstructionResult::InvalidExtDelegateCallTarget => Ok(Self::EvmError(exit)),
 
+                // Out of gas errors:
                 InstructionResult::OutOfGas |
                 InstructionResult::MemoryOOG |
                 InstructionResult::MemoryLimitOOG |
                 InstructionResult::PrecompileOOG |
-                InstructionResult::InvalidOperandOOG => Ok(Self::OutOfGas),
+                InstructionResult::InvalidOperandOOG |
+                InstructionResult::ReentrancySentryOOG => Ok(Self::OutOfGas),
 
+                // Other errors:
                 InstructionResult::OpcodeNotFound |
                 InstructionResult::CallNotAllowedInsideStatic |
                 InstructionResult::StateChangeDuringStaticCall |
-                InstructionResult::InvalidExtDelegateCallTarget |
-                InstructionResult::InvalidEXTCALLTarget |
                 InstructionResult::InvalidFEOpcode |
                 InstructionResult::InvalidJump |
                 InstructionResult::NotActivated |
@@ -3270,18 +3276,7 @@ impl TryFrom<Result<(InstructionResult, Option<Output>, u128, State)>> for GasEs
                 InstructionResult::CreateContractSizeLimit |
                 InstructionResult::CreateContractStartingWithEF |
                 InstructionResult::CreateInitCodeSizeLimit |
-                InstructionResult::FatalExternalError |
-                InstructionResult::OutOfFunds |
-                InstructionResult::CallTooDeep => Ok(Self::EvmError(exit)),
-
-                // Handle Revm EOF InstructionResults: Not supported yet
-                InstructionResult::ReturnContractInNotInitEOF |
-                InstructionResult::EOFOpcodeDisabledInLegacy |
-                InstructionResult::EOFFunctionStackOverflow |
-                InstructionResult::CreateInitCodeStartingEF00 |
-                InstructionResult::InvalidEOFInitCode |
-                InstructionResult::EofAuxDataOverflow |
-                InstructionResult::EofAuxDataTooSmall => Ok(Self::EvmError(exit)),
+                InstructionResult::FatalExternalError => Ok(Self::EvmError(exit)),
             },
         }
     }

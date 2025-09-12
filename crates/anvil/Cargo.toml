@@ -37,6 +37,7 @@ revm = { workspace = true, features = [
     "c-kzg",
 ] }
 revm-inspectors.workspace = true
+revm-context-interface.workspace = true
 op-revm.workspace = true
 alloy-primitives = { workspace = true, features = ["serde"] }
 alloy-consensus = { workspace = true, features = ["k256", "kzg"] }
@@ -62,8 +63,11 @@ alloy-transport.workspace = true
 alloy-chains.workspace = true
 alloy-genesis.workspace = true
 alloy-trie.workspace = true
-alloy-evm.workspace = true
+alloy-evm = { workspace = true, features = ["call-util"] }
+alloy-op-evm.workspace = true
 op-alloy-consensus = { workspace = true, features = ["serde"] }
+alloy-hardforks.workspace = true
+alloy-op-hardforks.workspace = true
 
 # axum related
 axum.workspace = true

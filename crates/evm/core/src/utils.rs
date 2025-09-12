@@ -1,9 +1,11 @@
 pub use crate::ic::*;
 use crate::EnvMut;
+use alloy_chains::Chain;
 use alloy_consensus::BlockHeader;
+use alloy_hardforks::EthereumHardfork;
 use alloy_json_abi::{Function, JsonAbi};
 use alloy_network::{AnyTxEnvelope, TransactionResponse};
-use alloy_primitives::{Address, Selector, TxKind, B256, U256};
+use alloy_primitives::{Address, ChainId, Selector, TxKind, B256, U256};
 use alloy_provider::{network::BlockResponse, Network};
 use alloy_rpc_types::{Transaction, TransactionRequest};
 use foundry_config::NamedChain;
@@ -81,6 +83,19 @@ pub fn apply_chain_and_block_specific_env_changes<N: Network>(
     // if difficulty is `0` we assume it's past merge
     if block.header().difficulty().is_zero() {
         env.block.difficulty = env.block.prevrandao.unwrap_or_default().into();
+    }
+}
+
+/// Derive the blob base fee update fraction based on the chain and timestamp by checking the
+/// hardfork.
+pub fn get_blob_base_fee_update_fraction(chain_id: ChainId, timestamp: u64) -> u64 {
+    let hardfork = EthereumHardfork::from_chain_and_timestamp(Chain::from_id(chain_id), timestamp)
+        .unwrap_or_default();
+
+    if hardfork >= EthereumHardfork::Prague {
+        BLOB_BASE_FEE_UPDATE_FRACTION_PRAGUE
+    } else {
+        BLOB_BASE_FEE_UPDATE_FRACTION_CANCUN
     }
 }
 

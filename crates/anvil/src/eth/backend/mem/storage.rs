@@ -5,6 +5,7 @@ use crate::eth::{
             MaybeFullDatabase, SerializableBlock, SerializableHistoricalStates,
             SerializableTransaction, StateDb,
         },
+        env::Env,
         mem::cache::DiskStateCache,
     },
     error::BlockchainError,
@@ -34,13 +35,12 @@ use anvil_core::eth::{
 use anvil_rpc::error::RpcError;
 use foundry_evm::{
     backend::MemDb,
-    revm::primitives::Env,
     traces::{
         CallKind, FourByteInspector, GethTraceBuilder, ParityTraceBuilder, TracingInspectorConfig,
     },
 };
 use parking_lot::RwLock;
-use revm::primitives::SpecId;
+use revm::{context::Block as RevmBlock, primitives::hardfork::SpecId};
 use std::{collections::VecDeque, fmt, path::PathBuf, sync::Arc, time::Duration};
 // use yansi::Paint;
 
@@ -286,11 +286,11 @@ impl BlockchainStorage {
         let partial_header = PartialHeader {
             timestamp,
             base_fee,
-            gas_limit: env.block.gas_limit.to::<u64>(),
-            beneficiary: env.block.coinbase,
-            difficulty: env.block.difficulty,
-            blob_gas_used: env.block.blob_excess_gas_and_price.as_ref().map(|_| 0),
-            excess_blob_gas: env.block.get_blob_excess_gas(),
+            gas_limit: env.evm_env.block_env.gas_limit,
+            beneficiary: env.evm_env.block_env.beneficiary,
+            difficulty: env.evm_env.block_env.difficulty,
+            blob_gas_used: env.evm_env.block_env.blob_excess_gas_and_price.as_ref().map(|_| 0),
+            excess_blob_gas: env.evm_env.block_env.blob_excess_gas(),
             number: genesis_number,
             parent_beacon_block_root: is_cancun.then_some(Default::default()),
             withdrawals_root: is_shanghai.then_some(EMPTY_WITHDRAWALS),

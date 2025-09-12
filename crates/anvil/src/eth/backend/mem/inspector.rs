@@ -1,6 +1,6 @@
 //! Anvil specific [`revm::Inspector`] implementation
 
-use crate::{eth::macros::node_info, revm::Database};
+use crate::eth::macros::node_info;
 use alloy_primitives::{Address, Log};
 use foundry_evm::{
     call_inspectors,
@@ -15,6 +15,7 @@ use foundry_evm::{
     },
 };
 use revm::{context::ContextTr, inspector::JournalExt, interpreter::interpreter::EthInterpreter};
+use revm_inspectors::transfer::TransferInspector;
 
 /// The [`revm::Inspector`] used when transacting in the evm
 #[derive(Clone, Debug, Default)]
@@ -23,6 +24,8 @@ pub struct Inspector {
     pub tracer: Option<TracingInspector>,
     /// Collects all `console.sol` logs
     pub log_collector: Option<LogCollector>,
+    /// Collects all internal ETH transfers as ERC20 transfer events.
+    pub transfer: Option<TransferInspector>,
 }
 
 impl Inspector {
@@ -70,6 +73,12 @@ impl Inspector {
     /// Configures the `Tracer` [`revm::Inspector`] with a log collector
     pub fn with_log_collector(mut self) -> Self {
         self.log_collector = Some(Default::default());
+        self
+    }
+
+    /// Configures the `Tracer` [`revm::Inspector`] with a transfer event collector
+    pub fn with_transfers(mut self) -> Self {
+        self.transfer = Some(TransferInspector::new(false).with_logs(true));
         self
     }
 
@@ -126,7 +135,7 @@ where
 
     fn log(&mut self, interp: &mut Interpreter, ecx: &mut CTX, log: alloy_primitives::Log) {
         call_inspectors!([&mut self.tracer, &mut self.log_collector], |inspector| {
-            inspector.log(interp, ecx, log);
+            inspector.log(interp, ecx, log.clone());
         });
     }
 

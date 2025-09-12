@@ -1,7 +1,15 @@
 //! Support for "cheat codes" / bypass functions
 
-use alloy_primitives::{map::AddressHashSet, Address};
+use alloy_evm::precompiles::{Precompile, PrecompileInput};
+use alloy_primitives::{
+    map::{foldhash::HashMap, AddressHashSet},
+    Address, Bytes,
+};
 use parking_lot::RwLock;
+use revm::precompile::{
+    secp256k1::ec_recover_run, utilities::right_pad, PrecompileError, PrecompileOutput,
+    PrecompileResult,
+};
 use std::sync::Arc;
 
 /// Manages user modifications that may affect the node's behavior
@@ -63,6 +71,21 @@ impl CheatsManager {
     pub fn impersonated_accounts(&self) -> AddressHashSet {
         self.state.read().impersonated_accounts.clone()
     }
+
+    /// Registers an override so that `ecrecover(signature)` returns `addr`.
+    pub fn add_recover_override(&self, sig: Bytes, addr: Address) {
+        self.state.write().signature_overrides.insert(sig, addr);
+    }
+
+    /// If an override exists for `sig`, returns the address; otherwise `None`.
+    pub fn get_recover_override(&self, sig: &Bytes) -> Option<Address> {
+        self.state.read().signature_overrides.get(sig).copied()
+    }
+
+    /// Returns true if any ecrecover overrides have been registered.
+    pub fn has_recover_overrides(&self) -> bool {
+        !self.state.read().signature_overrides.is_empty()
+    }
 }
 
 /// Container type for all the state variables
@@ -72,6 +95,43 @@ pub struct CheatsState {
     pub impersonated_accounts: AddressHashSet,
     /// If set to true will make the `is_impersonated` function always return true
     pub auto_impersonate_accounts: bool,
+    /// Overrides for ecrecover: Signature => Address
+    pub signature_overrides: HashMap<Bytes, Address>,
+}
+
+impl CheatEcrecover {
+    pub fn new(cheats: Arc<CheatsManager>) -> Self {
+        Self { cheats }
+    }
+}
+
+impl Precompile for CheatEcrecover {
+    fn call(&self, input: PrecompileInput<'_>) -> PrecompileResult {
+        if !self.cheats.has_recover_overrides() {
+            return ec_recover_run(input.data, input.gas);
+        }
+
+        const ECRECOVER_BASE: u64 = 3_000;
+        if input.gas < ECRECOVER_BASE {
+            return Err(PrecompileError::OutOfGas);
+        }
+        let padded = right_pad::<128>(input.data);
+        let v = padded[63];
+        let mut sig_bytes = [0u8; 65];
+        sig_bytes[..64].copy_from_slice(&padded[64..128]);
+        sig_bytes[64] = v;
+        let sig_bytes_wrapped = Bytes::copy_from_slice(&sig_bytes);
+        if let Some(addr) = self.cheats.get_recover_override(&sig_bytes_wrapped) {
+            let mut out = [0u8; 32];
+            out[12..].copy_from_slice(addr.as_slice());
+            return Ok(PrecompileOutput::new(ECRECOVER_BASE, Bytes::copy_from_slice(&out)));
+        }
+        ec_recover_run(input.data, input.gas)
+    }
+
+    fn is_pure(&self) -> bool {
+        false
+    }
 }
 
 /// A custom ecrecover precompile that supports cheat-based signature overrides.
