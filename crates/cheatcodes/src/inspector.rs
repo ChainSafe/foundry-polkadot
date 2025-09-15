@@ -1098,10 +1098,6 @@ impl Inspector<EthEvmContext<&mut dyn DatabaseExt>> for Cheatcodes {
     }
 
     fn step(&mut self, interpreter: &mut Interpreter, ecx: Ecx) {
-        if self.strategy.runner.pre_step_end(self.strategy.context.as_mut(), interpreter, ecx) {
-            return;
-        }
-
         self.pc = interpreter.bytecode.pc();
 
         // `pauseGasMetering`: pause / resume interpreter gas.
