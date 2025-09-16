@@ -6,16 +6,18 @@ use forge::{
     executors::ExecutorStrategy, revm::primitives::SpecId, MultiContractRunner,
     MultiContractRunnerBuilder,
 };
-use foundry_cli::utils::install_crypto_provider;
+use foundry_cli::utils::{get_executor_strategy, install_crypto_provider};
+use foundry_common::{compile::ProjectCompiler, shell};
 use foundry_compilers::{
     artifacts::{EvmVersion, Libraries, Settings},
     compilers::multi::MultiCompiler,
+    resolc::dual_compiled_contracts::DualCompiledContracts,
     utils::RuntimeOrHandle,
     Project, ProjectCompileOutput, SolcConfig, Vyper,
 };
 use foundry_config::{
-    fs_permissions::PathPermission, Config, FsPermissions, FuzzConfig, FuzzDictionaryConfig,
-    InvariantConfig, RpcEndpointUrl, RpcEndpoints,
+    fs_permissions::PathPermission, revive, Config, FsPermissions, FuzzConfig,
+    FuzzDictionaryConfig, InvariantConfig, RpcEndpointUrl, RpcEndpoints,
 };
 use foundry_evm::{constants::CALLER, opts::EvmOpts};
 use foundry_test_utils::{
@@ -23,6 +25,7 @@ use foundry_test_utils::{
     rpc::{next_http_archive_rpc_url, next_rpc_endpoint},
 };
 use std::{
+    collections::BTreeSet,
     env, fmt,
     io::Write,
     path::{Path, PathBuf},
@@ -196,6 +199,7 @@ pub struct ForgeTestData {
     pub output: ProjectCompileOutput,
     pub config: Arc<Config>,
     pub profile: ForgeTestProfile,
+    pub dual_compiled_contracts: Option<DualCompiledContracts>,
 }
 
 impl ForgeTestData {
@@ -207,8 +211,46 @@ impl ForgeTestData {
         init_tracing();
         let config = Arc::new(profile.config());
         let mut project = config.project().unwrap();
-        let output = get_compiled(&mut project);
-        Self { project, output, config, profile }
+
+        let sources_to_compile = project
+            .sources()
+            .expect("Could not read sources")
+            .keys()
+            .cloned()
+            .collect::<BTreeSet<_>>();
+
+        // Handle compilation based on whether dual compilation is enabled
+        let (output, dual_compiled_contracts) = if config.resolc.resolc_compile {
+            // Dual compilation mode: compile both solc and resolc
+
+            // Compile with solc to a subdirectory
+            let mut solc_config = config.as_ref().clone();
+            solc_config.out = solc_config.out.join(revive::SOLC_ARTIFACTS_SUBDIR);
+            solc_config.resolc = Default::default();
+            solc_config.build_info_path = Some(solc_config.out.join("build-info"));
+            let mut solc_project = solc_config.project().expect("Could not create solc project");
+
+            let solc_output = get_compiled(&mut solc_project);
+
+            // Compile with resolc to the main output directory
+            let mut resolc_project =
+                config.clone().project().expect("Could not create resolc project");
+
+            let resolc_output = get_compiled(&mut resolc_project);
+
+            // Create dual compiled contracts
+            let dual_compiled_contracts = DualCompiledContracts::new(
+                &solc_output,
+                &resolc_output,
+                &solc_project.paths,
+                &resolc_project.paths,
+            );
+
+            (solc_output, Some(dual_compiled_contracts))
+        } else {
+            (get_compiled(&mut project), None)
+        };
+        Self { project, output, config, profile, dual_compiled_contracts }
     }
 
     /// Builds a base runner
@@ -249,16 +291,17 @@ impl ForgeTestData {
         let config = Arc::new(config);
         let root = self.project.root();
         builder.config = config.clone();
+        let mut strategy = get_executor_strategy(&config);
+
+        strategy.runner.revive_set_dual_compiled_contracts(
+            strategy.context.as_mut(),
+            self.dual_compiled_contracts.clone().unwrap_or_default(),
+        );
+
         builder
             .enable_isolation(opts.isolate)
             .sender(config.sender)
-            .build::<MultiCompiler>(
-                ExecutorStrategy::new_evm(),
-                root,
-                &self.output,
-                opts.local_evm_env(),
-                opts,
-            )
+            .build::<MultiCompiler>(strategy, root, &self.output, opts.local_evm_env(), opts)
             .unwrap()
     }
 
