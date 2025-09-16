@@ -1,19 +1,18 @@
 use crate::{
     api_server::{
-        error::{Error, Result, ToRpcResponseResult},
+        error::{Error, Result},
         ApiRequest,
     },
     logging::LoggingManager,
     macros::node_info,
+    substrate_node::{error::ToRpcResponseResult, mining_engine::MiningEngine},
 };
 use alloy_primitives::{B256, U256, U64};
-use alloy_rpc_types::request::TransactionRequest;
-use alloy_serde::WithOtherFields;
 use anvil_core::eth::EthRequest;
 use anvil_rpc::{error::RpcError, response::ResponseResult};
 use futures::{channel::mpsc, StreamExt};
 use polkadot_sdk::{
-    pallet_revive::evm::{Account, GenericTransaction, ReceiptInfo},
+    pallet_revive::evm::{Account, ReceiptInfo},
     pallet_revive_eth_rpc::{
         client::Client as EthRpcClient, subxt_client::SrcChainConfig, ReceiptExtractor,
         ReceiptProvider, SubxtBlockInfoProvider,
@@ -21,6 +20,7 @@ use polkadot_sdk::{
     sc_service::RpcHandlers,
 };
 use sqlx::sqlite::SqlitePoolOptions;
+use std::{sync::Arc, time::Duration};
 use subxt::{
     backend::rpc::{RawRpcFuture, RawRpcSubscription, RawValue, RpcClient, RpcClientT},
     ext::{
@@ -31,14 +31,15 @@ use subxt::{
 };
 
 pub struct Wallet {
-    accounts: Vec<Account>,
+    _accounts: Vec<Account>,
 }
 
 pub struct ApiServer {
     req_receiver: mpsc::Receiver<ApiRequest>,
     logging_manager: LoggingManager,
+    mining_engine: Arc<MiningEngine>,
     eth_rpc_client: EthRpcClient,
-    wallet: Wallet,
+    _wallet: Wallet,
 }
 
 struct InMemoryRpcClient(RpcHandlers);
@@ -78,6 +79,7 @@ impl RpcClientT for InMemoryRpcClient {
 
 impl ApiServer {
     pub async fn new(
+        mining_engine: Arc<MiningEngine>,
         rpc_handlers: RpcHandlers,
         req_receiver: mpsc::Receiver<ApiRequest>,
         logging_manager: LoggingManager,
@@ -118,7 +120,13 @@ impl ApiServer {
                 .await
                 .unwrap();
 
-        Self { req_receiver, logging_manager, eth_rpc_client, wallet: Wallet { accounts: vec![] } }
+        Self {
+            req_receiver,
+            logging_manager,
+            mining_engine,
+            eth_rpc_client,
+            _wallet: Wallet { _accounts: vec![] },
+        }
     }
 
     pub async fn run(mut self) {
@@ -139,9 +147,73 @@ impl ApiServer {
             EthRequest::EthGetTransactionReceipt(tx_hash) => {
                 self.transaction_receipt(tx_hash).await.to_rpc_result()
             }
-            EthRequest::EthEstimateGas(call, _block, _overrides) => {
+            EthRequest::Mine(blocks, interval) => {
+                if blocks.is_some_and(|b| u64::try_from(b).is_err()) {
+                    return ResponseResult::Error(RpcError::invalid_params(
+                        "The number of blocks is too large",
+                    ));
+                }
+                if interval.is_some_and(|i| u64::try_from(i).is_err()) {
+                    return ResponseResult::Error(RpcError::invalid_params(
+                        "The interval between blocks is too large",
+                    ));
+                }
+                self.mining_engine
+                    .mine(blocks.map(|b| b.to()), interval.map(|i| Duration::from_secs(i.to())))
+                    .await
+                    .to_rpc_result()
+            }
+            EthRequest::SetIntervalMining(interval) => self
+                .mining_engine
+                .set_interval_mining(Duration::from_secs(interval))
+                .to_rpc_result(),
+            EthRequest::GetIntervalMining(()) => {
+                self.mining_engine.get_interval_mining().to_rpc_result()
+            }
+            EthRequest::GetAutoMine(()) => self.mining_engine.get_auto_mine().to_rpc_result(),
+            EthRequest::SetAutomine(enabled) => {
+                self.mining_engine.set_auto_mine(enabled).to_rpc_result()
+            }
+            EthRequest::EvmMine(mine) => {
+                self.mining_engine.evm_mine(mine.and_then(|p| p.params)).await.to_rpc_result()
+            }
+            EthRequest::EvmMineDetailed(_mine) => ResponseResult::Error(RpcError::internal_error()),
+            //------- TimeMachine---------
+            EthRequest::EvmSetBlockTimeStampInterval(time) => self
+                .mining_engine
+                .set_block_timestamp_interval(Duration::from_secs(time))
+                .to_rpc_result(),
+            EthRequest::EvmRemoveBlockTimeStampInterval(()) => {
+                self.mining_engine.remove_block_timestamp_interval().to_rpc_result()
+            }
+            EthRequest::EvmSetNextBlockTimeStamp(time) => {
+                if time >= U256::from(u64::MAX) {
+                    return ResponseResult::Error(RpcError::invalid_params(
+                        "The timestamp is too big",
+                    ))
+                }
+                let time = time.to::<u64>();
+                self.mining_engine
+                    .set_next_block_timestamp(Duration::from_secs(time))
+                    .to_rpc_result()
+            }
+            EthRequest::EvmIncreaseTime(time) => self
+                .mining_engine
+                .increase_time(Duration::from_secs(time.try_into().unwrap_or(0)))
+                .to_rpc_result(),
+            EthRequest::EvmSetTime(timestamp) => {
+                if timestamp >= U256::from(u64::MAX) {
+                    return ResponseResult::Error(RpcError::invalid_params(
+                        "The timestamp is too big",
+                    ))
+                }
+                // Make sure here we are not traveling back in time.
+                let time = timestamp.to::<u64>();
+                self.mining_engine.set_time(Duration::from_secs(time)).to_rpc_result()
+            }
+            EthRequest::EthEstimateGas(_call, _block, _overrides) => {
                 //self.estimate_gas(call, block).await.to_rpc_result()
-                ResponseResult::success(())
+                Err::<(), _>(Error::RpcUnimplemented).to_rpc_result()
             }
 
             _ => Err::<(), _>(Error::RpcUnimplemented).to_rpc_result(),
@@ -194,18 +266,18 @@ impl ApiServer {
     //    block: Option<alloy_rpc_types::BlockId>,
     //) -> Result<U256> {
     //    node_info!("eth_estimateGas");
-//
+    //
     //    let hash = self.eth_rpc_client.block_hash_for_tag(block.into()).await?;
     //    let runtime_api = self.eth_rpc_client.runtime_api(hash);
     //    /*
     //    GenericTransaction {
-	//				from: Some(from),
-	//				input: input.clone().into(),
-	//				value: Some(value),
-	//				gas_price: Some(gas_price),
-	//				to,
-	//				..Default::default()
-	//			}, */
+    //				from: Some(from),
+    //				input: input.clone().into(),
+    //				value: Some(value),
+    //				gas_price: Some(gas_price),
+    //				to,
+    //				..Default::default()
+    //			}, */
     //    let tr = request.into_inner();
     //    let dry_run = runtime_api.dry_run(GenericTransaction {
     //        from: Some(tr.from.unwrap().into()),
