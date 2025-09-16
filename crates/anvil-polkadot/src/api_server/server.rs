@@ -1,13 +1,22 @@
-use super::ApiRequest;
-use crate::{logging::LoggingManager, macros::node_info};
+use crate::{
+    api_server::{
+        error::{Error, Result, ToRpcResponseResult},
+        ApiRequest,
+    },
+    logging::LoggingManager,
+    macros::node_info,
+};
+use alloy_primitives::{B256, U256, U64};
+use alloy_rpc_types::request::TransactionRequest;
+use alloy_serde::WithOtherFields;
 use anvil_core::eth::EthRequest;
 use anvil_rpc::{error::RpcError, response::ResponseResult};
 use futures::{channel::mpsc, StreamExt};
 use polkadot_sdk::{
-    pallet_revive::evm::Account as EthRpcAccount,
+    pallet_revive::evm::{Account, ReceiptInfo},
     pallet_revive_eth_rpc::{
-        client::Client as EthRpcClient, subxt_client::SrcChainConfig, EthRpcServerImpl,
-        ReceiptExtractor, ReceiptProvider, SubxtBlockInfoProvider,
+        client::Client as EthRpcClient, subxt_client::SrcChainConfig, ReceiptExtractor,
+        ReceiptProvider, SubxtBlockInfoProvider,
     },
     sc_service::RpcHandlers,
 };
@@ -21,10 +30,15 @@ use subxt::{
     OnlineClient,
 };
 
+pub struct Wallet {
+    accounts: Vec<Account>,
+}
+
 pub struct ApiServer {
     req_receiver: mpsc::Receiver<ApiRequest>,
     logging_manager: LoggingManager,
     eth_rpc_client: EthRpcClient,
+    wallet: Wallet,
 }
 
 struct InMemoryRpcClient(RpcHandlers);
@@ -32,7 +46,7 @@ struct InMemoryRpcClient(RpcHandlers);
 struct Params(Option<Box<RawValue>>);
 
 impl ToRpcParams for Params {
-    fn to_rpc_params(self) -> Result<Option<Box<RawValue>>, serde_json::Error> {
+    fn to_rpc_params(self) -> std::result::Result<Option<Box<RawValue>>, serde_json::Error> {
         Ok(self.0)
     }
 }
@@ -104,10 +118,7 @@ impl ApiServer {
                 .await
                 .unwrap();
 
-        // let eth_rpc_server =
-        //     EthRpcServerImpl::new(eth_rpc_client).with_accounts(vec![EthRpcAccount::default()]);
-
-        Self { req_receiver, logging_manager, eth_rpc_client }
+        Self { req_receiver, logging_manager, eth_rpc_client, wallet: Wallet { accounts: vec![] } }
     }
 
     pub async fn run(mut self) {
@@ -119,18 +130,73 @@ impl ApiServer {
     }
 
     pub async fn execute(&mut self, req: EthRequest) -> ResponseResult {
-        match req {
-            EthRequest::SetLogging(enabled) => {
-                node_info!("anvil_setLoggingEnabled");
-                self.logging_manager.set_enabled(enabled);
-                ResponseResult::Success(serde_json::Value::Bool(true))
+        let res = match req.clone() {
+            EthRequest::SetLogging(enabled) => self.set_logging(enabled).to_rpc_result(),
+            EthRequest::EthChainId(()) => self.eth_chain_id().to_rpc_result(),
+            EthRequest::EthNetworkId(()) => self.network_id().to_rpc_result(),
+            EthRequest::NetListening(()) => self.net_listening().to_rpc_result(),
+            EthRequest::EthSyncing(()) => self.syncing().to_rpc_result(),
+            EthRequest::EthGetTransactionReceipt(tx_hash) => {
+                self.transaction_receipt(tx_hash).await.to_rpc_result()
             }
-            EthRequest::EthChainId(()) => {
-                node_info!("eth_chainId");
-                let chain_id = self.eth_rpc_client.chain_id();
-                ResponseResult::Success(serde_json::Value::Number(chain_id.into()))
+            EthRequest::EthEstimateGas(call, block, _overrides) => {
+                self.estimate_gas(call, block).await.to_rpc_result()
             }
-            _ => ResponseResult::Error(RpcError::internal_error()),
+
+            _ => Err::<(), _>(Error::RpcUnimplemented).to_rpc_result(),
+        };
+
+        if let ResponseResult::Error(err) = &res {
+            node_info!("\nRPC request failed:");
+            node_info!("    Request: {:?}", res);
+            node_info!("    Error: {}\n", err);
         }
+
+        res
+    }
+
+    fn set_logging(&self, enabled: bool) -> Result<()> {
+        node_info!("anvil_setLoggingEnabled");
+        self.logging_manager.set_enabled(enabled);
+        Ok(())
+    }
+
+    fn eth_chain_id(&self) -> Result<U64> {
+        node_info!("eth_chainId");
+        Ok(U256::from(self.eth_rpc_client.chain_id()).to::<U64>())
+    }
+
+    fn network_id(&self) -> Result<u64> {
+        node_info!("eth_networkId");
+        Ok(self.eth_rpc_client.chain_id())
+    }
+
+    fn net_listening(&self) -> Result<bool> {
+        node_info!("net_listening");
+        Ok(true)
+    }
+
+    fn syncing(&self) -> Result<bool> {
+        node_info!("eth_syncing");
+        Ok(false)
+    }
+
+    async fn transaction_receipt(&self, tx_hash: B256) -> Result<Option<ReceiptInfo>> {
+        node_info!("eth_getTransactionReceipt");
+        // TODO: do we really need to return Ok(None) if the transaction is still in the pool?
+        Ok(self.eth_rpc_client.receipt(&(tx_hash.0.into())).await)
+    }
+
+    async fn estimate_gas(
+        &self,
+        request: WithOtherFields<TransactionRequest>,
+        block: Option<alloy_rpc_types::BlockId>,
+    ) -> Result<U256> {
+        node_info!("eth_estimateGas");
+
+        let hash = self.eth_rpc_client.block_hash_for_tag(block.unwrap_or_default().into()).await?;
+        let runtime_api = self.eth_rpc_client.runtime_api(hash);
+        let dry_run = runtime_api.dry_run(transaction).await?;
+        Ok(dry_run.eth_gas)
     }
 }
