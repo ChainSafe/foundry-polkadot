@@ -23,9 +23,8 @@ use foundry_common::{
     fmt::parse_tokens,
     shell,
 };
-use foundry_compilers::artifacts::solc::Extensions;
 use foundry_compilers::{
-    artifacts::BytecodeObject, info::ContractInfo, utils::canonicalize, Artifact, ArtifactId,
+    artifacts::{ArtifactExtras, BytecodeObject}, info::ContractInfo, utils::canonicalize, Artifact, ArtifactId,
     ProjectCompileOutput,
 };
 use foundry_config::{
@@ -76,9 +75,11 @@ async fn handle_factory_dependencies(
     let mut all_dependencies = BTreeMap::new();
 
     for (_id, contract) in output.artifact_ids() {
-        if let Extensions::Resolc(extras) = &contract.extensions {
-            for (bytecode_hash, contract_name) in &extras.factory_dependencies {
-                all_dependencies.insert(bytecode_hash.clone(), contract_name.clone());
+        if let ArtifactExtras::Resolc(extras) = &contract.extensions {
+            if let Some(factory_dependencies) = &extras.factory_dependencies {
+                for (bytecode_hash, contract_name) in factory_dependencies {
+                    all_dependencies.insert(bytecode_hash, contract_name);
+                }
             }
         }
     }
@@ -93,7 +94,7 @@ async fn handle_factory_dependencies(
     // Upload each factory dependency
     for (hash, name) in all_dependencies {
         // Try to find the contract by hash directly (skip name-based lookup)
-        let bytecode = find_contract_by_hash(output, &hash);
+        let bytecode = find_contract_by_hash(output, hash);
 
         if let Some(bytecode) = bytecode {
             // Skip child contracts (those with 0x3c04 prefix)

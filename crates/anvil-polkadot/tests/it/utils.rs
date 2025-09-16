@@ -1,0 +1,233 @@
+use alloy_primitives::hex;
+use anvil_core::eth::EthRequest;
+use anvil_polkadot::{
+    api_server::{self, ApiHandle},
+    config::{AnvilNodeConfig, SubstrateNodeConfig},
+    logging::LoggingManager,
+    opts::SubstrateCli,
+    spawn,
+    substrate_node::service::Service,
+};
+use anvil_rpc::response::ResponseResult;
+use eyre::{Result, WrapErr};
+use futures::{channel::oneshot, StreamExt};
+use parity_scale_codec::Decode;
+use polkadot_sdk::{
+    pallet_revive_eth_rpc::subxt_client::{self, system::calls::types::Remark},
+    polkadot_sdk_frame::traits::Header,
+    sc_cli::CliConfiguration,
+    sc_client_api::{BlockBackend, BlockchainEvents},
+    sc_network_types::multiaddr::Protocol,
+    sp_core::{storage::StorageKey, twox_128, H256},
+};
+use serde_json::{json, Value};
+use std::fmt::Debug;
+use subxt::{OnlineClient, PolkadotConfig};
+use subxt_signer::sr25519::Keypair;
+use tempfile::TempDir;
+
+pub struct TestNode {
+    pub service: Service,
+    pub api: ApiHandle,
+    _temp_dir: Option<TempDir>,
+    port: u16,
+}
+
+impl TestNode {
+    pub async fn new(
+        anvil_config: AnvilNodeConfig,
+        mut substrate_config: SubstrateNodeConfig,
+    ) -> Result<Self> {
+        let handle = tokio::runtime::Handle::current();
+
+        let mut temp_dir = None;
+        match substrate_config
+            .base_path()
+            .expect("We are in dev mode and failed to create a temp dir")
+        {
+            None => {
+                let temp = tempfile::tempdir().expect("Failed to create temp dir");
+                let db_path = temp.path().join("db");
+                temp_dir = Some(temp);
+                substrate_config.set_base_path(Some(db_path));
+            }
+            Some(_) if substrate_config.shared_params().is_dev() => {
+                let temp = tempfile::tempdir().expect("Failed to create temp dir");
+                let db_path = temp.path().join("db");
+                temp_dir = Some(temp);
+                substrate_config.set_base_path(Some(db_path));
+            }
+            Some(_) => {}
+        }
+
+        let substrate_client = SubstrateCli {};
+        let config = substrate_config.create_configuration(&substrate_client, handle.clone())?;
+        let (service, api) = spawn(anvil_config, config, LoggingManager::default()).await?;
+
+        let port = match service.rpc_handlers.listen_addresses()[0].clone().pop().unwrap() {
+            Protocol::Tcp(port) => port,
+            _ => panic!("Expected TCP protocol"),
+        };
+
+        Ok(Self { service, api, _temp_dir: temp_dir, port })
+    }
+
+    pub async fn eth_rpc(&mut self, req: EthRequest) -> Result<ResponseResult> {
+        let (tx, rx) = oneshot::channel();
+        self.api
+            .try_send(api_server::ApiRequest { req: req.clone(), resp_sender: tx })
+            .map_err(|e| eyre::eyre!("failed to send EthRequest {:?}: {}", req, e))?;
+
+        rx.await.map_err(|e| eyre::eyre!("ApiRequest receiver dropped: {}", e))
+    }
+
+    pub async fn substrate_rpc(&self, method: &str, params: Value) -> Result<Value> {
+        let rpc = &self.service.rpc_handlers;
+
+        let request = json!({
+            "jsonrpc": "2.0",
+            "method": method,
+            "params": params,
+            "id": 1
+        });
+
+        let (response, _receiver) = rpc
+            .rpc_query(&request.to_string())
+            .await
+            .wrap_err(format!("RPC call failed for method: {method}"))?;
+
+        let response_value: Value =
+            serde_json::from_str(&response).wrap_err("Failed to parse RPC response")?;
+
+        if let Some(error) = response_value.get("error") {
+            return Err(eyre::eyre!("RPC error: {}", error));
+        }
+
+        response_value
+            .get("result")
+            .cloned()
+            .ok_or_else(|| eyre::eyre!("No result in RPC response"))
+    }
+}
+
+impl TestNode {
+    pub async fn block_hash_by_number(&self, n: u32) -> eyre::Result<H256> {
+        self.service
+            .client
+            .block_hash(n)
+            .wrap_err("client.block_hash failed")?
+            .ok_or_else(|| eyre::eyre!("no hash for block {}", n))
+    }
+
+    pub fn create_storage_key(pallet: &str, item: &str) -> StorageKey {
+        let mut key = Vec::new();
+        key.extend_from_slice(&twox_128(pallet.as_bytes()));
+        key.extend_from_slice(&twox_128(item.as_bytes()));
+        StorageKey(key)
+    }
+
+    pub async fn state_get_storage(
+        &self,
+        key: StorageKey,
+        at: Option<H256>,
+    ) -> Result<Option<String>> {
+        let key_hex = format!("0x{}", hex::encode(&key.0));
+        let result = match at {
+            Some(hash) => self.substrate_rpc("state_getStorageAt", json!([key_hex, hash])).await?,
+            None => self.substrate_rpc("state_getStorage", json!([key_hex])).await?,
+        };
+        Ok(result.as_str().map(|s| s.to_string()))
+    }
+
+    pub async fn get_decoded_timestamp(&self, at: Option<H256>) -> u64 {
+        let storage_key = Self::create_storage_key("Timestamp", "Now");
+        let encoded_value = self.state_get_storage(storage_key, at).await.unwrap().unwrap();
+        let bytes =
+            hex::decode(encoded_value.strip_prefix("0x").unwrap_or(&encoded_value)).unwrap();
+        let mut input = &bytes[..];
+        Decode::decode(&mut input).unwrap()
+    }
+
+    async fn wait_for_block_with_number(&self, n: u32) {
+        let mut import_stream = self.service.client.import_notification_stream();
+
+        while let Some(notification) = import_stream.next().await {
+            let block_number = *notification.header.number();
+            if block_number >= n {
+                break;
+            }
+        }
+    }
+
+    pub async fn best_block_number(&self) -> u32 {
+        let num = self
+            .substrate_rpc("chain_getHeader", json!([]))
+            .await
+            .unwrap()
+            .get("number")
+            .and_then(|v| v.as_str())
+            .unwrap()
+            .to_owned();
+        u32::from_str_radix(num.trim_start_matches("0x"), 16).unwrap()
+    }
+
+    pub async fn wait_for_block_with_timeout(
+        &self,
+        n: u32,
+        timeout: std::time::Duration,
+    ) -> eyre::Result<()> {
+        tokio::time::timeout(timeout, self.wait_for_block_with_number(n))
+            .await
+            .map_err(|e| e.into())
+    }
+
+    pub async fn submit_remark(&self, signer: Keypair) {
+        let url = format!("ws://127.0.0.1:{}", self.port);
+        let subxt_client = OnlineClient::<PolkadotConfig>::from_url(url)
+            .await
+            .wrap_err("Failed to create subxt client")
+            .unwrap();
+        let remark_data = b"bonjour".to_vec();
+        let tx_payload = subxt_client::tx().system().remark(remark_data.clone());
+        let res = subxt_client
+            .tx()
+            .sign_and_submit_then_watch_default(&tx_payload, &signer)
+            .await
+            .unwrap()
+            .wait_for_finalized()
+            .await
+            .unwrap();
+
+        let block_hash = res.block_hash();
+        let block = subxt_client.blocks().at(block_hash).await.unwrap();
+        let extrinsics = block.extrinsics().await.unwrap();
+        let remarks =
+            extrinsics.find::<Remark>().map(|remark| remark.unwrap().value).collect::<Vec<_>>();
+        assert_eq!(remarks[0].remark, remark_data);
+    }
+}
+
+pub fn assert_with_tolerance<T>(actual: T, expected: T, tolerance: T, message: &str)
+where
+    T: PartialOrd + std::ops::Sub<Output = T> + Debug + Copy,
+{
+    let diff = if actual > expected { actual - expected } else { expected - actual };
+
+    if diff > tolerance {
+        panic!(
+            "{message}\nExpected: {expected:?} ± {tolerance:?}\nActual: {actual:?}\nDifference: {diff:?}",
+        );
+    }
+}
+
+pub fn unwrap_response<T>(response: ResponseResult) -> Result<T, Box<dyn std::error::Error>>
+where
+    T: serde::de::DeserializeOwned,
+{
+    match response {
+        ResponseResult::Success(value) => Ok(serde_json::from_value(value)?),
+        ResponseResult::Error(err) => {
+            Err(format!("Expected success but got error: {err:?}").into())
+        }
+    }
+}

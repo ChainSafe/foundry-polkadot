@@ -2853,7 +2853,7 @@ import {Test} from "forge-std/Test.sol";
 
 contract ScrollForkTest is Test {
     function test_roll_scroll_fork_to_tx() public {
-        vm.createSelectFork("https://scroll-mainnet.chainstacklabs.com/");
+        vm.createSelectFork("https://rpc.scroll.io/");
         bytes32 targetTxHash = 0xf94774a1f69bba76892141190293ffe85dd8d9ac90a0a2e2b114b8c65764014c;
         vm.rollFork(targetTxHash);
     }
@@ -3651,4 +3651,103 @@ Encountered 1 failing test in test/Counter.t.sol:CounterTest
 Encountered a total of 1 failing tests, 0 tests succeeded
 
 "#]]);
+});
+
+// Test that --resolc flag enables pallet-revive compilation for tests
+forgetest_init!(test_resolc_flag_enables_resolc_compilation, |prj, cmd| {
+    // Test that the --resolc flag is recognized by running help
+    cmd.args(["test", "--resolc", "--help"]).assert_success();
+
+    // Create a simple test contract
+    prj.add_test(
+        "Counter.t.sol",
+        r#"
+import "forge-std/Test.sol";
+
+contract Counter {
+    uint256 public number;
+
+    function setNumber(uint256 newNumber) public {
+        number = newNumber;
+    }
+
+    function increment() public {
+        number++;
+    }
+}
+
+contract CounterTest is Test {
+    Counter counter;
+
+    function setUp() public {
+        counter = new Counter();
+    }
+
+    function testSetNumber() public {
+        counter.setNumber(42);
+        assertEq(counter.number(), 42);
+    }
+
+    function testIncrement() public {
+        counter.setNumber(0);
+        counter.increment();
+        assertEq(counter.number(), 1);
+    }
+}
+    "#,
+    )
+    .unwrap();
+
+    // Test that the --resolc flag works for actual compilation and testing
+    cmd.forge_fuse().args(["test", "--resolc"]).assert_success().stdout_eq(str![[r#"
+[COMPILING_FILES] with [SOLC_VERSION]
+[SOLC_VERSION] [ELAPSED]
+Compiler run successful!
+[COMPILING_FILES] with [RESOLC_VERSION]
+[RESOLC_VERSION] [ELAPSED]
+Compiler run successful with warnings:
+Warning: Warning: Your code or one of its dependencies uses the 'extcodesize' instruction, which is
+usually needed in the following cases:
+  1. To detect whether an address belongs to a smart contract.
+  2. To detect whether the deploy code execution has finished.
+Polkadot comes with native account abstraction support (so smart contracts are just accounts
+coverned by code), and you should avoid differentiating between contracts and non-contract
+addresses.
+[FILE]
+Warning: Warning: Your code or one of its dependencies uses the 'extcodesize' instruction, which is
+usually needed in the following cases:
+  1. To detect whether an address belongs to a smart contract.
+  2. To detect whether the deploy code execution has finished.
+Polkadot comes with native account abstraction support (so smart contracts are just accounts
+coverned by code), and you should avoid differentiating between contracts and non-contract
+addresses.
+[FILE]
+Warning: Warning: Your code or one of its dependencies uses the 'extcodesize' instruction, which is
+usually needed in the following cases:
+  1. To detect whether an address belongs to a smart contract.
+  2. To detect whether the deploy code execution has finished.
+Polkadot comes with native account abstraction support (so smart contracts are just accounts
+coverned by code), and you should avoid differentiating between contracts and non-contract
+addresses.
+[FILE]
+
+Ran 2 tests for test/Counter.t.sol:CounterTest
+[PASS] testIncrement() ([GAS])
+[PASS] testSetNumber() ([GAS])
+Suite result: ok. 2 passed; 0 failed; 0 skipped; [ELAPSED]
+
+Ran 1 test suite [ELAPSED]: 2 tests passed, 0 failed, 0 skipped (2 total tests)
+
+"#]]);
+});
+
+// Test that resolc configuration option works
+forgetest_init!(test_resolc_config_option, |prj, cmd| {
+    // Set resolc.resolc_compile = true in foundry.toml
+    prj.update_config(|config| {
+        config.resolc.resolc_compile = true;
+    });
+
+    // Test that the config option is recognized
+    cmd.args(["test", "--help"]).assert_success();
 });

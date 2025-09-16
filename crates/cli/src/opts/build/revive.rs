@@ -15,6 +15,15 @@ pub struct ResolcOpts {
     )]
     pub resolc_compile: Option<bool>,
 
+    /// Enable PVM mode at startup (independent of compilation)
+    #[arg(
+        long = "resolc-startup",
+        help = "Enable PVM mode at startup",
+        value_name = "RESOLC_STARTUP",
+        action = clap::ArgAction::SetTrue
+    )]
+    pub resolc_startup: Option<bool>,
+
     /// Specify the resolc version, or a path to a local resolc, to build with.
     ///
     /// Valid values follow the SemVer format `x.y.z-dev.n`, `resolc:x.y.z-dev.n` or
@@ -53,6 +62,15 @@ pub struct ResolcOpts {
     )]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stack_size: Option<u32>,
+
+    /// Generate source based debug information in the output code file.
+    #[arg(
+        long = "debug-info",
+        help = "Generate source based debug information in the output code file",
+        action = clap::ArgAction::SetTrue
+    )]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub debug_information: Option<bool>,
 }
 
 impl ResolcOpts {
@@ -70,6 +88,10 @@ impl ResolcOpts {
             resolc.resolc_compile
         );
         set_if_some!(
+            self.resolc_startup.and_then(|v| if v { Some(true) } else { None }),
+            resolc.resolc_startup
+        );
+        set_if_some!(
             self.use_resolc.as_ref().map(|v| SolcReq::from(v.trim_start_matches("resolc:"))),
             resolc.resolc
         );
@@ -79,6 +101,10 @@ impl ResolcOpts {
         );
         set_if_some!(self.heap_size, resolc.heap_size);
         set_if_some!(self.stack_size, resolc.stack_size);
+        set_if_some!(
+            self.debug_information.and_then(|v| if v { Some(true) } else { None }),
+            resolc.debug_information
+        );
 
         resolc
     }

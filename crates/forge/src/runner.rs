@@ -155,6 +155,10 @@ impl<'a> ContractRunner<'a> {
 
         let address = self.sender.create(self.executor.get_nonce(self.sender)?);
         result.address = address;
+        // NOTE(revive): the test contract is set here instead of where upstream does it as
+        // the test contract address needs to be retrieved in order to skip
+        // revive mode for the creation of the test address (and for calls to it later).
+        self.executor.backend_mut().set_test_contract(address);
 
         // Set the contracts initial balance before deployment, so it is available during
         // construction
@@ -186,6 +190,11 @@ impl<'a> ContractRunner<'a> {
         self.executor.set_balance(LIBRARY_DEPLOYER, self.initial_balance())?;
 
         self.executor.deploy_create2_deployer()?;
+
+        if let Some(cheatcodes) = &mut self.executor.inspector_mut().cheatcodes {
+            debug!("test contract deployed");
+            cheatcodes.strategy.runner.base_contract_deployed(cheatcodes.strategy.context.as_mut());
+        }
 
         // Optionally call the `setUp` function
         if call_setup {
@@ -306,7 +315,7 @@ impl<'a> ContractRunner<'a> {
                 [("setUp()".to_string(), TestResult::fail("multiple setUp functions".to_string()))]
                     .into(),
                 warnings,
-            )
+            );
         }
 
         // Check if `afterInvariant` function with valid signature declared.
@@ -322,7 +331,7 @@ impl<'a> ContractRunner<'a> {
                 )]
                 .into(),
                 warnings,
-            )
+            );
         }
         let call_after_invariant = after_invariant_fns.first().is_some_and(|after_invariant_fn| {
             let match_sig = after_invariant_fn.name == "afterInvariant";
@@ -361,7 +370,7 @@ impl<'a> ContractRunner<'a> {
                 start.elapsed(),
                 [(fail_msg, TestResult::setup_result(setup))].into(),
                 warnings,
-            )
+            );
         }
 
         // Filter out functions sequentially since it's very fast and there is no need to do it
@@ -400,12 +409,10 @@ impl<'a> ContractRunner<'a> {
                 test_fail_instances.join(", ")
             );
             let fail =  TestResult::fail("`testFail*` has been removed. Consider changing to test_Revert[If|When]_Condition and expecting a revert".to_string());
-            return SuiteResult::new(start.elapsed(), [(instances, fail)].into(), warnings)
+            return SuiteResult::new(start.elapsed(), [(instances, fail)].into(), warnings);
         }
-
-        let test_results = functions
-            .par_iter()
-            .map(|&func| {
+        let f = |backend: Option<revive_strategy::Backend>, func: &Function| {
+            let f = || {
                 let start = Instant::now();
 
                 let _guard = self.tokio_handle.enter();
@@ -435,7 +442,22 @@ impl<'a> ContractRunner<'a> {
                 res.duration = start.elapsed();
 
                 (sig, res)
-            })
+            };
+            if let Some(backend) = backend {
+                revive_strategy::with_externalities(backend, f)
+            } else {
+                f()
+            }
+        };
+        let backend = if self.config.resolc.resolc_compile {
+            Some(revive_strategy::Backend::get())
+        } else {
+            None
+        };
+
+        let test_results = functions
+            .into_par_iter()
+            .map(|item| f(backend.clone(), item))
             .collect::<BTreeMap<_, _>>();
 
         let duration = start.elapsed();
@@ -538,9 +560,10 @@ impl<'a> FunctionRunner<'a> {
         if self.prepare_test(func).is_err() {
             return self.result;
         }
-
+        let mut binding = self.executor.clone();
+        let executor = binding.to_mut();
         // Run current unit test.
-        let (mut raw_call_result, reason) = match self.executor.call(
+        let (mut raw_call_result, reason) = match executor.call(
             self.sender,
             self.address,
             func,
@@ -573,8 +596,10 @@ impl<'a> FunctionRunner<'a> {
         identified_contracts: &ContractsByAddress,
         test_bytecode: &Bytes,
     ) -> TestResult {
+        let mut binding = self.executor.clone();
+        let executor = binding.to_mut();
         // First, run the test normally to see if it needs to be skipped.
-        if let Err(EvmError::Skip(reason)) = self.executor.call(
+        if let Err(EvmError::Skip(reason)) = executor.call(
             self.sender,
             self.address,
             func,
