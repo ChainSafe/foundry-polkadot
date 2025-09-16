@@ -13,7 +13,7 @@ use anvil_core::eth::EthRequest;
 use anvil_rpc::{error::RpcError, response::ResponseResult};
 use futures::{channel::mpsc, StreamExt};
 use polkadot_sdk::{
-    pallet_revive::evm::{Account, ReceiptInfo},
+    pallet_revive::evm::{Account, GenericTransaction, ReceiptInfo},
     pallet_revive_eth_rpc::{
         client::Client as EthRpcClient, subxt_client::SrcChainConfig, ReceiptExtractor,
         ReceiptProvider, SubxtBlockInfoProvider,
@@ -139,8 +139,9 @@ impl ApiServer {
             EthRequest::EthGetTransactionReceipt(tx_hash) => {
                 self.transaction_receipt(tx_hash).await.to_rpc_result()
             }
-            EthRequest::EthEstimateGas(call, block, _overrides) => {
-                self.estimate_gas(call, block).await.to_rpc_result()
+            EthRequest::EthEstimateGas(call, _block, _overrides) => {
+                //self.estimate_gas(call, block).await.to_rpc_result()
+                ResponseResult::success(())
             }
 
             _ => Err::<(), _>(Error::RpcUnimplemented).to_rpc_result(),
@@ -187,16 +188,29 @@ impl ApiServer {
         Ok(self.eth_rpc_client.receipt(&(tx_hash.0.into())).await)
     }
 
-    async fn estimate_gas(
-        &self,
-        request: WithOtherFields<TransactionRequest>,
-        block: Option<alloy_rpc_types::BlockId>,
-    ) -> Result<U256> {
-        node_info!("eth_estimateGas");
-
-        let hash = self.eth_rpc_client.block_hash_for_tag(block.unwrap_or_default().into()).await?;
-        let runtime_api = self.eth_rpc_client.runtime_api(hash);
-        let dry_run = runtime_api.dry_run(transaction).await?;
-        Ok(dry_run.eth_gas)
-    }
+    //async fn estimate_gas(
+    //    &self,
+    //    request: WithOtherFields<TransactionRequest>,
+    //    block: Option<alloy_rpc_types::BlockId>,
+    //) -> Result<U256> {
+    //    node_info!("eth_estimateGas");
+//
+    //    let hash = self.eth_rpc_client.block_hash_for_tag(block.into()).await?;
+    //    let runtime_api = self.eth_rpc_client.runtime_api(hash);
+    //    /*
+    //    GenericTransaction {
+	//				from: Some(from),
+	//				input: input.clone().into(),
+	//				value: Some(value),
+	//				gas_price: Some(gas_price),
+	//				to,
+	//				..Default::default()
+	//			}, */
+    //    let tr = request.into_inner();
+    //    let dry_run = runtime_api.dry_run(GenericTransaction {
+    //        from: Some(tr.from.unwrap().into()),
+    //        ..Default::default()
+    //    }).await?;
+    //    Ok(dry_run.eth_gas)
+    //}
 }
