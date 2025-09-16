@@ -22,8 +22,9 @@ where
     GenericChainSpec<E, EHF>: BuildStorage,
 {
     fn assimilate_storage(&self, storage: &mut Storage) -> Result<(), String> {
-        self.inner.assimilate_storage(storage)
-        // TODO: inject genesis values from `genesis_config`
+        self.inner.assimilate_storage(storage)?;
+        storage.top.extend(self.genesis_config.as_storage_key_value());
+        Ok(())
     }
 }
 

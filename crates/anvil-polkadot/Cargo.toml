@@ -50,6 +50,7 @@ polkadot-sdk = { version = "2507.1.0", default-features = false, features = [
 	"sp-core-hashing",
 	"sp-core-hashing-proc-macro",
 	"sp-database",
+	"sp-io",
 	"sp-panic-handler",
 	"sp-rpc",
 	"std",
