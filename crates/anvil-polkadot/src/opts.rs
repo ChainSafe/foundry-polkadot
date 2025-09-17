@@ -69,9 +69,9 @@ impl sc_cli::SubstrateCli for SubstrateCli {
     fn load_spec(&self, id: &str) -> std::result::Result<Box<dyn sc_service::ChainSpec>, String> {
         Ok(match id {
             "dev" | "" => Box::new(chain_spec::development_chain_spec(self.anvil_config.clone())?),
-            path => {
-                Box::new(chain_spec::ChainSpec::from_json_file(std::path::PathBuf::from(path))?)
-            }
+            path => Box::new(chain_spec::DevelopmentChainSpec::<Option<()>, ()>::from_json_file(
+                std::path::PathBuf::from(path),
+            )?),
         })
     }
 }

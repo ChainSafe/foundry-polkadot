@@ -19,6 +19,7 @@ path = "bin/main.rs"
 
 [dependencies]
 # foundry internal
+codec = { version = "3.7.5", default-features = true, package = "parity-scale-codec" }
 substrate-runtime = { path = "substrate-runtime" }
 polkadot-sdk = { version = "2507.1.0", default-features = false, features = [
     "sc-allocator",
@@ -34,6 +35,7 @@ polkadot-sdk = { version = "2507.1.0", default-features = false, features = [
 	"sc-executor-common",
 	"sc-executor-wasmtime",
 	"sc-keystore",
+	"sc-network",
 	"sc-network-types",
     "sc-rpc",
 	"sc-rpc-api",
@@ -41,6 +43,7 @@ polkadot-sdk = { version = "2507.1.0", default-features = false, features = [
 	"sc-rpc-spec-v2",
 	"sc-service",
 	"sc-state-db",
+	"sc-telemetry",
 	"sc-tracing",
 	"sc-transaction-pool",
 	"sc-transaction-pool-api",
@@ -127,7 +130,6 @@ clap = { version = "4", features = [
 clap_complete = { version = "4" }
 chrono.workspace = true
 clap_complete_fig = "4"
-parity-scale-codec = "3.7.5"
 
 [dev-dependencies]
 alloy-provider = { workspace = true, features = ["txpool-api"] }

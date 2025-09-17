@@ -1,8 +1,11 @@
 use crate::{config::AnvilNodeConfig, genesis::GenesisConfig};
 use polkadot_sdk::{
+    sc_chain_spec::{ChainSpec, GetExtension},
     sc_executor::HostFunctions,
-    sc_service::{self, ChainType, GenericChainSpec, Properties},
-    sp_core::Storage,
+    sc_network::config::MultiaddrWithPeerId,
+    sc_service::{ChainType, GenericChainSpec, Properties},
+    sc_telemetry::TelemetryEndpoints,
+    sp_core::storage::Storage,
     sp_genesis_builder,
     sp_runtime::BuildStorage,
 };
@@ -10,15 +13,15 @@ use substrate_runtime::WASM_BINARY;
 
 /// This is a wrapper around the general Substrate ChainSpec type that allows manual changes to the
 /// genesis block.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct DevelopmentChainSpec<E = Option<()>, EHF = ()> {
-    inner: sc_service::GenericChainSpec<E, EHF>,
+    inner: GenericChainSpec<E, EHF>,
     genesis_config: GenesisConfig,
 }
 
 impl<E, EHF> BuildStorage for DevelopmentChainSpec<E, EHF>
 where
-    E: HostFunctions,
+    EHF: HostFunctions,
     GenericChainSpec<E, EHF>: BuildStorage,
 {
     fn assimilate_storage(&self, storage: &mut Storage) -> Result<(), String> {
@@ -29,7 +32,7 @@ where
 }
 
 // Inherit all methods defined on GenericChainSpec.
-impl<E, EHF> Deref for CustomChainSpec<E, EHF> {
+impl<E, EHF> std::ops::Deref for DevelopmentChainSpec<E, EHF> {
     type Target = GenericChainSpec<E, EHF>;
 
     fn deref(&self) -> &Self::Target {
@@ -37,9 +40,86 @@ impl<E, EHF> Deref for CustomChainSpec<E, EHF> {
     }
 }
 
-impl<E, EHF> DerefMut for CustomChainSpec<E, EHF> {
+impl<E, EHF> std::ops::DerefMut for DevelopmentChainSpec<E, EHF> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.inner
+    }
+}
+
+impl<E, EHF> ChainSpec for DevelopmentChainSpec<E, EHF>
+where
+    E: GetExtension + serde::Serialize + Clone + Send + Sync + 'static,
+    EHF: HostFunctions,
+{
+    fn boot_nodes(&self) -> &[MultiaddrWithPeerId] {
+        self.inner.boot_nodes()
+    }
+
+    fn name(&self) -> &str {
+        self.inner.name()
+    }
+
+    fn id(&self) -> &str {
+        self.inner.id()
+    }
+
+    fn chain_type(&self) -> ChainType {
+        self.inner.chain_type()
+    }
+
+    fn telemetry_endpoints(&self) -> &Option<TelemetryEndpoints> {
+        self.inner.telemetry_endpoints()
+    }
+
+    fn protocol_id(&self) -> Option<&str> {
+        self.inner.protocol_id()
+    }
+
+    fn fork_id(&self) -> Option<&str> {
+        self.inner.fork_id()
+    }
+
+    fn properties(&self) -> Properties {
+        self.inner.properties()
+    }
+
+    fn add_boot_node(&mut self, addr: MultiaddrWithPeerId) {
+        self.inner.add_boot_node(addr)
+    }
+
+    fn extensions(&self) -> &dyn GetExtension {
+        self.inner.extensions() as &dyn GetExtension
+    }
+
+    fn extensions_mut(&mut self) -> &mut dyn GetExtension {
+        self.inner.extensions_mut() as &mut dyn GetExtension
+    }
+
+    fn as_json(&self, raw: bool) -> Result<String, String> {
+        self.inner.as_json(raw)
+    }
+
+    fn as_storage_builder(&self) -> &dyn BuildStorage {
+        self
+    }
+
+    fn cloned_box(&self) -> Box<dyn ChainSpec> {
+        Box::new(Self { inner: self.inner.clone(), genesis_config: self.genesis_config.clone() })
+    }
+
+    fn set_storage(&mut self, storage: Storage) {
+        self.inner.set_storage(storage);
+    }
+
+    fn code_substitutes(&self) -> std::collections::BTreeMap<String, Vec<u8>> {
+        self.inner.code_substitutes()
+    }
+}
+
+impl<E: serde::de::DeserializeOwned, EHF> DevelopmentChainSpec<E, EHF> {
+    pub fn from_json_file(path: std::path::PathBuf) -> Result<Self, String> {
+        let inner = GenericChainSpec::from_json_file(path)?;
+        Ok(Self { inner, genesis_config: GenesisConfig::default() })
     }
 }
 

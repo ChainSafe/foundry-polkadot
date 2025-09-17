@@ -2,8 +2,8 @@
 
 use crate::config::AnvilNodeConfig;
 use alloy_genesis::GenesisAccount;
-use alloy_primitives::{Address, U256};
-use foundry_evm::revm::primitives::AccountInfo;
+use alloy_primitives::Address;
+use codec::Encode;
 use std::collections::BTreeMap;
 
 // Hex-encode key: 0x9527366927478e710d3f7fb77c6d1f89
@@ -33,20 +33,20 @@ pub const BLOCK_NUMBER_KEY: [u8; 32] = [
 /// Genesis settings
 #[derive(Clone, Debug, Default)]
 pub struct GenesisConfig {
-    /// The chain id of the Substrate chain, if provided.
-    pub chain_id: Option<u64>,
+    /// The chain id of the Substrate chain.
+    pub chain_id: u64,
     /// The initial timestamp for the genesis block
-    pub timestamp: Option<u64>,
-    /// The genesis block author address, if provided.
+    pub timestamp: u64,
+    /// The genesis block author address.
     pub coinbase: Option<Address>,
     /// All accounts that should be initialised at genesis with their info.
     pub alloc: Option<BTreeMap<Address, GenesisAccount>>,
     /// The initial number for the genesis block
-    pub number: Option<u64>,
+    pub number: u64,
     /// The genesis header base fee
-    pub base_fee_per_gas: Option<u128>,
+    pub base_fee_per_gas: u64,
     /// The genesis header gas limit.
-    pub gas_limit: Option<u64>,
+    pub gas_limit: Option<u128>,
 }
 
 impl From<AnvilNodeConfig> for GenesisConfig {
@@ -54,15 +54,11 @@ impl From<AnvilNodeConfig> for GenesisConfig {
         Self {
             chain_id: anvil_config.get_chain_id(),
             timestamp: anvil_config.get_genesis_timestamp(),
-            coinbase: anvil_config.genesis.as_ref().map(|g| g.coinbase),
-            alloc: anvil_config.genesis.as_ref().map(|g| g.alloc),
+            coinbase: anvil_config.genesis.as_ref().map(|g| g.coinbase.clone()),
+            alloc: anvil_config.genesis.as_ref().map(|g| g.alloc.clone()),
             number: anvil_config.get_genesis_number(),
             base_fee_per_gas: anvil_config.get_base_fee(),
-            gas_limit: if cfg.disable_block_gas_limit {
-                None
-            } else {
-                Some(anvil_config.gas_limit)
-            },
+            gas_limit: anvil_config.gas_limit,
         }
     }
 }
@@ -70,15 +66,9 @@ impl From<AnvilNodeConfig> for GenesisConfig {
 impl GenesisConfig {
     pub fn as_storage_key_value(&self) -> Vec<(Vec<u8>, Vec<u8>)> {
         let mut storage = Vec::new();
-        if let Some(chain_id) = self.chain_id {
-            storage.push((CHAIN_ID_KEY.to_vec(), chain_id.encode()));
-        }
-        if let Some(timestamp) = self.timestamp {
-            storage.push((TIMESTAMP_KEY.to_vec(), timestamp.encode()));
-        }
-        if let Some(number) = self.number {
-            storage.push((BLOCK_NUMBER_KEY.to_vec(), number.encode()));
-        }
+        storage.push((CHAIN_ID_KEY.to_vec(), self.chain_id.encode()));
+        storage.push((TIMESTAMP_KEY.to_vec(), self.timestamp.encode()));
+        storage.push((BLOCK_NUMBER_KEY.to_vec(), self.number.encode()));
         // TODO: add other fields
         storage
     }
