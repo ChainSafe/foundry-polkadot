@@ -61,7 +61,9 @@ polkadot-sdk = { version = "2507.1.0", default-features = false, features = [
 	"substrate-frame-rpc-system",
 	"substrate-rpc-client",
 	"substrate-wasm-builder",
+	"pallet-revive-eth-rpc"
 ] }
+anvil.workspace = true
 anvil-core.workspace = true
 anvil-server = { workspace = true, features = ["clap"] }
 anvil-rpc.workspace = true
@@ -130,6 +132,9 @@ clap = { version = "4", features = [
 clap_complete = { version = "4" }
 chrono.workspace = true
 clap_complete_fig = "4"
+subxt = "0.41.0"
+subxt-signer = "0.41.0"
+tokio-stream = "0.1.17"
 
 [dev-dependencies]
 alloy-provider = { workspace = true, features = ["txpool-api"] }
