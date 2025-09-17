@@ -1,3 +1,8 @@
+use crate::{
+    substrate_node::mining_engine::{run_mining_engine, MiningEngine, MiningMode},
+    AnvilNodeConfig,
+};
+use anvil::eth::backend::time::TimeManager;
 use parking_lot::Mutex;
 use polkadot_sdk::{
     sc_basic_authorship, sc_consensus, sc_consensus_manual_seal,
@@ -12,8 +17,8 @@ use polkadot_sdk::{
 };
 use std::sync::Arc;
 use substrate_runtime::Block;
+use tokio_stream::wrappers::ReceiverStream;
 
-use crate::AnvilNodeConfig;
 pub use backend::{BackendError, BackendWithOverlay, StorageOverrides};
 pub use client::Client;
 
@@ -34,14 +39,12 @@ pub struct Service {
     pub backend: Arc<Backend>,
     pub tx_pool: Arc<TransactionPoolHandle>,
     pub rpc_handlers: RpcHandlers,
+    pub mining_engine: Arc<MiningEngine>,
     pub storage_overrides: Arc<Mutex<StorageOverrides>>,
 }
 
 /// Builds a new service for a full client.
-pub fn new(
-    _anvil_config: &AnvilNodeConfig,
-    config: Configuration,
-) -> Result<Service, ServiceError> {
+pub fn new(anvil_config: &AnvilNodeConfig, config: Configuration) -> Result<Service, ServiceError> {
     let storage_overrides = Arc::new(Mutex::new(StorageOverrides::new()));
 
     let (client, backend, keystore, mut task_manager) = client::new_client(
@@ -67,6 +70,19 @@ pub fn new(
         sc_transaction_pool::notification_future(client.clone(), transaction_pool.clone()),
     );
 
+    let (seal_engine_command_sender, commands_stream) = tokio::sync::mpsc::channel(1024);
+    let commands_stream = ReceiverStream::new(commands_stream);
+
+    let mining_mode =
+        MiningMode::new(anvil_config.block_time, anvil_config.mixed_mining, anvil_config.no_mining);
+    let time_manager =
+        Arc::new(TimeManager::new_with_milliseconds(sp_timestamp::Timestamp::current().into()));
+    let mining_engine = Arc::new(MiningEngine::new(
+        mining_mode,
+        transaction_pool.clone(),
+        time_manager.clone(),
+        seal_engine_command_sender,
+    ));
     let rpc_handlers = spawn_rpc_server(
         &mut task_manager,
         client.clone(),
@@ -76,6 +92,12 @@ pub fn new(
         backend.clone(),
     )?;
 
+    task_manager.spawn_handle().spawn(
+        "mining_engine_task",
+        Some("consensus"),
+        run_mining_engine(mining_engine.clone()),
+    );
+
     let proposer = sc_basic_authorship::ProposerFactory::new(
         task_manager.spawn_handle(),
         client.clone(),
@@ -84,24 +106,12 @@ pub fn new(
         None,
     );
 
-    // Implement a dummy block production mechanism for now, just build an instantly finalized block
-    // every 6 seconds. This will have to change.
-    let default_block_time = 6000;
-    let (mut sink, commands_stream) = futures::channel::mpsc::channel(1024);
-    task_manager.spawn_handle().spawn("block_authoring", "anvil-polkadot", async move {
-        loop {
-            futures_timer::Delay::new(std::time::Duration::from_millis(default_block_time)).await;
-            let (sender, recv) = futures::channel::oneshot::channel();
-            sink.try_send(sc_consensus_manual_seal::EngineCommand::SealNewBlock {
-                create_empty: true,
-                finalize: false,
-                parent_hash: None,
-                sender: Some(sender),
-            })
-            .unwrap();
-            recv.await.unwrap().unwrap();
+    let create_inherent_data_providers = {
+        move |_, ()| {
+            let next_timestamp = time_manager.next_timestamp();
+            async move { Ok(sp_timestamp::InherentDataProvider::new(next_timestamp.into())) }
         }
-    });
+    };
 
     let params = sc_consensus_manual_seal::ManualSealParams {
         block_import: client.clone(),
@@ -111,9 +121,7 @@ pub fn new(
         select_chain: SelectChain::new(backend.clone()),
         commands_stream: Box::pin(commands_stream),
         consensus_data_provider: None,
-        create_inherent_data_providers: move |_, ()| async move {
-            Ok(sp_timestamp::InherentDataProvider::from_system_time())
-        },
+        create_inherent_data_providers,
     };
     let authorship_future = sc_consensus_manual_seal::run_manual_seal(params);
 
@@ -130,6 +138,7 @@ pub fn new(
         tx_pool: transaction_pool,
         rpc_handlers,
         storage_overrides,
+        mining_engine,
     })
 }
 

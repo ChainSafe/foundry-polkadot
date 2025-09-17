@@ -5,14 +5,17 @@ use crate::{
     },
     logging::LoggingManager,
     macros::node_info,
-    substrate_node::service::{
-        storage::{AccountInfo, AccountType},
-        BackendWithOverlay, Client, Service,
+    substrate_node::{
+        mining_engine::MiningEngine,
+        service::{
+            storage::{AccountInfo, AccountType},
+            BackendWithOverlay, Client, Service,
+        },
     },
 };
 use alloy_primitives::{Address, Bytes, B256, U256};
 use anvil_core::eth::EthRequest;
-use anvil_rpc::response::ResponseResult;
+use anvil_rpc::{error::RpcError, response::ResponseResult};
 use codec::Encode;
 use futures::{channel::mpsc, StreamExt};
 use polkadot_sdk::{
@@ -31,7 +34,7 @@ use polkadot_sdk::{
     sp_io,
     sp_runtime::traits::BlakeTwo256,
 };
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 use substrate_runtime::Balance;
 
 pub struct ApiServer {
@@ -40,6 +43,7 @@ pub struct ApiServer {
     logging_manager: LoggingManager,
     rpc: RpcHandlers,
     client: Arc<Client>,
+    mining_engine: Arc<MiningEngine>,
 }
 
 impl ApiServer {
@@ -57,6 +61,7 @@ impl ApiServer {
             ),
             rpc: substrate_service.rpc_handlers.clone(),
             client: substrate_service.client.clone(),
+            mining_engine: substrate_service.mining_engine.clone(),
         }
     }
 
@@ -70,17 +75,87 @@ impl ApiServer {
 
     pub async fn execute(&mut self, req: EthRequest) -> ResponseResult {
         let res = match req.clone() {
-            EthRequest::SetBalance(address, value) => self.set_balance(address, value),
-            EthRequest::SetNonce(address, value) => self.set_nonce(address, value),
-            EthRequest::SetCode(address, bytes) => self.set_code(address, bytes),
+            EthRequest::SetBalance(address, value) => {
+                self.set_balance(address, value).to_rpc_result()
+            }
+            EthRequest::SetNonce(address, value) => self.set_nonce(address, value).to_rpc_result(),
+            EthRequest::SetCode(address, bytes) => self.set_code(address, bytes).to_rpc_result(),
             EthRequest::SetStorageAt(address, key, value) => {
-                self.set_storage_at(address, key, value)
+                self.set_storage_at(address, key, value).to_rpc_result()
+            }
+            EthRequest::Mine(blocks, interval) => {
+                if blocks.is_some_and(|b| u64::try_from(b).is_err()) {
+                    return ResponseResult::Error(RpcError::invalid_params(
+                        "The number of blocks is too large",
+                    ));
+                }
+                if interval.is_some_and(|i| u64::try_from(i).is_err()) {
+                    return ResponseResult::Error(RpcError::invalid_params(
+                        "The interval between blocks is too large",
+                    ));
+                }
+                self.mining_engine
+                    .mine(blocks.map(|b| b.to()), interval.map(|i| Duration::from_secs(i.to())))
+                    .await
+                    .to_rpc_result()
+            }
+            EthRequest::SetIntervalMining(interval) => self
+                .mining_engine
+                .set_interval_mining(Duration::from_secs(interval))
+                .to_rpc_result(),
+            EthRequest::GetIntervalMining(()) => {
+                self.mining_engine.get_interval_mining().to_rpc_result()
+            }
+            EthRequest::GetAutoMine(()) => self.mining_engine.get_auto_mine().to_rpc_result(),
+            EthRequest::SetAutomine(enabled) => {
+                self.mining_engine.set_auto_mine(enabled).to_rpc_result()
+            }
+            EthRequest::EvmMine(mine) => {
+                self.mining_engine.evm_mine(mine.and_then(|p| p.params)).await.to_rpc_result()
+            }
+            EthRequest::EvmMineDetailed(_mine) => ResponseResult::Error(RpcError::internal_error()),
+            //------- TimeMachine---------
+            EthRequest::EvmSetBlockTimeStampInterval(time) => self
+                .mining_engine
+                .set_block_timestamp_interval(Duration::from_secs(time))
+                .to_rpc_result(),
+            EthRequest::EvmRemoveBlockTimeStampInterval(()) => {
+                self.mining_engine.remove_block_timestamp_interval().to_rpc_result()
+            }
+            EthRequest::EvmSetNextBlockTimeStamp(time) => {
+                if time >= U256::from(u64::MAX) {
+                    return ResponseResult::Error(RpcError::invalid_params(
+                        "The timestamp is too big",
+                    ))
+                }
+                let time = time.to::<u64>();
+                self.mining_engine
+                    .set_next_block_timestamp(Duration::from_secs(time))
+                    .to_rpc_result()
+            }
+            EthRequest::EvmIncreaseTime(time) => self
+                .mining_engine
+                .increase_time(Duration::from_secs(time.try_into().unwrap_or(0)))
+                .to_rpc_result(),
+            EthRequest::EvmSetTime(timestamp) => {
+                if timestamp >= U256::from(u64::MAX) {
+                    return ResponseResult::Error(RpcError::invalid_params(
+                        "The timestamp is too big",
+                    ))
+                }
+                // Make sure here we are not traveling back in time.
+                let time = timestamp.to::<u64>();
+                self.mining_engine.set_time(Duration::from_secs(time)).to_rpc_result()
+            }
+            EthRequest::SetLogging(enabled) => {
+                node_info!("anvil_setLoggingEnabled");
+                self.logging_manager.set_enabled(enabled);
+                ResponseResult::Success(serde_json::Value::Bool(true))
             }
             EthRequest::SetChainId(chain_id) => self.set_chain_id(chain_id),
             EthRequest::SetLogging(enabled) => self.set_logging(enabled),
             _ => Err(Error::RpcUnimplemented),
-        }
-        .to_rpc_result();
+        };
 
         if let ResponseResult::Error(err) = &res {
             node_info!("\nRPC request failed:");
