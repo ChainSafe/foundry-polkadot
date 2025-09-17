@@ -68,7 +68,7 @@ fn find_contract_by_hash(output: &ProjectCompileOutput, target_hash: &str) -> Op
 }
 
 /// Handles factory dependencies for a contract deployment
-async fn handle_factory_dependencies(
+async fn upload_factory_dependencies(
     output: &ProjectCompileOutput,
     config: &Config,
     private_key: &str,
@@ -292,10 +292,10 @@ impl CreateArgs {
         let provider = utils::get_provider(&config)?;
 
         // Handle factory dependencies before deploying the main contract
-        if self.broadcast {
+        if self.broadcast && self.build.compiler.resolc_opts.resolc_compile.unwrap_or_default() {
             let private_key =
                 self.eth.wallet.raw.private_key.clone().ok_or_eyre("Private key not provided")?;
-            handle_factory_dependencies(&output, &config, &private_key).await?;
+            upload_factory_dependencies(&output, &config, &private_key).await?;
         }
 
         // respect chain, if set explicitly via cmd args
