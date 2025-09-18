@@ -88,7 +88,7 @@ pub fn run_command(args: Anvil) -> Result<()> {
 
     let (anvil_config, substrate_config) = args.node.into_node_config()?;
 
-    let substrate_client = opts::SubstrateCli { anvil_config: anvil_config.clone() };
+    let substrate_client = opts::SubstrateCli { genesis_config: anvil_config.clone().into() };
 
     let tokio_runtime = build_runtime()?;
 

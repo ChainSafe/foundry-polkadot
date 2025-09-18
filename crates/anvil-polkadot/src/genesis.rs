@@ -37,8 +37,6 @@ pub struct GenesisConfig {
     pub chain_id: u64,
     /// The initial timestamp for the genesis block
     pub timestamp: u64,
-    /// The genesis block author address.
-    pub coinbase: Option<Address>,
     /// All accounts that should be initialised at genesis with their info.
     pub alloc: Option<BTreeMap<Address, GenesisAccount>>,
     /// The initial number for the genesis block
@@ -54,7 +52,6 @@ impl From<AnvilNodeConfig> for GenesisConfig {
         Self {
             chain_id: anvil_config.get_chain_id(),
             timestamp: anvil_config.get_genesis_timestamp(),
-            coinbase: anvil_config.genesis.as_ref().map(|g| g.coinbase),
             alloc: anvil_config.genesis.as_ref().map(|g| g.alloc.clone()),
             number: anvil_config.get_genesis_number(),
             base_fee_per_gas: anvil_config.get_base_fee(),
@@ -78,25 +75,37 @@ impl GenesisConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sp_io::hashing::twox_128;
+    use polkadot_sdk::sp_core::twox_128;
 
     #[test]
-    fn test_number_storage_key() {
+    fn test_storage() {
         let system_hash = twox_128(b"System");
         let number_hash = twox_128(b"Number");
         let mut concatenated_number_hash = [0u8; 32];
         concatenated_number_hash[..16].copy_from_slice(&system_hash);
         concatenated_number_hash[16..].copy_from_slice(&number_hash);
-        assert_eq!(BLOCK_NUMBER_KEY, concatenated_number_hash);
-    }
-
-    #[test]
-    fn test_timestamp_storage_key() {
         let timestamp_hash = twox_128(b"Timestamp");
         let now_hash = twox_128(b"Now");
         let mut concatenated_timestamp_hash = [0u8; 32];
         concatenated_timestamp_hash[..16].copy_from_slice(&timestamp_hash);
         concatenated_timestamp_hash[16..].copy_from_slice(&now_hash);
-        assert_eq!(TIMESTAMP_KEY, concatenated_timestamp_hash);
+        let block_number: u64 = 5;
+        let timestamp: u64 = 10;
+        let chain_id: u64 = 42;
+        let genesis_config =
+            GenesisConfig { number: block_number, timestamp, chain_id, ..Default::default() };
+        let genesis_storage = genesis_config.as_storage_key_value();
+        assert!(
+            genesis_storage.contains(&(concatenated_number_hash.to_vec(), block_number.encode())),
+            "Block number not found in genesis key-value storage"
+        );
+        assert!(
+            genesis_storage.contains(&(concatenated_timestamp_hash.to_vec(), timestamp.encode())),
+            "Timestamp not found in genesis key-value storage"
+        );
+        assert!(
+            genesis_storage.contains(&(CHAIN_ID_KEY.to_vec(), chain_id.encode())),
+            "Chain id not found in genesis key-value storage"
+        );
     }
 }

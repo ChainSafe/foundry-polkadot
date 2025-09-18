@@ -134,7 +134,6 @@ clap_complete_fig = "4"
 subxt = "0.41.0"
 subxt-signer = "0.41.0"
 tokio-stream = "0.1.17"
-sp-io = "42.0.0"
 
 [dev-dependencies]
 alloy-provider = { workspace = true, features = ["txpool-api"] }

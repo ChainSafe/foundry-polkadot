@@ -60,7 +60,7 @@ impl TestNode {
             Some(_) => {}
         }
 
-        let substrate_client = SubstrateCli { anvil_config: anvil_config.clone() };
+        let substrate_client = SubstrateCli { genesis_config: anvil_config.clone().into() };
         let config = substrate_config.create_configuration(&substrate_client, handle.clone())?;
         let (service, api) = spawn(anvil_config, config, LoggingManager::default()).await?;
 

@@ -1,4 +1,4 @@
-use crate::{config::AnvilNodeConfig, genesis::GenesisConfig};
+use crate::genesis::GenesisConfig;
 use polkadot_sdk::{
     sc_chain_spec::{ChainSpec, GetExtension},
     sc_executor::HostFunctions,
@@ -28,21 +28,6 @@ where
         self.inner.assimilate_storage(storage)?;
         storage.top.extend(self.genesis_config.as_storage_key_value());
         Ok(())
-    }
-}
-
-// Inherit all methods defined on GenericChainSpec.
-impl<E, EHF> std::ops::Deref for DevelopmentChainSpec<E, EHF> {
-    type Target = GenericChainSpec<E, EHF>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.inner
-    }
-}
-
-impl<E, EHF> std::ops::DerefMut for DevelopmentChainSpec<E, EHF> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.inner
     }
 }
 
@@ -116,13 +101,6 @@ where
     }
 }
 
-impl<E: serde::de::DeserializeOwned, EHF> DevelopmentChainSpec<E, EHF> {
-    pub fn from_json_file(path: std::path::PathBuf) -> Result<Self, String> {
-        let inner = GenericChainSpec::from_json_file(path)?;
-        Ok(Self { inner, genesis_config: GenesisConfig::default() })
-    }
-}
-
 fn props() -> Properties {
     let mut properties = Properties::new();
     properties.insert("tokenDecimals".to_string(), 12.into());
@@ -131,7 +109,7 @@ fn props() -> Properties {
 }
 
 pub fn development_chain_spec(
-    anvil_config: AnvilNodeConfig,
+    genesis_config: GenesisConfig,
 ) -> Result<DevelopmentChainSpec, String> {
     let inner = GenericChainSpec::builder(
         WASM_BINARY.expect("Development wasm not available"),
@@ -143,5 +121,5 @@ pub fn development_chain_spec(
     .with_genesis_config_preset_name(sp_genesis_builder::DEV_RUNTIME_PRESET)
     .with_properties(props())
     .build();
-    Ok(DevelopmentChainSpec { inner, genesis_config: GenesisConfig::from(anvil_config) })
+    Ok(DevelopmentChainSpec { inner, genesis_config })
 }
