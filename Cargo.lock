@@ -1255,6 +1255,7 @@ dependencies = [
  "rand 0.8.5",
  "serde",
  "serde_json",
+ "sp-io",
  "substrate-runtime",
  "subxt",
  "subxt-signer",

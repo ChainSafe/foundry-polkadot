@@ -54,7 +54,7 @@ impl From<AnvilNodeConfig> for GenesisConfig {
         Self {
             chain_id: anvil_config.get_chain_id(),
             timestamp: anvil_config.get_genesis_timestamp(),
-            coinbase: anvil_config.genesis.as_ref().map(|g| g.coinbase.clone()),
+            coinbase: anvil_config.genesis.as_ref().map(|g| g.coinbase),
             alloc: anvil_config.genesis.as_ref().map(|g| g.alloc.clone()),
             number: anvil_config.get_genesis_number(),
             base_fee_per_gas: anvil_config.get_base_fee(),
@@ -65,10 +65,11 @@ impl From<AnvilNodeConfig> for GenesisConfig {
 
 impl GenesisConfig {
     pub fn as_storage_key_value(&self) -> Vec<(Vec<u8>, Vec<u8>)> {
-        let mut storage = Vec::new();
-        storage.push((CHAIN_ID_KEY.to_vec(), self.chain_id.encode()));
-        storage.push((TIMESTAMP_KEY.to_vec(), self.timestamp.encode()));
-        storage.push((BLOCK_NUMBER_KEY.to_vec(), self.number.encode()));
+        let storage = vec![
+            (CHAIN_ID_KEY.to_vec(), self.chain_id.encode()),
+            (TIMESTAMP_KEY.to_vec(), self.timestamp.encode()),
+            (BLOCK_NUMBER_KEY.to_vec(), self.number.encode()),
+        ];
         // TODO: add other fields
         storage
     }

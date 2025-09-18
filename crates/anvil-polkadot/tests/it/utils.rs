@@ -9,9 +9,9 @@ use anvil_polkadot::{
     substrate_node::service::Service,
 };
 use anvil_rpc::response::ResponseResult;
+use codec::Decode;
 use eyre::{Result, WrapErr};
 use futures::{channel::oneshot, StreamExt};
-use parity_scale_codec::Decode;
 use polkadot_sdk::{
     pallet_revive_eth_rpc::subxt_client::{self, system::calls::types::Remark},
     polkadot_sdk_frame::traits::Header,
@@ -60,7 +60,7 @@ impl TestNode {
             Some(_) => {}
         }
 
-        let substrate_client = SubstrateCli {};
+        let substrate_client = SubstrateCli { anvil_config: anvil_config.clone() };
         let config = substrate_config.create_configuration(&substrate_client, handle.clone())?;
         let (service, api) = spawn(anvil_config, config, LoggingManager::default()).await?;
 
