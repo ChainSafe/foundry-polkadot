@@ -14,7 +14,7 @@ use foundry_cheatcodes::{
     Broadcast, BroadcastableTransactions, CheatcodeInspectorStrategy,
     CheatcodeInspectorStrategyContext, CheatcodeInspectorStrategyRunner, CheatsConfig, CheatsCtxt,
     CommonCreateInput, Ecx, EvmCheatcodeInspectorStrategyRunner, InnerEcx, Result,
-    Vm::{getNonce_0Call, pvmCall, setNonceCall, setNonceUnsafeCall},
+    Vm::{getNonce_0Call, pvmCall, setNonceCall, setNonceUnsafeCall, loadCall},
 };
 
 use polkadot_sdk::{
@@ -164,6 +164,16 @@ impl CheatcodeInspectorStrategyRunner for PvmCheatcodeInspectorStrategyRunner {
                     })
                 });
                 Ok(u64::from(nonce).abi_encode())
+            }
+            t if using_pvm && is::<loadCall>(t) => {
+                let &loadCall { target , slot } = cheatcode.as_any().downcast_ref().unwrap();
+                let target_address_h160 = H160::from_slice(target.as_slice());
+                let storage_value = execute_with_externalities(|externalities| {
+                    externalities.execute_with(|| {
+                        Pallet::<Runtime>::get_storage(target_address_h160, slot.into())
+                    })
+                });
+                Ok(storage_value)
             }
             // Not custom, just invoke the default behavior
             _ => cheatcode.dyn_apply(ccx, executor),
