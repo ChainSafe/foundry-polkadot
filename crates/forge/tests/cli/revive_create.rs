@@ -115,6 +115,68 @@ constructor(Point[] memory _points) {}
     "src/TupleArrayConstructorContract.sol:TupleArrayConstructorContract".to_string()
 }
 
+fn setup_with_factory_pattern(prj: &TestProject) -> String {
+    prj.add_source(
+        "Child.sol",
+        r#"
+pragma solidity ^0.8.20;
+
+contract Child {
+    uint256 public x;
+
+    constructor() {
+        x = 1;
+    }
+}
+"#,
+    )
+    .unwrap();
+    prj.add_source(
+        "Factory.sol",
+        r#"
+pragma solidity ^0.8.20;
+
+import "./Child.sol";
+
+contract Factory {
+    constructor() {
+        new Child();
+    }
+}
+"#,
+    )
+    .unwrap();
+
+    "src/Factory.sol:Factory".to_string()
+}
+
+fn setup_with_library(prj: &TestProject) -> String {
+    prj.add_source(
+        "Library.sol",
+        r#"
+// SPDX-License-Identifier: GPL-3.0
+
+pragma solidity >=0.7.0 <0.9.0;
+
+library Assert {
+    function equal(uint256 a, uint256 b) internal pure returns (bool result) {
+    result = (a == b);
+  }
+}
+
+contract TestAssert {
+    function checkEquality(uint256 a, uint256 b) public pure returns (string memory) {
+        Assert.equal(a, b);
+        return "Values are equal";
+    }
+}
+"#,
+    )
+    .unwrap();
+
+    "src/Library.sol:TestAssert".to_string()
+}
+
 /// configures the `TestProject` with the given closure and calls the `forge create` command
 fn create_on_chain<F>(
     network_args: Option<Vec<String>>,
@@ -242,6 +304,32 @@ forgetest_serial!(can_create_with_constructor_args_on_polkadot_localnode, |prj, 
             prj,
             cmd,
             setup_with_constructor,
+            CREATE_RESPONSE_PATTERN,
+        );
+    }
+});
+
+forgetest_serial!(can_create_with_factory_deps_on_polkadot_localnode, |prj, cmd| {
+    if let Ok(_node) = tokio::runtime::Runtime::new().unwrap().block_on(PolkadotNode::start()) {
+        create_on_chain(
+            localnode_args(),
+            None,
+            prj,
+            cmd,
+            setup_with_factory_pattern,
+            CREATE_RESPONSE_PATTERN,
+        );
+    }
+});
+
+forgetest_serial!(can_create_with_library_deps_on_polkadot_localnode, |prj, cmd| {
+    if let Ok(_node) = tokio::runtime::Runtime::new().unwrap().block_on(PolkadotNode::start()) {
+        create_on_chain(
+            localnode_args(),
+            None,
+            prj,
+            cmd,
+            setup_with_library,
             CREATE_RESPONSE_PATTERN,
         );
     }
