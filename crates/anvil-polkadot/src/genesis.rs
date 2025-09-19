@@ -40,7 +40,7 @@ pub struct GenesisConfig {
     /// All accounts that should be initialised at genesis with their info.
     pub alloc: Option<BTreeMap<Address, GenesisAccount>>,
     /// The initial number for the genesis block
-    pub number: u64,
+    pub number: u32,
     /// The genesis header base fee
     pub base_fee_per_gas: u64,
     /// The genesis header gas limit.
@@ -53,7 +53,7 @@ impl From<AnvilNodeConfig> for GenesisConfig {
             chain_id: anvil_config.get_chain_id(),
             timestamp: anvil_config.get_genesis_timestamp(),
             alloc: anvil_config.genesis.as_ref().map(|g| g.alloc.clone()),
-            number: anvil_config.get_genesis_number(),
+            number: anvil_config.get_genesis_number() as u32,
             base_fee_per_gas: anvil_config.get_base_fee(),
             gas_limit: anvil_config.gas_limit,
         }
