@@ -1,10 +1,13 @@
-use crate::{logging::LoggingManager, substrate_node::service::Service};
+use crate::{config::AnvilNodeConfig, logging::LoggingManager, substrate_node::service::Service};
+use alloy_signer_local::LocalSigner;
 use anvil_core::eth::EthRequest;
 use anvil_rpc::response::ResponseResult;
 use futures::channel::{mpsc, oneshot};
 use server::ApiServer;
 
+pub mod convert;
 mod error;
+mod rpc;
 mod server;
 
 pub type ApiHandle = mpsc::Sender<ApiRequest>;

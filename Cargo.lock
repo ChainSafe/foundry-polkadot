@@ -1230,6 +1230,7 @@ dependencies = [
  "anvil-core",
  "anvil-rpc",
  "anvil-server",
+ "async-stream",
  "async-trait",
  "axum",
  "chrono",
