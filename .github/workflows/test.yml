@@ -33,7 +33,7 @@ jobs:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
       - uses: dtolnay/rust-toolchain@stable
         with:
-          target: wasm32-unknown-unknown
+          target: wasm32v1-none
           components: rust-src
           toolchain: nightly-x86_64-unknown-linux-gnu
       - name: Build documentation
@@ -60,7 +60,7 @@ jobs:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
       - uses: dtolnay/rust-toolchain@stable
         with:
-          target: wasm32-unknown-unknown
+          target: wasm32v1-none
           components: rust-src
           toolchain: stable
       - run: cargo test --workspace --doc
@@ -84,7 +84,7 @@ jobs:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
       - uses: dtolnay/rust-toolchain@stable
         with:
-          target: wasm32-unknown-unknown
+          target: wasm32v1-none
           components: rust-src
           toolchain: nightly-x86_64-unknown-linux-gnu
       - run: cargo clippy --workspace --all-targets --all-features
@@ -128,7 +128,7 @@ jobs:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
       - uses: dtolnay/rust-toolchain@stable
         with:
-          target: wasm32-unknown-unknown
+          target: wasm32v1-none
           components: rust-src
           toolchain: stable
       # Exclude substrate-runtime because it can only be compiled for wasm32 without the std feature.
