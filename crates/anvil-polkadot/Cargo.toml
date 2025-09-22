@@ -33,6 +33,7 @@ polkadot-sdk = { git = "https://github.com/paritytech/polkadot-sdk.git", branch 
 	"sc-client-api",
 	"sc-client-db",
 	"sc-consensus",
+	"sc-consensus-babe",
 	"sc-consensus-manual-seal",
     "sc-executor",
 	"sc-executor-common",
@@ -99,6 +100,7 @@ alloy-chains.workspace = true
 alloy-genesis.workspace = true
 alloy-trie.workspace = true
 op-alloy-consensus = { workspace = true, features = ["serde"] }
+hex = "0.4"
 
 # axum related
 axum.workspace = true
@@ -125,7 +127,11 @@ tempfile.workspace = true
 itertools.workspace = true
 rand_08.workspace = true
 eyre.workspace = true
+<<<<<<< HEAD
 lru = "0.16.0"
+=======
+jsonrpsee = { version = "0.24", features = ["http-client"] }
+>>>>>>> 5dfcea7c1 (Fork runtime and build chainspec)
 
 # cli
 clap = { version = "4", features = [

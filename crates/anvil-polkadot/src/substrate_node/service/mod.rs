@@ -14,10 +14,28 @@ use polkadot_sdk::{
         self, Configuration, RpcHandlers, SpawnTaskHandle, TaskManager,
         error::Error as ServiceError,
     },
-    sc_transaction_pool, sp_timestamp,
+    sp_wasm_interface::ExtendedHostFunctions,
+    sc_transaction_pool::{self, TransactionPoolWrapper},
+    sc_utils::mpsc::tracing_unbounded,
+    sc_chain_spec,
+    sp_io,
+    sp_core::storage::well_known_keys,
+    sp_keystore::KeystorePtr,
+    sp_timestamp,
+    substrate_frame_rpc_system::SystemApiServer,
 };
 use std::sync::Arc;
 use tokio_stream::wrappers::ReceiverStream;
+use tokio::runtime::Builder as TokioRtBuilder;
+
+use serde_json::{json, Map, Value};
+
+use jsonrpsee::http_client::{HttpClient, HttpClientBuilder, HeaderMap, HeaderValue};
+use jsonrpsee::core::client::ClientT as JsonClientT;
+use jsonrpsee::rpc_params;
+use hex;
+
+use crate::AnvilNodeConfig;
 
 pub use backend::{BackendError, BackendWithOverlay, StorageOverrides};
 pub use client::Client;
@@ -45,10 +63,69 @@ pub struct Service {
     pub genesis_block_number: u64,
 }
 
+async fn resolve_fork_hash_http(client: &HttpClient, fork_block_hash: Option<String>) -> eyre::Result<String> {
+    if let Some(h) = fork_block_hash { return Ok(h); }
+    let res: String = client.request("chain_getBlockHash", rpc_params![]).await?;
+    Ok(res)
+}
+
+async fn fetch_runtime_code_at_http(client: &HttpClient, at_hex: &str) -> eyre::Result<Vec<u8>> {
+    let key_hex = format!("0x{}", hex::encode(well_known_keys::CODE));
+    let res: Option<String> = client
+        .request("state_getStorage", rpc_params![key_hex, at_hex])
+        .await?;
+    let Some(code_hex) = res else { eyre::bail!("state_getStorage(:code) returned None at {at_hex}"); };
+    let code_hex = code_hex.strip_prefix("0x").unwrap_or(&code_hex);
+    Ok(hex::decode(code_hex)?)
+}
+
+fn build_forked_chainspec_from_json(
+    config: &Configuration,
+    wasm_code: Vec<u8>,
+) -> sc_service::error::Result<Box<dyn sc_chain_spec::ChainSpec>> {
+    let storage = config
+        .chain_spec
+        .as_storage_builder()
+        .build_storage()
+        .map_err(|e| ServiceError::Other(format!("build_storage failed: {e}")))?;
+
+    let mut top_map: Map<String, Value> = Map::new();
+    for (k, v) in storage.top.into_iter() {
+        let key_hex = format!("0x{}", hex::encode(k));
+        let val_hex = format!("0x{}", hex::encode(v));
+        top_map.insert(key_hex, Value::String(val_hex));
+    }
+    let code_key = format!("0x{}", hex::encode(well_known_keys::CODE));
+    top_map.insert(code_key, Value::String(format!("0x{}", hex::encode(wasm_code))));
+
+    let children_default = serde_json::Map::<String, Value>::new();
+    let spec_json = json!({
+        "name": "Anvil Polkadot (Forked)",
+        "id": "anvil-polkadot-forked",
+        "chainType": "Development",
+        "bootNodes": [],
+        "telemetryEndpoints": null,
+        "protocolId": null,
+        "properties": null,
+        "codeSubstitutes": {},
+        "consensusEngine": null,
+        "genesis": { "raw": { "top": top_map, "childrenDefault": children_default }}
+    });
+
+    let bytes = serde_json::to_vec(&spec_json)
+        .map_err(|e| ServiceError::Other(format!("serialize spec json failed: {e}")))?;
+
+    type EmptyExt = Option<()>;
+    let new_spec: sc_chain_spec::GenericChainSpec<EmptyExt> =
+        sc_chain_spec::GenericChainSpec::from_json_bytes(bytes)
+            .map_err(|e| ServiceError::Other(format!("from_json_bytes failed: {e}")))?;
+    Ok(Box::new(new_spec))
+}
+
 /// Builds a new service for a full client.
 pub fn new(
     anvil_config: &AnvilNodeConfig,
-    config: Configuration,
+    mut config: Configuration,
 ) -> Result<(Service, TaskManager), ServiceError> {
     let storage_overrides = Arc::new(Mutex::new(StorageOverrides::default()));
 
@@ -58,6 +135,36 @@ pub fn new(
         sc_service::new_wasm_executor(&config.executor),
         storage_overrides.clone(),
     )?;
+    if let Some(ref fork_url) = anvil_config.fork_url {
+        let http_url = fork_url.clone();
+        let fork_block_hash = anvil_config.fork_block_hash.clone();
+
+        let wasm_code = std::thread::spawn(move || -> eyre::Result<Vec<u8>> {
+            let rt = TokioRtBuilder::new_current_thread()
+                .enable_all()
+                .build()
+                .map_err(|e| eyre::eyre!("tokio rt build error: {e}"))?;
+
+            rt.block_on(async move {
+                let mut headers = HeaderMap::new();
+                headers.insert("Accept-Encoding", HeaderValue::from_static("gzip, deflate, br"));
+
+                let http = HttpClientBuilder::default()
+                    .set_headers(headers)
+                    .build(http_url)
+                    .map_err(|e| eyre::eyre!("http client build error: {e}"))?;
+
+                let at_hex = resolve_fork_hash_http(&http, fork_block_hash).await?;
+                fetch_runtime_code_at_http(&http, &at_hex).await
+            })
+        })
+        .join()
+        .map_err(|_| ServiceError::Other("tokio thread panicked".into()))?
+        .map_err(|e| ServiceError::Other(format!("fork fetch failed: {e}")))?;
+
+        let spec = build_forked_chainspec_from_json(&config, wasm_code)?;
+        config.chain_spec = spec;
+    }
 
     let transaction_pool = Arc::from(
         sc_transaction_pool::Builder::new(
@@ -69,7 +176,6 @@ pub fn new(
         .build(),
     );
 
-    // Inform the tx pool about imported and finalized blocks.
     task_manager.spawn_handle().spawn(
         "txpool-notifications",
         Some("transaction-pool"),
@@ -121,10 +227,19 @@ pub fn new(
         None,
     );
 
-    let create_inherent_data_providers = {
-        move |_, ()| {
-            let next_timestamp = time_manager.next_timestamp();
-            async move { Ok(sp_timestamp::InherentDataProvider::new(next_timestamp.into())) }
+    // Implement a dummy block production mechanism for now, just build an instantly finalized block
+    // every 6 seconds. This will have to change.
+    let default_block_time = 6000;
+    let (mut sink, commands_stream) = futures::channel::mpsc::channel(1024);
+    task_manager.spawn_handle().spawn("block_authoring", "anvil-polkadot", async move {
+        loop {
+            futures_timer::Delay::new(std::time::Duration::from_millis(default_block_time)).await;
+            let _ = sink.try_send(sc_consensus_manual_seal::EngineCommand::SealNewBlock {
+                create_empty: true,
+                finalize: true,
+                parent_hash: None,
+                sender: None,
+            });
         }
     };
 

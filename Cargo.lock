@@ -1210,12 +1210,24 @@ dependencies = [
  "foundry-test-utils",
  "futures",
  "futures-timer",
+ "hex",
  "hyper 1.6.0",
  "itertools 0.14.0",
+<<<<<<< HEAD
  "jsonrpsee",
  "libsecp256k1",
+<<<<<<< HEAD
  "lru 0.16.0",
+=======
+=======
+<<<<<<< HEAD
+>>>>>>> cea02c557 (Fork runtime and build chainspec)
+>>>>>>> 5dfcea7c1 (Fork runtime and build chainspec)
  "op-alloy-consensus 0.17.2",
+=======
+ "jsonrpsee",
+ "op-alloy-consensus",
+>>>>>>> 6de685340 (Fork runtime and build chainspec)
  "op-alloy-rpc-types",
  "parity-scale-codec",
  "parking_lot 0.12.4",
@@ -9216,6 +9228,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "jsonrpsee-http-client"
+version = "0.24.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c872b6c9961a4ccc543e321bb5b89f6b2d2c7fe8b61906918273a3333c95400c"
+dependencies = [
+ "async-trait",
+ "base64 0.22.1",
+ "http-body 1.0.1",
+ "hyper 1.6.0",
+ "hyper-rustls",
+ "hyper-util",
+ "jsonrpsee-core",
+ "jsonrpsee-types",
+ "rustls",
+ "rustls-platform-verifier",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tokio",
+ "tower 0.4.13",
+ "tracing",
+ "url",
+]
+
+[[package]]
 name = "jsonrpsee-proc-macros"
 version = "0.24.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -14352,6 +14389,7 @@ dependencies = [
  "sc-client-api",
  "sc-client-db",
  "sc-consensus",
+ "sc-consensus-babe",
  "sc-consensus-manual-seal",
  "sc-executor",
  "sc-executor-common",
