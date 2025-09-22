@@ -89,7 +89,7 @@ mod tests {
         let mut concatenated_timestamp_hash = [0u8; 32];
         concatenated_timestamp_hash[..16].copy_from_slice(&timestamp_hash);
         concatenated_timestamp_hash[16..].copy_from_slice(&now_hash);
-        let block_number: u64 = 5;
+        let block_number: u32 = 5;
         let timestamp: u64 = 10;
         let chain_id: u64 = 42;
         let genesis_config =
