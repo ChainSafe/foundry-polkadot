@@ -19,7 +19,6 @@ use polkadot_sdk::{
     sc_utils::mpsc::tracing_unbounded,
     sc_chain_spec,
     sp_io,
-    sp_core::storage::well_known_keys,
     sp_keystore::KeystorePtr,
     sp_timestamp,
     substrate_frame_rpc_system::SystemApiServer,
@@ -33,7 +32,6 @@ use serde_json::{json, Map, Value};
 use jsonrpsee::http_client::{HttpClient, HttpClientBuilder, HeaderMap, HeaderValue};
 use jsonrpsee::core::client::ClientT as JsonClientT;
 use jsonrpsee::rpc_params;
-use hex;
 
 use crate::AnvilNodeConfig;
 
@@ -69,35 +67,46 @@ async fn resolve_fork_hash_http(client: &HttpClient, fork_block_hash: Option<Str
     Ok(res)
 }
 
-async fn fetch_runtime_code_at_http(client: &HttpClient, at_hex: &str) -> eyre::Result<Vec<u8>> {
-    let key_hex = format!("0x{}", hex::encode(well_known_keys::CODE));
-    let res: Option<String> = client
-        .request("state_getStorage", rpc_params![key_hex, at_hex])
+async fn fetch_sync_spec_http(client: &HttpClient, at_hex_opt: Option<String>) -> eyre::Result<Vec<u8>> {
+    let raw = true;
+    let spec_json: serde_json::Value = client
+        .request("sync_state_genSyncSpec", rpc_params![raw, at_hex_opt])
         .await?;
-    let Some(code_hex) = res else { eyre::bail!("state_getStorage(:code) returned None at {at_hex}"); };
-    let code_hex = code_hex.strip_prefix("0x").unwrap_or(&code_hex);
-    Ok(hex::decode(code_hex)?)
+    Ok(serde_json::to_vec(&spec_json)?)
 }
 
-fn build_forked_chainspec_from_json(
-    config: &Configuration,
-    wasm_code: Vec<u8>,
-) -> sc_service::error::Result<Box<dyn sc_chain_spec::ChainSpec>> {
-    let storage = config
-        .chain_spec
-        .as_storage_builder()
-        .build_storage()
-        .map_err(|e| ServiceError::Other(format!("build_storage failed: {e}")))?;
-
-    let mut top_map: Map<String, Value> = Map::new();
-    for (k, v) in storage.top.into_iter() {
-        let key_hex = format!("0x{}", hex::encode(k));
-        let val_hex = format!("0x{}", hex::encode(v));
-        top_map.insert(key_hex, Value::String(val_hex));
+async fn fetch_all_keys_paged(client: &HttpClient, at_hex: &str) -> eyre::Result<Vec<String>> {
+    let mut keys = Vec::new();
+    let mut start_key: Option<String> = None;
+    loop {
+        let page: Vec<String> = client
+            .request(
+                "state_getKeysPaged",
+                rpc_params!["0x", 1000u32, start_key.clone(), at_hex],
+            )
+            .await?;
+        if page.is_empty() { break; }
+        start_key = page.last().cloned();
+        keys.extend(page.into_iter());
     }
-    let code_key = format!("0x{}", hex::encode(well_known_keys::CODE));
-    top_map.insert(code_key, Value::String(format!("0x{}", hex::encode(wasm_code))));
+    Ok(keys)
+}
 
+async fn fetch_top_state_map_http(client: &HttpClient, at_hex: &str) -> eyre::Result<Map<String, Value>> {
+    let keys = fetch_all_keys_paged(client, at_hex).await?;
+    let mut top_map: Map<String, Value> = Map::new();
+    for k in keys {
+        let v: Option<String> = client.request("state_getStorage", rpc_params![k.clone(), at_hex]).await?;
+        if let Some(val_hex) = v {
+            top_map.insert(k, Value::String(val_hex));
+        }
+    }
+    Ok(top_map)
+}
+
+fn build_forked_chainspec_from_raw_top(
+    top_map: Map<String, Value>,
+) -> sc_service::error::Result<Box<dyn sc_chain_spec::ChainSpec>> {
     let children_default = serde_json::Map::<String, Value>::new();
     let spec_json = json!({
         "name": "Anvil Polkadot (Forked)",
@@ -111,10 +120,8 @@ fn build_forked_chainspec_from_json(
         "consensusEngine": null,
         "genesis": { "raw": { "top": top_map, "childrenDefault": children_default }}
     });
-
     let bytes = serde_json::to_vec(&spec_json)
         .map_err(|e| ServiceError::Other(format!("serialize spec json failed: {e}")))?;
-
     type EmptyExt = Option<()>;
     let new_spec: sc_chain_spec::GenericChainSpec<EmptyExt> =
         sc_chain_spec::GenericChainSpec::from_json_bytes(bytes)
@@ -139,31 +146,45 @@ pub fn new(
         let http_url = fork_url.clone();
         let fork_block_hash = anvil_config.fork_block_hash.clone();
 
-        let wasm_code = std::thread::spawn(move || -> eyre::Result<Vec<u8>> {
+        let spec_or_top = std::thread::spawn(move || -> eyre::Result<Result<Vec<u8>, Map<String, Value>>> {
             let rt = TokioRtBuilder::new_current_thread()
                 .enable_all()
                 .build()
                 .map_err(|e| eyre::eyre!("tokio rt build error: {e}"))?;
-
             rt.block_on(async move {
                 let mut headers = HeaderMap::new();
                 headers.insert("Accept-Encoding", HeaderValue::from_static("gzip, deflate, br"));
-
                 let http = HttpClientBuilder::default()
                     .set_headers(headers)
                     .build(http_url)
                     .map_err(|e| eyre::eyre!("http client build error: {e}"))?;
-
                 let at_hex = resolve_fork_hash_http(&http, fork_block_hash).await?;
-                fetch_runtime_code_at_http(&http, &at_hex).await
+                let try_sync = fetch_sync_spec_http(&http, Some(at_hex.clone())).await;
+                match try_sync {
+                    Ok(spec_bytes) => Ok(Ok(spec_bytes)),
+                    Err(_) => {
+                        let top = fetch_top_state_map_http(&http, &at_hex).await?;
+                        Ok(Err(top))
+                    }
+                }
             })
         })
         .join()
         .map_err(|_| ServiceError::Other("tokio thread panicked".into()))?
         .map_err(|e| ServiceError::Other(format!("fork fetch failed: {e}")))?;
 
-        let spec = build_forked_chainspec_from_json(&config, wasm_code)?;
-        config.chain_spec = spec;
+        match spec_or_top {
+            Ok(spec_bytes) => {
+                type EmptyExt = Option<()>;
+                let new_spec: sc_chain_spec::GenericChainSpec<EmptyExt> =
+                    sc_chain_spec::GenericChainSpec::from_json_bytes(spec_bytes)
+                        .map_err(|e| ServiceError::Other(format!("from_json_bytes failed: {e}")))?;
+                config.chain_spec = Box::new(new_spec);
+            }
+            Err(top_map) => {
+                config.chain_spec = build_forked_chainspec_from_raw_top(top_map)?;
+            }
+        }
     }
 
     let transaction_pool = Arc::from(
@@ -227,8 +248,6 @@ pub fn new(
         None,
     );
 
-    // Implement a dummy block production mechanism for now, just build an instantly finalized block
-    // every 6 seconds. This will have to change.
     let default_block_time = 6000;
     let (mut sink, commands_stream) = futures::channel::mpsc::channel(1024);
     task_manager.spawn_handle().spawn("block_authoring", "anvil-polkadot", async move {

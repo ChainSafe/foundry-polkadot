@@ -271,7 +271,6 @@ pub struct ForkArgs {
     #[arg(
         long = "fork-url",
         short = 'f',
-        alias = "rpc-url",
         value_name = "URL",
     )]
     pub fork_url: Option<String>,
