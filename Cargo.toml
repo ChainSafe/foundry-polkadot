@@ -376,6 +376,7 @@ polkadot-sdk = { git = "https://github.com/paritytech/polkadot-sdk.git", branch 
 idna_adapter = "=1.1.0"
 
 [patch.crates-io]
+librocksdb-sys = { git = "https://github.com/rust-rocksdb/rust-rocksdb.git", rev = "1d23d2b" }
 solar-parse = { git = "https://github.com/paradigmxyz/solar", tag = "v0.1.5" }
 solar-sema = { git = "https://github.com/paradigmxyz/solar", tag = "v0.1.5" }
 solar-ast = { git = "https://github.com/paradigmxyz/solar", tag = "v0.1.5" }
