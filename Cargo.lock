@@ -1212,6 +1212,7 @@ dependencies = [
  "futures-timer",
  "hex",
  "hyper 1.6.0",
+ "indicatif",
  "itertools 0.14.0",
 <<<<<<< HEAD
  "jsonrpsee",

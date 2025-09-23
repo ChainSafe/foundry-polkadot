@@ -32,6 +32,7 @@ use serde_json::{json, Map, Value};
 use jsonrpsee::http_client::{HttpClient, HttpClientBuilder, HeaderMap, HeaderValue};
 use jsonrpsee::core::client::ClientT as JsonClientT;
 use jsonrpsee::rpc_params;
+use indicatif::{ProgressBar, ProgressStyle};
 
 use crate::AnvilNodeConfig;
 
@@ -68,16 +69,37 @@ async fn resolve_fork_hash_http(client: &HttpClient, fork_block_hash: Option<Str
 }
 
 async fn fetch_sync_spec_http(client: &HttpClient, at_hex_opt: Option<String>) -> eyre::Result<Vec<u8>> {
+    let pb = ProgressBar::new_spinner();
+    pb.set_style(
+        ProgressStyle::with_template("{spinner:.green} {msg}")
+            .unwrap()
+            .tick_chars("/|\\- "),
+    );
+    pb.enable_steady_tick(std::time::Duration::from_millis(120));
+    pb.set_message("Downloading sync state spec...");
+
     let raw = true;
     let spec_json: serde_json::Value = client
         .request("sync_state_genSyncSpec", rpc_params![raw, at_hex_opt])
         .await?;
+
+    pb.finish_with_message("Sync state spec downloaded ✔");
+
     Ok(serde_json::to_vec(&spec_json)?)
 }
 
 async fn fetch_all_keys_paged(client: &HttpClient, at_hex: &str) -> eyre::Result<Vec<String>> {
+    let pb = ProgressBar::new_spinner();
+    pb.set_style(
+        ProgressStyle::with_template("{spinner:.green} Fetching key pages... {pos} pages collected")
+            .unwrap()
+            .tick_chars("/|\\- "),
+    );
+    pb.enable_steady_tick(std::time::Duration::from_millis(120));
+
     let mut keys = Vec::new();
     let mut start_key: Option<String> = None;
+    let mut page_count: u64 = 0;
     loop {
         let page: Vec<String> = client
             .request(
@@ -88,19 +110,35 @@ async fn fetch_all_keys_paged(client: &HttpClient, at_hex: &str) -> eyre::Result
         if page.is_empty() { break; }
         start_key = page.last().cloned();
         keys.extend(page.into_iter());
+        page_count += 1;
+        pb.set_position(page_count);
     }
+
+    pb.finish_with_message(format!("All keys fetched ✔ (total: {})", keys.len()));
     Ok(keys)
 }
 
 async fn fetch_top_state_map_http(client: &HttpClient, at_hex: &str) -> eyre::Result<Map<String, Value>> {
     let keys = fetch_all_keys_paged(client, at_hex).await?;
+
+    let pb = ProgressBar::new(keys.len() as u64);
+    pb.set_style(
+        ProgressStyle::with_template("[{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} values")
+            .unwrap()
+            .progress_chars("=>-"),
+    );
+    pb.set_message("Downloading values...");
+
     let mut top_map: Map<String, Value> = Map::new();
-    for k in keys {
+    for k in keys.iter() {
         let v: Option<String> = client.request("state_getStorage", rpc_params![k.clone(), at_hex]).await?;
         if let Some(val_hex) = v {
-            top_map.insert(k, Value::String(val_hex));
+            top_map.insert(k.clone(), Value::String(val_hex));
         }
+        pb.inc(1);
     }
+
+    pb.finish_with_message("All values downloaded ✔");
     Ok(top_map)
 }
 
