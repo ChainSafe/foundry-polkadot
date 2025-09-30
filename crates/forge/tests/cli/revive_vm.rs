@@ -1,3 +1,5 @@
+use foundry_compilers::artifacts::EvmVersion;
+
 forgetest!(can_translate_balances_after_switch_to_pvm, |prj, cmd| {
     prj.insert_ds_test();
     prj.insert_vm();
@@ -29,6 +31,7 @@ contract BalanceTranslationTest is DSTest {
 "#,
     )
     .unwrap();
+    prj.update_config(|config| config.evm_version = EvmVersion::Cancun);
 
     let res = cmd.args(["test", "--resolc", "-vvv"]).assert_success();
     res.stderr_eq(str![""]).stdout_eq(str![[r#"
@@ -131,6 +134,7 @@ contract CounterTest is DSTest {
 "#,
     )
     .unwrap();
+    prj.update_config(|config| config.evm_version = EvmVersion::Cancun);
 
     let res = cmd.args(["test", "--resolc", "-vvv"]).assert();
     res.stderr_eq(str![""]).stdout_eq(str![[r#"
@@ -187,6 +191,7 @@ contract SetNonce is DSTest {
 "#,
     )
     .unwrap();
+    prj.update_config(|config| config.evm_version = EvmVersion::Cancun);
 
     let res = cmd.args(["test", "--resolc", "-vvv"]).assert_success();
     res.stderr_eq(str![""]).stdout_eq(str![[r#"
@@ -267,6 +272,66 @@ Ran 1 test suite [ELAPSED]: 1 tests passed, 0 failed, 0 skipped (1 total tests)
 "#]]);
 });
 
+forgetest!(warp_revive, |prj, cmd| {
+    prj.insert_ds_test();
+    prj.insert_vm();
+    prj.insert_console();
+    prj.add_source(
+        "Warp.t.sol",
+        r#"
+import "./test.sol";
+import "./Vm.sol";
+import {console} from "./console.sol";
+
+contract Warp is DSTest {
+  Vm constant vm = Vm(HEVM_ADDRESS);
+
+  function test_Warp() public {
+      vm.pvm(true);
+      uint256 original = block.timestamp;
+      vm.warp(100);
+      uint256 newValue = block.timestamp;
+      assert(original != newValue);
+      assertEq(newValue, 100);
+  }
+}
+"#,
+    )
+    .unwrap();
+
+    cmd.env("RUST_LOG", "revive_strategy");
+    let res = cmd.args(["test", "--resolc", "-vvv", "--resolc-startup"]).assert_success();
+    res.stderr_eq(str![""]).stdout_eq(str![[r#"
+[COMPILING_FILES] with [SOLC_VERSION]
+[SOLC_VERSION] [ELAPSED]
+Compiler run successful!
+[COMPILING_FILES] with [RESOLC_VERSION]
+[RESOLC_VERSION] [ELAPSED]
+Compiler run successful with warnings:
+Warning: Warning: Your code or one of its dependencies uses the 'extcodesize' instruction, which is
+usually needed in the following cases:
+  1. To detect whether an address belongs to a smart contract.
+  2. To detect whether the deploy code execution has finished.
+Polkadot comes with native account abstraction support (so smart contracts are just accounts
+coverned by code), and you should avoid differentiating between contracts and non-contract
+addresses.
+[FILE]
+[..] INFO revive_strategy::cheatcodes: startup PVM migration initiated
+[..] INFO revive_strategy::cheatcodes: switching to PVM
+[..] INFO revive_strategy::cheatcodes: startup PVM migration completed
+[..] INFO revive_strategy::cheatcodes: cheatcode=pvmCall { enabled: true } using_pvm=true
+[..] INFO revive_strategy::cheatcodes: already in PVM
+[..] INFO revive_strategy::cheatcodes: cheatcode=warpCall { newTimestamp: 100 } using_pvm=true
+
+Ran 1 test for src/Warp.t.sol:Warp
+[PASS] test_Warp() ([GAS])
+Suite result: ok. 1 passed; 0 failed; 0 skipped; [ELAPSED]
+
+Ran 1 test suite [ELAPSED]: 1 tests passed, 0 failed, 0 skipped (1 total tests)
+
+"#]]);
+});
+
 forgetest!(deal, |prj, cmd| {
     prj.insert_ds_test();
     prj.insert_vm();
@@ -321,6 +386,74 @@ addresses.
 
 Ran 1 test for src/Balance.t.sol:Balance
 [PASS] test_Balance() ([GAS])
+Suite result: ok. 1 passed; 0 failed; 0 skipped; [ELAPSED]
+
+Ran 1 test suite [ELAPSED]: 1 tests passed, 0 failed, 0 skipped (1 total tests)
+
+"#]]);
+});
+
+forgetest!(vm_load, |prj, cmd| {
+    prj.insert_ds_test();
+    prj.insert_vm();
+    prj.insert_console();
+    prj.add_source(
+        "Counter.sol",
+        r#"
+  // SPDX-License-Identifier: UNLICENSED
+  pragma solidity ^0.8.13;
+
+  contract Counter {
+      uint256 public number;
+
+      constructor (uint256 number_) {
+        number = number_;
+      }
+  }
+  "#,
+    )
+    .unwrap();
+    prj.add_source(
+        "Load.t.sol",
+        r#"
+import "./test.sol";
+import "./Vm.sol";
+import {console} from "./console.sol";
+import {Counter} from "./Counter.sol";
+
+contract Load is DSTest {
+Vm constant vm = Vm(HEVM_ADDRESS);
+
+function testFuzz_Load(uint256 x) public {
+    vm.pvm(true);
+    Counter counter = new Counter(x);
+    bytes32 res = vm.load(address(counter), bytes32(uint256(0)));
+    assertEq(uint256(res), x);
+}
+}
+"#,
+    )
+    .unwrap();
+
+    let res = cmd.args(["test", "--resolc", "-vvv"]).assert_success();
+    res.stderr_eq(str![""]).stdout_eq(str![[r#"
+[COMPILING_FILES] with [SOLC_VERSION]
+[SOLC_VERSION] [ELAPSED]
+Compiler run successful!
+[COMPILING_FILES] with [RESOLC_VERSION]
+[RESOLC_VERSION] [ELAPSED]
+Compiler run successful with warnings:
+Warning: Warning: Your code or one of its dependencies uses the 'extcodesize' instruction, which is
+usually needed in the following cases:
+  1. To detect whether an address belongs to a smart contract.
+  2. To detect whether the deploy code execution has finished.
+Polkadot comes with native account abstraction support (so smart contracts are just accounts
+coverned by code), and you should avoid differentiating between contracts and non-contract
+addresses.
+[FILE]
+
+Ran 1 test for src/Load.t.sol:Load
+[PASS] testFuzz_Load(uint256) (runs: 256, [AVG_GAS])
 Suite result: ok. 1 passed; 0 failed; 0 skipped; [ELAPSED]
 
 Ran 1 test suite [ELAPSED]: 1 tests passed, 0 failed, 0 skipped (1 total tests)

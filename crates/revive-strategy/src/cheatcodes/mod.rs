@@ -4,39 +4,44 @@ use std::{
     sync::Arc,
 };
 
-use alloy_primitives::{ruint::aliases::U256, Address, Bytes, B256};
+use alloy_primitives::{Address, B256, Bytes, ruint::aliases::U256};
+use alloy_rpc_types::BlobTransactionSidecar;
 use alloy_sol_types::SolValue;
 use foundry_cheatcodes::{
     Broadcast, BroadcastableTransactions, CheatcodeInspectorStrategy,
     CheatcodeInspectorStrategyContext, CheatcodeInspectorStrategyRunner, CheatsConfig, CheatsCtxt,
-    CommonCreateInput, DealRecord, Ecx, EvmCheatcodeInspectorStrategyRunner, InnerEcx, Result,
-    Vm::{dealCall, getNonce_0Call, pvmCall, rollCall, setNonceCall, setNonceUnsafeCall},
+    CommonCreateInput, DealRecord, Ecx, EvmCheatcodeInspectorStrategyRunner, Result,
+    Vm::{
+        dealCall, getNonce_0Call, loadCall, pvmCall, rollCall, setNonceCall, setNonceUnsafeCall,
+        warpCall,
+    },
 };
 use foundry_common::sh_err;
 use foundry_compilers::resolc::dual_compiled_contracts::DualCompiledContracts;
-use revive_env::{AccountId, Runtime, System};
+use revive_env::{AccountId, Runtime, System, Timestamp};
 
 use polkadot_sdk::{
-    frame_support::traits::{fungible::Mutate, Currency},
+    frame_support::traits::{Currency, fungible::Mutate},
     pallet_balances,
     pallet_revive::{
-        self, evm::GasEncoder, AddressMapper, BalanceOf, BalanceWithDust, BumpNonce, Code, Config,
-        DepositLimit, Pallet,
+        self, AddressMapper, BalanceOf, BalanceWithDust, BumpNonce, Code, Config, DepositLimit,
+        Pallet, evm::GasEncoder,
     },
     polkadot_sdk_frame::prelude::OriginFor,
     sp_core::{self, H160},
     sp_weights::Weight,
 };
 
-use revm::{
-    interpreter::{
-        opcode as op, CallInputs, CallOutcome, CreateOutcome, Gas, InstructionResult, Interpreter,
-        InterpreterResult,
-    },
-    primitives::{CreateScheme, SignedAuthorization},
-};
-
 use crate::{execute_with_externalities, trace, tracing::apply_prestate_trace};
+use alloy_eips::eip7702::SignedAuthorization;
+use revm::{
+    bytecode::opcode as op,
+    context::{CreateScheme, JournalTr},
+    interpreter::{
+        CallInputs, CallOutcome, CreateOutcome, Gas, InstructionResult, Interpreter,
+        InterpreterResult, interpreter_types::Jumps,
+    },
+};
 pub trait PvmCheatcodeInspectorStrategyBuilder {
     fn new_pvm(dual_compiled_contracts: DualCompiledContracts, resolc_startup: bool) -> Self;
 }
@@ -90,7 +95,7 @@ impl CheatcodeInspectorStrategyContext for PvmCheatcodeInspectorStrategyContext 
     }
 }
 
-fn set_nonce(address: Address, nonce: u64, ecx: InnerEcx<'_, '_, '_>) {
+fn set_nonce(address: Address, nonce: u64, ecx: Ecx<'_, '_, '_>) {
     execute_with_externalities(|externalities| {
         externalities.execute_with(|| {
             let account_id =
@@ -107,15 +112,13 @@ fn set_nonce(address: Address, nonce: u64, ecx: InnerEcx<'_, '_, '_>) {
             }
         })
     });
-    let account =
-        ecx.journaled_state.load_account(address, &mut ecx.db).expect("account loaded").data;
+    let account = ecx.journaled_state.load_account(address).expect("account loaded").data;
     account.mark_touch();
     account.info.nonce = nonce;
 }
 
-fn set_balance(address: Address, amount: U256, ecx: InnerEcx<'_, '_, '_>) -> U256 {
-    let account =
-        ecx.journaled_state.load_account(address, &mut ecx.db).expect("account loaded").data;
+fn set_balance(address: Address, amount: U256, ecx: Ecx<'_, '_, '_>) -> U256 {
+    let account = ecx.journaled_state.load_account(address).expect("account loaded").data;
     account.mark_touch();
     account.info.balance = amount;
     let amount_pvm = sp_core::U256::from_little_endian(&amount.as_le_bytes()).min(u128::MAX.into());
@@ -140,14 +143,26 @@ fn set_balance(address: Address, amount: U256, ecx: InnerEcx<'_, '_, '_>) -> U25
     U256::from_limbs(old_balance.0)
 }
 
-fn set_block_number(new_height: U256, ecx: InnerEcx<'_, '_, '_>) {
+fn set_block_number(new_height: U256, ecx: Ecx<'_, '_, '_>) {
     // Set block number in EVM context.
-    ecx.env.block.number = new_height;
+    ecx.block.number = new_height;
 
     // Set block number in pallet-revive runtime.
     execute_with_externalities(|externalities| {
         externalities.execute_with(|| {
             System::set_block_number(new_height.try_into().expect("Block number exceeds u64"));
+        })
+    });
+}
+
+fn set_timestamp(new_timestamp: U256, ecx: Ecx<'_, '_, '_>) {
+    // Set timestamp in EVM context.
+    ecx.block.timestamp = new_timestamp;
+
+    // Set timestamp in pallet-revive runtime.
+    execute_with_externalities(|externalities| {
+        externalities.execute_with(|| {
+            Timestamp::set_timestamp(new_timestamp.try_into().expect("Timestamp exceeds u64"));
         })
     });
 }
@@ -166,7 +181,6 @@ impl CheatcodeInspectorStrategyRunner for PvmCheatcodeInspectorStrategyRunner {
         fn is<T: std::any::Any>(t: TypeId) -> bool {
             TypeId::of::<T>() == t
         }
-
         let using_pvm = get_context_ref_mut(ccx.state.strategy.context.as_mut()).using_pvm;
 
         match cheatcode.as_any().type_id() {
@@ -179,7 +193,6 @@ impl CheatcodeInspectorStrategyRunner for PvmCheatcodeInspectorStrategyRunner {
                 } else {
                     todo!("Switch back to EVM");
                 }
-
                 Ok(Default::default())
             }
             t if using_pvm && is::<dealCall>(t) => {
@@ -228,6 +241,30 @@ impl CheatcodeInspectorStrategyRunner for PvmCheatcodeInspectorStrategyRunner {
 
                 Ok(Default::default())
             }
+            t if using_pvm && is::<warpCall>(t) => {
+                let &warpCall { newTimestamp } = cheatcode.as_any().downcast_ref().unwrap();
+
+                tracing::info!(cheatcode = ?cheatcode.as_debug() , using_pvm = ?using_pvm);
+                set_timestamp(newTimestamp, ccx.ecx);
+
+                Ok(Default::default())
+            }
+            t if using_pvm && is::<loadCall>(t) => {
+                tracing::info!(cheatcode = ?cheatcode.as_debug() , using_pvm = ?using_pvm);
+                let &loadCall { target, slot } = cheatcode.as_any().downcast_ref().unwrap();
+                let target_address_h160 = H160::from_slice(target.as_slice());
+                let storage_value = execute_with_externalities(|externalities| {
+                    externalities.execute_with(|| {
+                        Pallet::<Runtime>::get_storage(target_address_h160, slot.into())
+                    })
+                });
+                let result = storage_value
+                    .ok()
+                    .flatten()
+                    .map(|b| B256::from_slice(&b))
+                    .unwrap_or(B256::ZERO);
+                Ok(result.abi_encode())
+            }
             // Not custom, just invoke the default behavior
             _ => cheatcode.dyn_apply(ccx, executor),
         }
@@ -244,7 +281,7 @@ impl CheatcodeInspectorStrategyRunner for PvmCheatcodeInspectorStrategyRunner {
         _ctx: &mut dyn CheatcodeInspectorStrategyContext,
         config: Arc<CheatsConfig>,
         input: &dyn CommonCreateInput,
-        ecx_inner: InnerEcx<'_, '_, '_>,
+        ecx_inner: Ecx<'_, '_, '_>,
         broadcast: &Broadcast,
         broadcastable_transactions: &mut BroadcastableTransactions,
     ) {
@@ -265,10 +302,11 @@ impl CheatcodeInspectorStrategyRunner for PvmCheatcodeInspectorStrategyRunner {
         _ctx: &mut dyn CheatcodeInspectorStrategyContext,
         config: Arc<CheatsConfig>,
         call: &CallInputs,
-        ecx_inner: InnerEcx<'_, '_, '_>,
+        ecx_inner: Ecx<'_, '_, '_>,
         broadcast: &Broadcast,
         broadcastable_transactions: &mut BroadcastableTransactions,
-        active_delegation: &mut Option<SignedAuthorization>,
+        active_delegations: Vec<SignedAuthorization>,
+        active_blob_sidecar: Option<BlobTransactionSidecar>,
     ) {
         // Use EVM implementation for now
         // Only intercept PVM-specific calls when needed in future implementations
@@ -279,7 +317,8 @@ impl CheatcodeInspectorStrategyRunner for PvmCheatcodeInspectorStrategyRunner {
             ecx_inner,
             broadcast,
             broadcastable_transactions,
-            active_delegation,
+            active_delegations,
+            active_blob_sidecar,
         );
     }
 
@@ -310,11 +349,10 @@ impl CheatcodeInspectorStrategyRunner for PvmCheatcodeInspectorStrategyRunner {
             return false;
         }
 
-        let address = match interpreter.current_opcode() {
-            op::SELFBALANCE => interpreter.contract().target_address,
+        let address = match interpreter.bytecode.opcode() {
+            op::SELFBALANCE => interpreter.input.target_address,
             op::BALANCE => {
                 if interpreter.stack.is_empty() {
-                    interpreter.instruction_result = InstructionResult::StackUnderflow;
                     return true;
                 }
 
@@ -332,20 +370,17 @@ impl CheatcodeInspectorStrategyRunner for PvmCheatcodeInspectorStrategyRunner {
         tracing::info!(operation = "get_balance" , using_pvm = ?ctx.using_pvm, target = ?address, balance = ?balance);
 
         // Skip the current BALANCE instruction since we've already handled it
-        match interpreter.stack.push(balance) {
-            Ok(_) => unsafe {
-                interpreter.instruction_pointer = interpreter.instruction_pointer.add(1);
-            },
-            Err(e) => {
-                interpreter.instruction_result = e;
-            }
-        };
+        if interpreter.stack.push(balance) {
+            interpreter.bytecode.relative_jump(1);
+        } else {
+            // stack overflow; nothing else to do here
+        }
 
         false // Let EVM handle all operations
     }
 }
 
-fn select_pvm(ctx: &mut PvmCheatcodeInspectorStrategyContext, data: InnerEcx<'_, '_, '_>) {
+fn select_pvm(ctx: &mut PvmCheatcodeInspectorStrategyContext, data: Ecx<'_, '_, '_>) {
     if ctx.using_pvm {
         tracing::info!("already in PVM");
         return;
@@ -353,9 +388,9 @@ fn select_pvm(ctx: &mut PvmCheatcodeInspectorStrategyContext, data: InnerEcx<'_,
 
     tracing::info!("switching to PVM");
     ctx.using_pvm = true;
-    let persistent_accounts = data.db.persistent_accounts().clone();
+    let persistent_accounts = data.journaled_state.database.persistent_accounts().clone();
     for address in persistent_accounts {
-        let acc = data.load_account(address).expect("just loaded above");
+        let acc = data.journaled_state.load_account(address).expect("just loaded above");
         let amount = acc.data.info.balance;
         let nonce = acc.data.info.nonce;
 
@@ -366,7 +401,9 @@ fn select_pvm(ctx: &mut PvmCheatcodeInspectorStrategyContext, data: InnerEcx<'_,
         let balance = Pallet::<Runtime>::convert_native_to_evm(balance_native);
         let amount_evm = U256::from_limbs(balance.0);
         if amount != amount_evm {
-            let _ = sh_err!("Amount mismatch {amount} != {amount_evm}, Polkadot balances are u128. Test results may be incorrect.");
+            let _ = sh_err!(
+                "Amount mismatch {amount} != {amount_evm}, Polkadot balances are u128. Test results may be incorrect."
+            );
         }
         let min_balance = pallet_balances::Pallet::<Runtime>::minimum_balance();
         execute_with_externalities(|externalities| {
@@ -401,7 +438,7 @@ impl foundry_cheatcodes::CheatcodeInspectorStrategyExt for PvmCheatcodeInspector
     fn revive_try_create(
         &self,
         state: &mut foundry_cheatcodes::Cheatcodes,
-        ecx: InnerEcx<'_, '_, '_>,
+        ecx: Ecx<'_, '_, '_>,
         input: &dyn CommonCreateInput,
         _executor: &mut dyn foundry_cheatcodes::CheatcodesExecutor,
     ) -> Option<CreateOutcome> {
@@ -413,10 +450,20 @@ impl foundry_cheatcodes::CheatcodeInspectorStrategyExt for PvmCheatcodeInspector
 
         if let Some(CreateScheme::Create) = input.scheme() {
             let caller = input.caller();
-            let nonce =
-                ecx.load_account(input.caller()).expect("to load caller account").info.nonce;
+            let nonce = ecx
+                .journaled_state
+                .load_account(input.caller())
+                .expect("to load caller account")
+                .info
+                .nonce;
             let address = caller.create(nonce);
-            if ecx.db.get_test_contract_address().map(|addr| address == addr).unwrap_or_default() {
+            if ecx
+                .journaled_state
+                .database
+                .get_test_contract_address()
+                .map(|addr| address == addr)
+                .unwrap_or_default()
+            {
                 tracing::info!(
                     "running create in EVM, instead of PVM (Test Contract) {:#?}",
                     address
@@ -471,7 +518,7 @@ impl foundry_cheatcodes::CheatcodeInspectorStrategyExt for PvmCheatcodeInspector
                         ),
                         _ => None,
                     };
-                    let bump_nonce = BumpNonce::No;
+                    let bump_nonce = BumpNonce::Yes;
 
                     Pallet::<Runtime>::bare_instantiate(
                         origin,
@@ -494,7 +541,7 @@ impl foundry_cheatcodes::CheatcodeInspectorStrategyExt for PvmCheatcodeInspector
                 res.gas_required,
                 res.storage_deposit.charge_or_zero(),
             );
-        let result = match res.result {
+        let result = match &res.result {
             Ok(result) => {
                 let _ = gas.record_cost(gas_used.as_u64());
 
@@ -502,7 +549,7 @@ impl foundry_cheatcodes::CheatcodeInspectorStrategyExt for PvmCheatcodeInspector
                     CreateOutcome {
                         result: InterpreterResult {
                             result: InstructionResult::Revert,
-                            output: result.result.data.into(),
+                            output: result.result.data.clone().into(),
                             gas,
                         },
                         address: None,
@@ -547,7 +594,7 @@ impl foundry_cheatcodes::CheatcodeInspectorStrategyExt for PvmCheatcodeInspector
     fn revive_try_call(
         &self,
         state: &mut foundry_cheatcodes::Cheatcodes,
-        ecx: InnerEcx<'_, '_, '_>,
+        ecx: Ecx<'_, '_, '_>,
         call: &CallInputs,
         _executor: &mut dyn foundry_cheatcodes::CheatcodesExecutor,
     ) -> Option<CallOutcome> {
@@ -558,7 +605,8 @@ impl foundry_cheatcodes::CheatcodeInspectorStrategyExt for PvmCheatcodeInspector
         }
 
         if ecx
-            .db
+            .journaled_state
+            .database
             .get_test_contract_address()
             .map(|addr| call.bytecode_address == addr)
             .unwrap_or_default()
@@ -603,7 +651,7 @@ impl foundry_cheatcodes::CheatcodeInspectorStrategyExt for PvmCheatcodeInspector
                         evm_value,
                         gas_limit,
                         storage_deposit_limit,
-                        call.input.to_vec(),
+                        call.input.bytes(ecx).to_vec(),
                     )
                 })
             })
