@@ -18,7 +18,6 @@ use polkadot_sdk::{
     sc_transaction_pool::{self, TransactionPoolWrapper},
     sc_utils::mpsc::tracing_unbounded,
     sc_chain_spec,
-    sp_io,
     sp_keystore::KeystorePtr,
     sp_timestamp,
     substrate_frame_rpc_system::SystemApiServer,
@@ -26,6 +25,7 @@ use polkadot_sdk::{
 use std::sync::Arc;
 use tokio_stream::wrappers::ReceiverStream;
 use tokio::runtime::Builder as TokioRtBuilder;
+use cumulus_client_service::ParachainHostFunctions;
 
 use serde_json::{json, Map, Value};
 
