@@ -286,19 +286,19 @@ pub fn new(
         None,
     );
 
-    // let default_block_time = 6000;
-    // let (mut sink, commands_stream) = futures::channel::mpsc::channel(1024);
-    // task_manager.spawn_handle().spawn("block_authoring", "anvil-polkadot", async move {
-    //     loop {
-    //         futures_timer::Delay::new(std::time::Duration::from_millis(default_block_time)).await;
-    //         let _ = sink.try_send(sc_consensus_manual_seal::EngineCommand::SealNewBlock {
-    //             create_empty: true,
-    //             finalize: true,
-    //             parent_hash: None,
-    //             sender: None,
-    //         });
-    //     }
-    // };
+    let default_block_time = 6000;
+    let (mut sink, commands_stream) = futures::channel::mpsc::channel(1024);
+    task_manager.spawn_handle().spawn("block_authoring", "anvil-polkadot", async move {
+        loop {
+            futures_timer::Delay::new(std::time::Duration::from_millis(default_block_time)).await;
+            let _ = sink.try_send(sc_consensus_manual_seal::EngineCommand::SealNewBlock {
+                create_empty: true,
+                finalize: true,
+                parent_hash: None,
+                sender: None,
+            });
+        }
+      });
 
      let create_inherent_data_providers = {
         move |_, ()| {
