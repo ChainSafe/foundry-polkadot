@@ -21,11 +21,11 @@ use polkadot_sdk::{
     sp_keystore::KeystorePtr,
     sp_timestamp,
     substrate_frame_rpc_system::SystemApiServer,
+    cumulus_client_service::ParachainHostFunctions,
 };
 use std::sync::Arc;
 use tokio_stream::wrappers::ReceiverStream;
 use tokio::runtime::Builder as TokioRtBuilder;
-use cumulus_client_service::ParachainHostFunctions;
 
 use serde_json::{json, Map, Value};
 
@@ -286,17 +286,24 @@ pub fn new(
         None,
     );
 
-    let default_block_time = 6000;
-    let (mut sink, commands_stream) = futures::channel::mpsc::channel(1024);
-    task_manager.spawn_handle().spawn("block_authoring", "anvil-polkadot", async move {
-        loop {
-            futures_timer::Delay::new(std::time::Duration::from_millis(default_block_time)).await;
-            let _ = sink.try_send(sc_consensus_manual_seal::EngineCommand::SealNewBlock {
-                create_empty: true,
-                finalize: true,
-                parent_hash: None,
-                sender: None,
-            });
+    // let default_block_time = 6000;
+    // let (mut sink, commands_stream) = futures::channel::mpsc::channel(1024);
+    // task_manager.spawn_handle().spawn("block_authoring", "anvil-polkadot", async move {
+    //     loop {
+    //         futures_timer::Delay::new(std::time::Duration::from_millis(default_block_time)).await;
+    //         let _ = sink.try_send(sc_consensus_manual_seal::EngineCommand::SealNewBlock {
+    //             create_empty: true,
+    //             finalize: true,
+    //             parent_hash: None,
+    //             sender: None,
+    //         });
+    //     }
+    // };
+
+     let create_inherent_data_providers = {
+        move |_, ()| {
+            let next_timestamp = time_manager.next_timestamp();
+            async move { Ok(sp_timestamp::InherentDataProvider::new(next_timestamp.into())) }
         }
     };
 
