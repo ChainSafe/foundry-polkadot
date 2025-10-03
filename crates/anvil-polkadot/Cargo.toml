@@ -134,6 +134,13 @@ subxt-signer = "0.43.0"
 tokio-stream = "0.1.17"
 sqlx = "0.8.6"
 
+jsonrpsee = { version = "0.24.7", default-features = false }
+log = { version = "0.4.21", default-features = false }
+polkadot-core-primitives = "18.0.0"
+cumulus-primitives-core = "0.21.0"
+tokio-retry = { version = "0.3.0" }
+
+
 [dev-dependencies]
 alloy-provider = { workspace = true, features = ["txpool-api"] }
 alloy-pubsub.workspace = true
