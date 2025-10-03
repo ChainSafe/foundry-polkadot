@@ -16,15 +16,35 @@ use jsonrpsee::{http_client::HttpClient, core::ClientError};
 use tokio_retry::strategy::FixedInterval;
 use tokio_retry::Retry;
 
+trait RPCClient  {
+	fn storage<
+	Hash: 'static + Clone + Sync + Send + DeserializeOwned + sp_runtime::Serialize + core::fmt::Debug
+	>(
+		&self,
+		key: StorageKey,
+		at: Option<Hash>,
+	) -> Result<Option<StorageData>, jsonrpsee::core::ClientError>;
+
+	fn storage_keys_paged<
+	Hash: 'static + Clone + Sync + Send + DeserializeOwned + sp_runtime::Serialize + core::fmt::Debug
+	>(
+		&self,
+		key: Option<StorageKey>,
+		count: u32,
+		start_key: Option<StorageKey>,
+		at: Option<Hash>,
+	) -> Result<Vec<sp_state_machine::StorageKey>, ClientError>;
+}
+
 #[derive(Debug, Clone)]
-pub struct RPC {
+pub struct LazyLoadingRPC {
 	http_client: HttpClient,
 	delay_between_requests_ms: u32,
 	max_retries_per_request: u32,
 	counter: Arc<AtomicU64>,
 }
 
-impl RPC {
+impl LazyLoadingRPC {
 	pub fn new(
 		http_client: HttpClient,
 		delay_between_requests_ms: u32,
@@ -35,50 +55,6 @@ impl RPC {
 			delay_between_requests_ms,
 			max_retries_per_request,
 			counter: Default::default(),
-		}
-	}
-
-	pub fn storage<
-		Hash: 'static + Clone + Sync + Send + DeserializeOwned + sp_runtime::Serialize + core::fmt::Debug,
-	>(
-		&self,
-		key: StorageKey,
-		at: Option<Hash>,
-	) -> Result<Option<StorageData>, jsonrpsee::core::ClientError> {
-		let request = &|| {
-			substrate_rpc_client::StateApi::<Hash>::storage(
-				&self.http_client,
-				key.clone(),
-				at.clone(),
-			)
-		};
-
-		self.block_on(request)
-	}
-
-	pub fn storage_keys_paged<
-		Hash: 'static + Clone + Sync + Send + DeserializeOwned + sp_runtime::Serialize,
-	>(
-		&self,
-		key: Option<StorageKey>,
-		count: u32,
-		start_key: Option<StorageKey>,
-		at: Option<Hash>,
-	) -> Result<Vec<sp_state_machine::StorageKey>, ClientError> {
-		let request = &|| {
-			substrate_rpc_client::StateApi::<Hash>::storage_keys_paged(
-				&self.http_client,
-				key.clone(),
-				count.clone(),
-				start_key.clone(),
-				at.clone(),
-			)
-		};
-		let result = self.block_on(request);
-
-		match result {
-			Ok(result) => Ok(result.iter().map(|item| item.0.clone()).collect()),
-			Err(err) => Err(err),
 		}
 	}
 
@@ -127,6 +103,52 @@ impl RPC {
 	}
 }
 
+impl RPCClient for LazyLoadingRPC {
+	fn storage<
+		Hash: 'static + Clone + Sync + Send + DeserializeOwned + sp_runtime::Serialize + core::fmt::Debug,
+	>(
+		&self,
+		key: StorageKey,
+		at: Option<Hash>,
+	) -> Result<Option<StorageData>, jsonrpsee::core::ClientError> {
+		let request = &|| {
+			substrate_rpc_client::StateApi::<Hash>::storage(
+				&self.http_client,
+				key.clone(),
+				at.clone(),
+			)
+		};
+
+		self.block_on(request)
+	}
+
+	fn storage_keys_paged<
+		Hash: 'static + Clone + Sync + Send + DeserializeOwned + sp_runtime::Serialize,
+	>(
+		&self,
+		key: Option<StorageKey>,
+		count: u32,
+		start_key: Option<StorageKey>,
+		at: Option<Hash>,
+	) -> Result<Vec<sp_state_machine::StorageKey>, ClientError> {
+		let request = &|| {
+			substrate_rpc_client::StateApi::<Hash>::storage_keys_paged(
+				&self.http_client,
+				key.clone(),
+				count.clone(),
+				start_key.clone(),
+				at.clone(),
+			)
+		};
+		let result = self.block_on(request);
+
+		match result {
+			Ok(result) => Ok(result.iter().map(|item| item.0.clone()).collect()),
+			Err(err) => Err(err),
+		}
+	}
+}
+
 
 #[cfg(test)]
 mod tests {
@@ -135,18 +157,13 @@ mod tests {
     use std::sync::atomic::{AtomicUsize};
     use std::time::{Instant};
 
-    /// Builds an RPC with a valid (but unused) HttpClient.
     fn rpc_for_tests(delay_ms: u32, retries: u32) -> RPC {
-        // The URL is never actually used in these unit tests because we call `block_on`
-        // with our own closures; still, the client must be constructible.
         let client = HttpClientBuilder::default()
             .build("http://127.0.0.1:8080")
             .expect("build http client");
-        RPC::new(client, delay_ms, retries)
+        LazyLoadingRPC::new(client, delay_ms, retries)
     }
 
-    /// Helper that runs a closure through `block_on` and returns its result.
-    /// The closure can count attempts and emulate success/failure without any network.
     #[tokio::test(flavor = "multi_thread")]
     async fn block_on_success_no_retry() {
         let rpc = rpc_for_tests( 0,  1);
