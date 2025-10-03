@@ -22,10 +22,17 @@ use polkadot_sdk::{
     sp_timestamp,
     substrate_frame_rpc_system::SystemApiServer,
     cumulus_client_service::ParachainHostFunctions,
+
 };
 use std::sync::Arc;
 use tokio_stream::wrappers::ReceiverStream;
 use tokio::runtime::Builder as TokioRtBuilder;
+
+use cumulus_test_relay_sproof_builder::RelayStateSproofBuilder;
+use polkadot_primitives::PersistedValidationData;
+use cumulus_primitives_parachain_inherent::ParachainInherentData;
+//use cumulus_primitives_parachain_inherent::v0::ParachainInherentData;
+//use sp_inherents::{InherentIdentifier, InherentData};
 
 use serde_json::{json, Map, Value};
 
@@ -286,12 +293,65 @@ pub fn new(
         None,
     );
 
-    let create_inherent_data_providers = {
-        move |_, ()| {
-            let next_timestamp = time_manager.next_timestamp();
-            async move { Ok(sp_timestamp::InherentDataProvider::new(next_timestamp.into())) }
-        }
-    };
+    // let create_inherent_data_providers = {
+    //     move |_, ()| {
+    //         let next_timestamp = sp_timestamp::Timestamp::current();
+    //         async move { Ok(sp_timestamp::InherentDataProvider::new(next_timestamp.into())) }
+    //     }
+    // };
+
+
+      let create_inherent_data_providers = move |_, _| async move {
+		let time = sp_timestamp::InherentDataProvider::from_system_time();
+		// Create a dummy parachain inherent data provider which is required to pass
+		// the checks by the para chain system. We use dummy values because in the 'pending context'
+		// neither do we have access to the real values nor do we need them.
+		let (relay_parent_storage_root, relay_chain_state) =
+			RelayStateSproofBuilder::default().into_state_root_and_proof();
+		let vfp = PersistedValidationData {
+			// This is a hack to make `cumulus_pallet_parachain_system::RelayNumberStrictlyIncreases`
+			// happy. Relay parent number can't be bigger than u32::MAX.
+			relay_parent_number: u32::MAX,
+			relay_parent_storage_root,
+			..Default::default()
+		};
+
+       // parachain_inherent::BasicParachainInherentData::
+
+		let parachain_inherent_data = ParachainInherentData {
+			validation_data: vfp,
+			relay_chain_state,
+			downward_messages: Default::default(),
+			horizontal_messages: Default::default(),
+            relay_parent_descendants: Vec::new(),
+			collator_peer_id: None,
+		};
+		Ok((time, parachain_inherent_data))
+	};
+
+
+    // let create_inherent_data_providers = move |_, _| async move {
+	// 	let time = sp_timestamp::InherentDataProvider::from_system_time();
+	// 	// Create a dummy parachain inherent data provider which is required to pass
+	// 	// the checks by the para chain system. We use dummy values because in the 'pending context'
+	// 	// neither do we have access to the real values nor do we need them.
+	// 	let (relay_parent_storage_root, relay_chain_state) =
+	// 		RelayStateSproofBuilder::default().into_state_root_and_proof();
+	// 	let vfp = PersistedValidationData {
+	// 		// This is a hack to make `cumulus_pallet_parachain_system::RelayNumberStrictlyIncreases`
+	// 		// happy. Relay parent number can't be bigger than u32::MAX.
+	// 		relay_parent_number: u32::MAX,
+	// 		relay_parent_storage_root,
+	// 		..Default::default()
+	// 	};
+	// 	let parachain_inherent_data = ParachainInherentData {
+	// 		validation_data: vfp,
+	// 		relay_chain_state,
+	// 		downward_messages: Default::default(),
+	// 		horizontal_messages: Default::default(),
+	// 	};
+	// 	Ok((time, parachain_inherent_data))
+	// };
 
     let params = sc_consensus_manual_seal::ManualSealParams {
         block_import: client.clone(),
