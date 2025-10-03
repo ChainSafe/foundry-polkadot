@@ -1,74 +1,115 @@
+use jsonrpsee::{core::ClientError, http_client::HttpClient};
 use polkadot_sdk::{
-	substrate_rpc_client,
-	sp_state_machine,
-	sp_runtime,
-	sp_storage::{StorageData, StorageKey},
-};
-use std::{
-	time::Duration, 
-	sync::{
-		Arc, 
-		atomic::{AtomicU64, Ordering}
-	}
+    sp_runtime, sp_state_machine,
+    sp_storage::{StorageData, StorageKey},
+    substrate_rpc_client,
 };
 use serde::de::DeserializeOwned;
-use jsonrpsee::{http_client::HttpClient, core::ClientError};
-use tokio_retry::strategy::FixedInterval;
+use std::{
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
+    time::Duration,
+};
 use tokio_retry::Retry;
-
-trait RPCClient  {
-	fn storage<
-	Hash: 'static + Clone + Sync + Send + DeserializeOwned + sp_runtime::Serialize + core::fmt::Debug
-	>(
-		&self,
-		key: StorageKey,
-		at: Option<Hash>,
-	) -> Result<Option<StorageData>, jsonrpsee::core::ClientError>;
-
-	fn storage_keys_paged<
-	Hash: 'static + Clone + Sync + Send + DeserializeOwned + sp_runtime::Serialize + core::fmt::Debug
-	>(
-		&self,
-		key: Option<StorageKey>,
-		count: u32,
-		start_key: Option<StorageKey>,
-		at: Option<Hash>,
-	) -> Result<Vec<sp_state_machine::StorageKey>, ClientError>;
-}
+use tokio_retry::strategy::FixedInterval;
 
 #[derive(Debug, Clone)]
-pub struct LazyLoadingRPC {
-	http_client: HttpClient,
-	delay_between_requests_ms: u32,
-	max_retries_per_request: u32,
-	counter: Arc<AtomicU64>,
+pub struct RPC {
+    http_client: HttpClient,
+    delay_between_requests_ms: u32,
+    max_retries_per_request: u32,
+    counter: Arc<AtomicU64>,
 }
 
-impl LazyLoadingRPC {
-	pub fn new(
-		http_client: HttpClient,
-		delay_between_requests_ms: u32,
-		max_retries_per_request: u32,
-	) -> Self {
-		Self {
-			http_client,
-			delay_between_requests_ms,
-			max_retries_per_request,
-			counter: Default::default(),
-		}
-	}
+impl RPC {
+    pub fn new(
+        http_client: HttpClient,
+        delay_between_requests_ms: u32,
+        max_retries_per_request: u32,
+    ) -> Self {
+        Self {
+            http_client,
+            delay_between_requests_ms,
+            max_retries_per_request,
+            counter: Default::default(),
+        }
+    }
 
-	fn block_on<F, T, E>(&self, f: &dyn Fn() -> F) -> Result<T, E>
-	where
-		F: Future<Output = Result<T, E>>,
-	{
-		use tokio::runtime::Handle;
+    pub fn storage<
+        Hash: 'static + Clone + Sync + Send + DeserializeOwned + sp_runtime::Serialize + core::fmt::Debug,
+    >(
+        &self,
+        key: StorageKey,
+        at: Option<Hash>,
+    ) -> Result<Option<StorageData>, jsonrpsee::core::ClientError> {
+        let request = &|| {
+            substrate_rpc_client::StateApi::<Hash>::storage(
+                &self.http_client,
+                key.clone(),
+                at.clone(),
+            )
+        };
 
-		let id = self.counter.fetch_add(1, Ordering::SeqCst);
-		let start = std::time::Instant::now();
+        self.block_on(request)
+    }
 
-		tokio::task::block_in_place(move || {
-			Handle::current().block_on(async move {
+    pub fn storage_hash<
+        Hash: 'static + Clone + Sync + Send + DeserializeOwned + sp_runtime::Serialize,
+    >(
+        &self,
+        key: StorageKey,
+        at: Option<Hash>,
+    ) -> Result<Option<Hash>, jsonrpsee::core::ClientError> {
+        let request = &|| {
+            substrate_rpc_client::StateApi::<Hash>::storage_hash(
+                &self.http_client,
+                key.clone(),
+                at.clone(),
+            )
+        };
+
+        self.block_on(request)
+    }
+
+    pub fn storage_keys_paged<
+        Hash: 'static + Clone + Sync + Send + DeserializeOwned + sp_runtime::Serialize,
+    >(
+        &self,
+        key: Option<StorageKey>,
+        count: u32,
+        start_key: Option<StorageKey>,
+        at: Option<Hash>,
+    ) -> Result<Vec<sp_state_machine::StorageKey>, ClientError> {
+        let request = &|| {
+            substrate_rpc_client::StateApi::<Hash>::storage_keys_paged(
+                &self.http_client,
+                key.clone(),
+                count.clone(),
+                start_key.clone(),
+                at.clone(),
+            )
+        };
+        let result = self.block_on(request);
+
+        match result {
+            Ok(result) => Ok(result.iter().map(|item| item.0.clone()).collect()),
+            Err(err) => Err(err),
+        }
+    }
+
+    fn block_on<F, T, E>(&self, f: &dyn Fn() -> F) -> Result<T, E>
+    where
+        F: Future<Output = Result<T, E>>,
+    {
+        use tokio::runtime::Handle;
+
+        let id = self.counter.fetch_add(1, Ordering::SeqCst);
+        let start = std::time::Instant::now();
+
+        tokio::task::block_in_place(move || {
+            Handle::current().block_on(async move {
 				let delay_between_requests =
 					Duration::from_millis(self.delay_between_requests_ms.into());
 
@@ -99,74 +140,26 @@ impl LazyLoadingRPC {
 
 				result
 			})
-		})
-	}
+        })
+    }
 }
-
-impl RPCClient for LazyLoadingRPC {
-	fn storage<
-		Hash: 'static + Clone + Sync + Send + DeserializeOwned + sp_runtime::Serialize + core::fmt::Debug,
-	>(
-		&self,
-		key: StorageKey,
-		at: Option<Hash>,
-	) -> Result<Option<StorageData>, jsonrpsee::core::ClientError> {
-		let request = &|| {
-			substrate_rpc_client::StateApi::<Hash>::storage(
-				&self.http_client,
-				key.clone(),
-				at.clone(),
-			)
-		};
-
-		self.block_on(request)
-	}
-
-	fn storage_keys_paged<
-		Hash: 'static + Clone + Sync + Send + DeserializeOwned + sp_runtime::Serialize,
-	>(
-		&self,
-		key: Option<StorageKey>,
-		count: u32,
-		start_key: Option<StorageKey>,
-		at: Option<Hash>,
-	) -> Result<Vec<sp_state_machine::StorageKey>, ClientError> {
-		let request = &|| {
-			substrate_rpc_client::StateApi::<Hash>::storage_keys_paged(
-				&self.http_client,
-				key.clone(),
-				count.clone(),
-				start_key.clone(),
-				at.clone(),
-			)
-		};
-		let result = self.block_on(request);
-
-		match result {
-			Ok(result) => Ok(result.iter().map(|item| item.0.clone()).collect()),
-			Err(err) => Err(err),
-		}
-	}
-}
-
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use jsonrpsee::http_client::HttpClientBuilder;
-    use std::sync::atomic::{AtomicUsize};
-    use std::time::{Instant};
+    use std::sync::atomic::AtomicUsize;
+    use std::time::Instant;
 
     fn rpc_for_tests(delay_ms: u32, retries: u32) -> RPC {
-        let client = HttpClientBuilder::default()
-            .build("http://127.0.0.1:8080")
-            .expect("build http client");
+        let client =
+            HttpClientBuilder::default().build("http://127.0.0.1:8080").expect("build http client");
         LazyLoadingRPC::new(client, delay_ms, retries)
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn block_on_success_no_retry() {
-        let rpc = rpc_for_tests( 0,  1);
+        let rpc = rpc_for_tests(0, 1);
         let attempts = AtomicUsize::new(0);
 
         let res: Result<i32, &'static str> = rpc.block_on(&|| {
@@ -187,13 +180,7 @@ mod tests {
 
         let res: Result<&'static str, &'static str> = rpc.block_on(&|| {
             let n = attempts.fetch_add(1, Ordering::SeqCst);
-            async move {
-                if n < 2 {
-                    Err("transient error")
-                } else {
-                    Ok("ok-now")
-                }
-            }
+            async move { if n < 2 { Err("transient error") } else { Ok("ok-now") } }
         });
 
         assert_eq!(res.unwrap(), "ok-now");
@@ -208,7 +195,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn block_on_exhausts_retries_and_fails() {
         let retries = 3u32;
-        let rpc = rpc_for_tests( 0, retries);
+        let rpc = rpc_for_tests(0, retries);
         let attempts = AtomicUsize::new(0);
 
         let err = rpc

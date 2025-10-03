@@ -1210,6 +1210,8 @@ dependencies = [
  "foundry-test-utils",
  "futures",
  "futures-timer",
+ "hex",
+ "hex-literal",
  "hyper 1.6.0",
  "itertools 0.14.0",
  "jsonrpsee",
