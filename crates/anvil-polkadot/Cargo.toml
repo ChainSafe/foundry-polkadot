@@ -67,6 +67,10 @@ polkadot-sdk = { git = "https://github.com/paritytech/polkadot-sdk.git", branch 
 	"substrate-wasm-builder",
 	"cumulus-client-service",
 	"pallet-revive-eth-rpc",
+	"pallet-revive",
+	"cumulus-primitives-parachain-inherent",
+	"polkadot-primitives",
+	"cumulus-test-relay-sproof-builder",
 ] }
 anvil.workspace = true
 anvil-core.workspace = true
@@ -149,9 +153,9 @@ tokio-stream = "0.1.17"
 jsonrpsee = "0.24.9"
 sqlx = "0.8.6"
 indicatif.workspace = true
-cumulus-test-relay-sproof-builder = "0.21.0"
-polkadot-primitives = "20.0.0"
-cumulus-primitives-parachain-inherent = "0.20.0"
+#cumulus-test-relay-sproof-builder = "0.21.0"
+#polkadot-primitives = "20.0.0"
+#cumulus-primitives-parachain-inherent = "0.20.0"
 cumulus-pallet-parachain-system = "0.22.1"
 
 [dev-dependencies]
