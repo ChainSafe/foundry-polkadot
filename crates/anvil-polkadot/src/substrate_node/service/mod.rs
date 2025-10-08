@@ -27,14 +27,11 @@ polkadot_primitives::PersistedValidationData,
 cumulus_test_relay_sproof_builder::RelayStateSproofBuilder,
 };
 use std::sync::Arc;
+use substrate_runtime::{OpaqueBlock as Block, RuntimeApi, Hash};
 use tokio_stream::wrappers::ReceiverStream;
 use tokio::runtime::Builder as TokioRtBuilder;
-
-//use cumulus_test_relay_sproof_builder::RelayStateSproofBuilder;
-//use polkadot_primitives::PersistedValidationData;
-//use cumulus_primitives_parachain_inherent::ParachainInherentData;
-//use cumulus_primitives_parachain_inherent::v0::ParachainInherentData;
-//use sp_inherents::{InherentIdentifier, InherentData};
+//use substrate_runtime::Hash;
+//use crate::substrate_node::service::sc_consensus_manual_seal::consensus::aura::AuraConsensusDataProvider;
 
 use serde_json::{json, Map, Value};
 
@@ -176,6 +173,56 @@ fn build_forked_chainspec_from_raw_top(
     Ok(Box::new(new_spec))
 }
 
+fn create_manual_seal_inherent_data_providers(
+		client: Arc<FullClient>,
+		para_id: Id,
+		slot_duration: sc_consensus_aura::SlotDuration,
+	) -> impl Fn(
+		Hash,
+		(),
+	) ->
+		futures::future::Ready<
+		Result<
+			(sp_timestamp::InherentDataProvider, MockValidationDataInherentDataProvider<()>),
+			Box<dyn std::error::Error + Send + Sync>,
+		>,
+	> + Send
+	       + Sync{
+		move |block: Hash, ()| {
+			let current_para_head = client
+				.header(block)
+				.expect("Header lookup should succeed")
+				.expect("Header passed in as parent should be present in backend.");
+
+        let current_para_block_head =
+				Some(polkadot_primitives::HeadData(current_para_head.hash().as_bytes().to_vec()));
+
+        let current_block_number =
+        UniqueSaturatedInto::<u32>::unique_saturated_into(*current_para_head.number()) + 1;
+
+        let mocked_parachain = MockValidationDataInherentDataProvider::<()> {
+            current_para_block: current_block_number,
+            para_id: para_id,
+            current_para_block_head,
+            relay_blocks_per_para_block: 1,
+            para_blocks_per_relay_epoch: 10,
+            // upgrade_go_ahead: should_send_go_ahead.then(|| {
+            //     log::info!("Detected pending validation code, sending go-ahead signal.");
+            //     UpgradeGoAhead::GoAhead
+            // }),
+            ..Default::default()
+        };
+
+        let timestamp_provider = sp_timestamp::InherentDataProvider::new(
+            (slot_duration.as_millis() * current_block_number as u64).into(),
+        );
+
+
+        futures::future::ready(Ok((timestamp_provider, mocked_parachain)))
+        //Ok((timestamp_provider, mocked_parachain))
+		}
+	}
+
 /// Builds a new service for a full client.
 pub fn new(
     anvil_config: &AnvilNodeConfig,
@@ -302,38 +349,61 @@ pub fn new(
     //     }
     // };
 
+    // Note: Changing slot durations are currently not supported
+		// let slot_duration = sc_consensus_aura::slot_duration(&*client)
+		// 	.expect("slot_duration is always present; qed.");
 
-      let create_inherent_data_providers = move |_, _| async move {
-		let time = sp_timestamp::InherentDataProvider::from_system_time();
-		// Create a dummy parachain inherent data provider which is required to pass
-		// the checks by the para chain system. We use dummy values because in the 'pending context'
-		// neither do we have access to the real values nor do we need them.
-		let (relay_parent_storage_root, relay_chain_state) =
-			RelayStateSproofBuilder::default().into_state_root_and_proof();
-		let vfp = PersistedValidationData {
-			// This is a hack to make `cumulus_pallet_parachain_system::RelayNumberStrictlyIncreases`
-			// happy. Relay parent number can't be bigger than u32::MAX.
-			relay_parent_number: u32::MAX,
-			relay_parent_storage_root,
-			..Default::default()
-		};
+       let slot_duration= sc_consensus_aura::SlotDuration::from_millis(6000);
 
-       // parachain_inherent::BasicParachainInherentData::
+        // The aura digest provider will provide digests that match the provided timestamp data.
+		// Without this, the AURA parachain runtimes complain about slot mismatches.
+	//	let aura_digest_provider = AuraConsensusDataProvider::new(client);
 
-		let parachain_inherent_data = ParachainInherentData {
-			validation_data: vfp,
-			relay_chain_state,
-			downward_messages: Default::default(),
-			horizontal_messages: Default::default(),
-            relay_parent_descendants: Vec::new(),
-			collator_peer_id: None,
-		};
-		Ok((time, parachain_inherent_data))
-	};
+    let para_id = Id::new(0);
+
+    let create_inherent_data_providers = create_manual_seal_inherent_data_providers(
+			client.clone(),
+			para_id,
+			slot_duration,
+		);
+
+    //  let create_inherent_data_providers = move |block: Hash, ()| async move {
+	// 	let current_para_head = client
+	// 			.header(block)
+	// 			.expect("Header lookup should succeed")
+	// 			.expect("Header passed in as parent should be present in backend.");
+
+    //     let current_para_block_head =
+	// 			Some(polkadot_primitives::HeadData(current_para_head.hash().as_bytes().to_vec()));
+
+    //             let current_block_number =
+	// 			UniqueSaturatedInto::<u32>::unique_saturated_into(*current_para_head.number()) + 1;
+
+    //     let mocked_parachain = MockValidationDataInherentDataProvider::<()> {
+    //         current_para_block: 0,
+    //         para_id: para_id,
+    //         current_para_block_head,
+    //         relay_blocks_per_para_block: 1,
+    //         para_blocks_per_relay_epoch: 10,
+    //         // upgrade_go_ahead: should_send_go_ahead.then(|| {
+    //         //     log::info!("Detected pending validation code, sending go-ahead signal.");
+    //         //     UpgradeGoAhead::GoAhead
+    //         // }),
+    //         ..Default::default()
+    //     };
+
+    //     let timestamp_provider = sp_timestamp::InherentDataProvider::new(
+    //         (slot_duration.as_millis() * current_block_number as u64).into(),
+    //     );
 
 
-    // let create_inherent_data_providers = move |_, _| async move {
-	// 	let time = sp_timestamp::InherentDataProvider::from_system_time();
+    //     Ok((timestamp_provider, mocked_parachain))
+	// };
+
+
+    //   let create_inherent_data_providers = move |_, _| async move {
+	// 	//let time = sp_timestamp::InherentDataProvider::from_system_time();
+    //     let time = sp_timestamp::InherentDataProvider::new(sp_timestamp::Timestamp::new(0));
 	// 	// Create a dummy parachain inherent data provider which is required to pass
 	// 	// the checks by the para chain system. We use dummy values because in the 'pending context'
 	// 	// neither do we have access to the real values nor do we need them.
@@ -346,11 +416,14 @@ pub fn new(
 	// 		relay_parent_storage_root,
 	// 		..Default::default()
 	// 	};
+
 	// 	let parachain_inherent_data = ParachainInherentData {
 	// 		validation_data: vfp,
 	// 		relay_chain_state,
 	// 		downward_messages: Default::default(),
 	// 		horizontal_messages: Default::default(),
+    //         relay_parent_descendants: Vec::new(),
+	// 		collator_peer_id: None,
 	// 	};
 	// 	Ok((time, parachain_inherent_data))
 	// };
