@@ -1,9 +1,17 @@
-use jsonrpsee::{core::ClientError, http_client::HttpClient};
 use polkadot_sdk::{
     sp_runtime, sp_state_machine,
     sp_storage::{StorageData, StorageKey},
     substrate_rpc_client,
+    sp_rpc::list::ListOrValue,
+    sp_core::H256,
+    sc_chain_spec,
+    sp_runtime::generic::SignedBlock,
+    sp_api::__private::HeaderT,
+    sp_rpc::number::NumberOrHex,
+    sp_runtime::traits::Block as BlockT,
 };
+use polkadot_core_primitives::BlockNumber;
+use jsonrpsee::{core::ClientError, http_client::HttpClient};
 use serde::de::DeserializeOwned;
 use std::{
     sync::{
@@ -36,6 +44,84 @@ impl RPC {
             counter: Default::default(),
         }
     }
+
+    pub fn system_chain(&self) -> Result<String, jsonrpsee::core::ClientError> {
+		let request = &|| {
+			substrate_rpc_client::SystemApi::<H256, BlockNumber>::system_chain(&self.http_client)
+		};
+
+		self.block_on(request)
+	}
+
+	pub fn system_properties(
+		&self,
+	) -> Result<sc_chain_spec::Properties, jsonrpsee::core::ClientError> {
+		let request = &|| {
+			substrate_rpc_client::SystemApi::<H256, BlockNumber>::system_properties(
+				&self.http_client,
+			)
+		};
+
+		self.block_on(request)
+	}
+
+    pub fn block<Block, Hash: Clone>(
+		&self,
+		hash: Option<Hash>,
+	) -> Result<Option<SignedBlock<Block>>, jsonrpsee::core::ClientError>
+	where
+		Block: BlockT + DeserializeOwned,
+		Hash: 'static + Send + Sync + sp_runtime::Serialize + DeserializeOwned,
+	{
+		let request = &|| {
+			substrate_rpc_client::ChainApi::<
+				BlockNumber,
+				Hash,
+				Block::Header,
+				SignedBlock<Block>,
+			>::block(&self.http_client, hash.clone())
+		};
+
+		self.block_on(request)
+	}
+
+    pub fn block_hash<Block: BlockT + DeserializeOwned>(
+		&self,
+		block_number: Option<<Block::Header as HeaderT>::Number>,
+	) -> Result<Option<Block::Hash>, jsonrpsee::core::ClientError> {
+		let request = &|| {
+			substrate_rpc_client::ChainApi::<
+				<Block::Header as HeaderT>::Number,
+				Block::Hash,
+				Block::Header,
+				SignedBlock<Block>,
+			>::block_hash(
+				&self.http_client,
+				block_number.map(|n| ListOrValue::Value(NumberOrHex::Hex(n.into()))),
+			)
+		};
+
+		self.block_on(request).map(|ok| match ok {
+			ListOrValue::List(v) => v.get(0).map_or(None, |some| *some),
+			ListOrValue::Value(v) => v,
+		})
+	}
+
+    pub fn header<Block: BlockT + DeserializeOwned>(
+		&self,
+		hash: Option<Block::Hash>,
+	) -> Result<Option<Block::Header>, jsonrpsee::core::ClientError> {
+		let request = &|| {
+			substrate_rpc_client::ChainApi::<
+				BlockNumber,
+				Block::Hash,
+				Block::Header,
+				SignedBlock<Block>,
+			>::header(&self.http_client, hash)
+		};
+
+		self.block_on(request)
+	}
 
     pub fn storage<
         Hash: 'static + Clone + Sync + Send + DeserializeOwned + sp_runtime::Serialize + core::fmt::Debug,

@@ -92,6 +92,7 @@ alloy-chains.workspace = true
 alloy-genesis.workspace = true
 alloy-trie.workspace = true
 op-alloy-consensus = { workspace = true, features = ["serde"] }
+url = { version = "2.4.0" }
 
 # axum related
 axum.workspace = true
