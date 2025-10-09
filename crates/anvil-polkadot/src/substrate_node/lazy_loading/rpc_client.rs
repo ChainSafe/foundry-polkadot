@@ -1,17 +1,16 @@
+use jsonrpsee::{core::ClientError, http_client::HttpClient};
+use polkadot_core_primitives::BlockNumber;
 use polkadot_sdk::{
-    sp_runtime, sp_state_machine,
+    sc_chain_spec,
+    sp_api::__private::HeaderT,
+    sp_core::H256,
+    sp_rpc::{list::ListOrValue, number::NumberOrHex},
+    sp_runtime,
+    sp_runtime::{generic::SignedBlock, traits::Block as BlockT},
+    sp_state_machine,
     sp_storage::{StorageData, StorageKey},
     substrate_rpc_client,
-    sp_rpc::list::ListOrValue,
-    sp_core::H256,
-    sc_chain_spec,
-    sp_runtime::generic::SignedBlock,
-    sp_api::__private::HeaderT,
-    sp_rpc::number::NumberOrHex,
-    sp_runtime::traits::Block as BlockT,
 };
-use polkadot_core_primitives::BlockNumber;
-use jsonrpsee::{core::ClientError, http_client::HttpClient};
 use serde::de::DeserializeOwned;
 use std::{
     sync::{
@@ -20,8 +19,7 @@ use std::{
     },
     time::Duration,
 };
-use tokio_retry::Retry;
-use tokio_retry::strategy::FixedInterval;
+use tokio_retry::{Retry, strategy::FixedInterval};
 
 #[derive(Debug, Clone)]
 pub struct RPC {
@@ -46,82 +44,82 @@ impl RPC {
     }
 
     pub fn system_chain(&self) -> Result<String, jsonrpsee::core::ClientError> {
-		let request = &|| {
-			substrate_rpc_client::SystemApi::<H256, BlockNumber>::system_chain(&self.http_client)
-		};
+        let request = &|| {
+            substrate_rpc_client::SystemApi::<H256, BlockNumber>::system_chain(&self.http_client)
+        };
 
-		self.block_on(request)
-	}
+        self.block_on(request)
+    }
 
-	pub fn system_properties(
-		&self,
-	) -> Result<sc_chain_spec::Properties, jsonrpsee::core::ClientError> {
-		let request = &|| {
-			substrate_rpc_client::SystemApi::<H256, BlockNumber>::system_properties(
-				&self.http_client,
-			)
-		};
+    pub fn system_properties(
+        &self,
+    ) -> Result<sc_chain_spec::Properties, jsonrpsee::core::ClientError> {
+        let request = &|| {
+            substrate_rpc_client::SystemApi::<H256, BlockNumber>::system_properties(
+                &self.http_client,
+            )
+        };
 
-		self.block_on(request)
-	}
+        self.block_on(request)
+    }
 
     pub fn block<Block, Hash: Clone>(
-		&self,
-		hash: Option<Hash>,
-	) -> Result<Option<SignedBlock<Block>>, jsonrpsee::core::ClientError>
-	where
-		Block: BlockT + DeserializeOwned,
-		Hash: 'static + Send + Sync + sp_runtime::Serialize + DeserializeOwned,
-	{
-		let request = &|| {
-			substrate_rpc_client::ChainApi::<
+        &self,
+        hash: Option<Hash>,
+    ) -> Result<Option<SignedBlock<Block>>, jsonrpsee::core::ClientError>
+    where
+        Block: BlockT + DeserializeOwned,
+        Hash: 'static + Send + Sync + sp_runtime::Serialize + DeserializeOwned,
+    {
+        let request = &|| {
+            substrate_rpc_client::ChainApi::<
 				BlockNumber,
 				Hash,
 				Block::Header,
 				SignedBlock<Block>,
 			>::block(&self.http_client, hash.clone())
-		};
+        };
 
-		self.block_on(request)
-	}
+        self.block_on(request)
+    }
 
     pub fn block_hash<Block: BlockT + DeserializeOwned>(
-		&self,
-		block_number: Option<<Block::Header as HeaderT>::Number>,
-	) -> Result<Option<Block::Hash>, jsonrpsee::core::ClientError> {
-		let request = &|| {
-			substrate_rpc_client::ChainApi::<
-				<Block::Header as HeaderT>::Number,
-				Block::Hash,
-				Block::Header,
-				SignedBlock<Block>,
-			>::block_hash(
-				&self.http_client,
-				block_number.map(|n| ListOrValue::Value(NumberOrHex::Hex(n.into()))),
-			)
-		};
+        &self,
+        block_number: Option<<Block::Header as HeaderT>::Number>,
+    ) -> Result<Option<Block::Hash>, jsonrpsee::core::ClientError> {
+        let request = &|| {
+            substrate_rpc_client::ChainApi::<
+                <Block::Header as HeaderT>::Number,
+                Block::Hash,
+                Block::Header,
+                SignedBlock<Block>,
+            >::block_hash(
+                &self.http_client,
+                block_number.map(|n| ListOrValue::Value(NumberOrHex::Hex(n.into()))),
+            )
+        };
 
-		self.block_on(request).map(|ok| match ok {
-			ListOrValue::List(v) => v.get(0).map_or(None, |some| *some),
-			ListOrValue::Value(v) => v,
-		})
-	}
+        self.block_on(request).map(|ok| match ok {
+            ListOrValue::List(v) => v.get(0).map_or(None, |some| *some),
+            ListOrValue::Value(v) => v,
+        })
+    }
 
     pub fn header<Block: BlockT + DeserializeOwned>(
-		&self,
-		hash: Option<Block::Hash>,
-	) -> Result<Option<Block::Header>, jsonrpsee::core::ClientError> {
-		let request = &|| {
-			substrate_rpc_client::ChainApi::<
-				BlockNumber,
-				Block::Hash,
-				Block::Header,
-				SignedBlock<Block>,
-			>::header(&self.http_client, hash)
-		};
+        &self,
+        hash: Option<Block::Hash>,
+    ) -> Result<Option<Block::Header>, jsonrpsee::core::ClientError> {
+        let request = &|| {
+            substrate_rpc_client::ChainApi::<
+                BlockNumber,
+                Block::Hash,
+                Block::Header,
+                SignedBlock<Block>,
+            >::header(&self.http_client, hash)
+        };
 
-		self.block_on(request)
-	}
+        self.block_on(request)
+    }
 
     pub fn storage<
         Hash: 'static + Clone + Sync + Send + DeserializeOwned + sp_runtime::Serialize + core::fmt::Debug,
@@ -234,8 +232,7 @@ impl RPC {
 mod tests {
     use super::*;
     use jsonrpsee::http_client::HttpClientBuilder;
-    use std::sync::atomic::AtomicUsize;
-    use std::time::Instant;
+    use std::{sync::atomic::AtomicUsize, time::Instant};
 
     fn rpc_for_tests(delay_ms: u32, retries: u32) -> RPC {
         let client =
@@ -261,7 +258,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn block_on_retries_then_succeeds() {
         // fail first 2 attempts, succeed on 3rd.
-        let rpc = rpc_for_tests(/*delay_ms*/ 0, /*retries*/ 5);
+        let rpc = rpc_for_tests(/* delay_ms */ 0, /* retries */ 5);
         let attempts = AtomicUsize::new(0);
 
         let res: Result<&'static str, &'static str> = rpc.block_on(&|| {
@@ -304,7 +301,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn block_on_respects_initial_delay() {
         let delay_ms = 60u32;
-        let rpc = rpc_for_tests(delay_ms, /*retries*/ 1);
+        let rpc = rpc_for_tests(delay_ms, /* retries */ 1);
         let attempts = AtomicUsize::new(0);
 
         let start = Instant::now();
