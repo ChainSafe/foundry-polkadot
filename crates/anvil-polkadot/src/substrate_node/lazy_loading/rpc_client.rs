@@ -237,7 +237,7 @@ mod tests {
     fn rpc_for_tests(delay_ms: u32, retries: u32) -> RPC {
         let client =
             HttpClientBuilder::default().build("http://127.0.0.1:8080").expect("build http client");
-        LazyLoadingRPC::new(client, delay_ms, retries)
+            RPC::new(client, delay_ms, retries)
     }
 
     #[tokio::test(flavor = "multi_thread")]
