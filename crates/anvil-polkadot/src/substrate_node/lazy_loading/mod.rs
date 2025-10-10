@@ -4,7 +4,7 @@ use std::path::PathBuf;
 mod backend;
 mod rpc_client;
 
-pub const LAZY_LOADING_LOG_TARGET: str = "lazy-loading";
+pub const LAZY_LOADING_LOG_TARGET: &str = "lazy-loading";
 
 #[derive(Clone)]
 pub struct LazyLoadingConfig {
