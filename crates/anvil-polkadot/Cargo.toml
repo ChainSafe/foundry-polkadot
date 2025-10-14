@@ -64,7 +64,13 @@ polkadot-sdk = { git = "https://github.com/paritytech/polkadot-sdk.git", branch 
 	"substrate-frame-rpc-system",
 	"substrate-rpc-client",
 	"substrate-wasm-builder",
-	"pallet-revive-eth-rpc"
+	"pallet-revive-eth-rpc",
+
+	"sc-consensus-aura",
+	"polkadot-primitives",
+	"cumulus-client-parachain-inherent",
+	"sp-arithmetic",
+
 ] }
 anvil.workspace = true
 anvil-core.workspace = true
@@ -99,6 +105,7 @@ alloy-chains.workspace = true
 alloy-genesis.workspace = true
 alloy-trie.workspace = true
 op-alloy-consensus = { workspace = true, features = ["serde"] }
+hex = "0.4"
 
 # axum related
 axum.workspace = true
@@ -140,6 +147,7 @@ subxt-signer = "0.43.0"
 tokio-stream = "0.1.17"
 jsonrpsee = "0.24.9"
 sqlx = "0.8.6"
+indicatif.workspace = true
 
 [dev-dependencies]
 alloy-provider = { workspace = true, features = ["txpool-api"] }
