@@ -14,17 +14,16 @@ use polkadot_sdk::{
         self, Configuration, RpcHandlers, SpawnTaskHandle, TaskManager,
         error::Error as ServiceError,
     },
+    sc_transaction_pool::{self, TransactionPoolWrapper}, sp_io, sp_timestamp,
     sp_wasm_interface::ExtendedHostFunctions,
-    sc_transaction_pool::{self, TransactionPoolWrapper},
-    sc_utils::mpsc::tracing_unbounded,
-    sc_chain_spec,
     sp_keystore::KeystorePtr,
-    sp_timestamp,
+    sc_consensus_aura,
+    cumulus_client_parachain_inherent::MockValidationDataInherentDataProvider, 
+    sp_arithmetic::traits::UniqueSaturatedInto,
     substrate_frame_rpc_system::SystemApiServer,
-    cumulus_client_service::ParachainHostFunctions,
-cumulus_primitives_parachain_inherent::ParachainInherentData,
-polkadot_primitives::PersistedValidationData,
-cumulus_test_relay_sproof_builder::RelayStateSproofBuilder,
+     sc_utils::mpsc::tracing_unbounded,
+     sc_network_types::{self, multiaddr::Multiaddr}, 
+     sc_rpc_api::DenyUnsafe, 
 };
 use std::sync::Arc;
 use substrate_runtime::{OpaqueBlock as Block, RuntimeApi, Hash};
@@ -198,7 +197,7 @@ fn create_manual_seal_inherent_data_providers(
 				Some(polkadot_primitives::HeadData(current_para_head.hash().as_bytes().to_vec()));
 
         let current_block_number =
-        UniqueSaturatedInto::<u32>::unique_saturated_into(*current_para_head.number()) + 1;
+        UniqueSaturatedInto::<u32>::unique_saturated_into(current_para_head.number) + 1;
 
         let mocked_parachain = MockValidationDataInherentDataProvider::<()> {
             current_para_block: current_block_number,
