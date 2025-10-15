@@ -231,8 +231,15 @@ impl RPC {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use jsonrpsee::{RpcModule, server::{ServerBuilder, ServerHandle}, types::error::ErrorObjectOwned};
+    use serde_json::json;
+    use std::net::SocketAddr;
     use jsonrpsee::http_client::HttpClientBuilder;
     use std::{sync::atomic::AtomicUsize, time::Instant};
+
+    // ---------------------------
+    // Unit tests for `block_on`.
+    // ---------------------------
 
     fn rpc_for_tests(delay_ms: u32, retries: u32) -> RPC {
         let client =
@@ -257,7 +264,7 @@ mod tests {
     /// Verifies that `block_on` retries on error and eventually returns Ok.
     #[tokio::test(flavor = "multi_thread")]
     async fn block_on_retries_then_succeeds() {
-        // fail first 2 attempts, succeed on 3rd.
+        // Fail the first 2 attempts, succeed on the 3rd.
         let rpc = rpc_for_tests(/* delay_ms */ 0, /* retries */ 5);
         let attempts = AtomicUsize::new(0);
 
@@ -288,7 +295,6 @@ mod tests {
             })
             .unwrap_err();
 
-        // Assert
         assert_eq!(err, "always failing");
         assert_eq!(
             attempts.load(Ordering::SeqCst),
@@ -318,5 +324,106 @@ mod tests {
             elapsed,
             delay_ms
         );
+    }
+
+    // ---------------------------------------------------------
+    // Integration-style tests with an embedded JSON-RPC server.
+    // ---------------------------------------------------------
+
+    async fn start_mock_server_ok() -> (SocketAddr, ServerHandle) {
+        let mut module = RpcModule::new(());
+
+        module.register_method("system_chain", |_, _, _| {
+            Ok::<String, ErrorObjectOwned>("Local Testnet".to_string())
+        }).expect("register system_chain");
+
+        module.register_method("system_properties", |_, _, _| {
+            Ok::<serde_json::Value, ErrorObjectOwned>(json!({
+                "tokenSymbol": "UNIT",
+                "tokenDecimals": 12,
+            }))
+        }).expect("register system_properties");
+
+        module.register_method("chain_getBlockHash", |_, _, _| {
+            Ok::<Option<String>, ErrorObjectOwned>(Some(
+                "0x0000000000000000000000000000000000000000000000000000000000000001".into(),
+            ))
+        }).expect("register chain_getBlockHash");
+
+        module.register_method("state_getStorage", |_, _, _| {
+            Ok::<Option<String>, ErrorObjectOwned>(Some("0xdeadbeef".into()))
+        }).expect("register state_getStorage");
+
+        module.register_method("state_getStorageHash", |_, _, _| {
+            Ok::<Option<String>, ErrorObjectOwned>(Some(
+                "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
+            ))
+        }).expect("register state_getStorageHash");
+
+        module.register_method("state_getKeysPaged", |_, _, _| {
+            Ok::<Vec<String>, ErrorObjectOwned>(vec!["0x1122".into(), "0xaabbcc".into()])
+        }).expect("register state_getKeysPaged");
+
+        let server = ServerBuilder::default().build("127.0.0.1:0").await.unwrap();
+        let addr = server.local_addr().unwrap();
+        let handle = server.start(module);
+        (addr, handle)
+    }
+
+    // Return RPC plus the ServerHandle so tests keep the server alive.
+    async fn rpc_against_mock() -> (RPC, ServerHandle) {
+        let (addr, handle) = start_mock_server_ok().await;
+        let url = format!("http://{}", addr);
+        let client = HttpClientBuilder::default().build(&url).unwrap();
+        (RPC::new(client, 0, 1), handle)
+    }
+
+    use polkadot_sdk::sp_storage;
+    use polkadot_sdk::sp_runtime::{
+        generic::{Header as GenericHeader, Block as GenericBlock},
+        traits::BlakeTwo256,
+        OpaqueExtrinsic,
+    };
+    type BlockType = GenericBlock<GenericHeader<u32, BlakeTwo256>, OpaqueExtrinsic>;
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn integration_system_endpoints_ok() {
+        // Keep `_server` in scope so the server isn't dropped early.
+        let (rpc, _server) = rpc_against_mock().await;
+
+        let chain = rpc.system_chain().expect("system_chain ok");
+        assert_eq!(chain, "Local Testnet");
+
+        let props = rpc.system_properties().expect("system_properties ok");
+        assert_eq!(props.get("tokenSymbol").and_then(|v| v.as_str()), Some("UNIT"));
+        assert_eq!(props.get("tokenDecimals").and_then(|v| v.as_u64()), Some(12));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn integration_chain_and_state_endpoints_ok() {
+        let (rpc, _server) = rpc_against_mock().await;
+
+        let hash = rpc.block_hash::<BlockType>(None).expect("ok").expect("some hash");
+        assert_eq!(hash, polkadot_sdk::sp_core::H256::from_low_u64_be(1));
+
+        let val = rpc
+            .storage::<polkadot_sdk::sp_core::H256>(sp_storage::StorageKey(vec![0x00, 0xde, 0xad]), None)
+            .expect("ok")
+            .expect("some data");
+        assert_eq!(val.0, vec![0xde, 0xad, 0xbe, 0xef]);
+
+        let h = rpc
+            .storage_hash::<polkadot_sdk::sp_core::H256>(sp_storage::StorageKey(vec![0x00, 0xde, 0xad]), None)
+            .expect("ok")
+            .expect("some hash");
+        assert_eq!(h, polkadot_sdk::sp_core::H256::from_slice(&[0xaa; 32]));
+
+        let keys: Vec<sp_state_machine::StorageKey> =
+            rpc.storage_keys_paged::<polkadot_sdk::sp_core::H256>(None, 10, None, None).expect("ok");
+        let expected: Vec<sp_state_machine::StorageKey> = vec![
+            vec![0x11, 0x22],
+            vec![0xaa, 0xbb, 0xcc],
+        ];
+        assert_eq!(keys, expected);
     }
 }
