@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["convert_to_generic_transaction"],"struct":["AlloyU256","ReviveAccessList","ReviveAddress","ReviveAuthorizationListEntry","ReviveBlockId","ReviveBytes","SubstrateU256"]};

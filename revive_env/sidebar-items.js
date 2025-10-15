@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"mod":["runtime"],"struct":["ExtBuilder","Runtime"],"type":["AccountId","Balance","System","Timestamp"]};
