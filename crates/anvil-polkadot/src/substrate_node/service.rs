@@ -222,7 +222,7 @@ pub fn new(
     // Need to add
     // let backend = sc_service::new_db_backend(config.db_config())?;
 
-    // let wasm_executor = sc_service::new_wasm_executor(&config.executor);
+    let wasm_executor = sc_service::new_wasm_executor(&config.executor);
     // let genesis_block_builder = DevelopmentGenesisBlockBuilder::new(
     //     anvil_config.get_genesis_number(),
     //     config.chain_spec.as_storage_builder(),
@@ -288,7 +288,7 @@ pub fn new(
         sc_service::new_full_parts::<Block, RuntimeApi, _>(
             &config,
             None,
-            sc_service::new_wasm_executor(&config.executor),
+            wasm_executor,
         )?;
     let client = Arc::new(client);
 
@@ -314,15 +314,18 @@ pub fn new(
 
     let mining_mode =
         MiningMode::new(anvil_config.block_time, anvil_config.mixed_mining, anvil_config.no_mining);
-    let time_manager = Arc::new(TimeManager::new_with_milliseconds(
-        sp_timestamp::Timestamp::from(
-            anvil_config
-                .get_genesis_timestamp()
-                .checked_mul(1000)
-                .ok_or(ServiceError::Application("Genesis timestamp overflow".into()))?,
-        )
-        .into(),
-    ));
+
+     let time_manager =
+        Arc::new(TimeManager::new_with_milliseconds(sp_timestamp::Timestamp::current().into()));    
+    // let time_manager = Arc::new(TimeManager::new_with_milliseconds(
+    //     sp_timestamp::Timestamp::from(
+    //         anvil_config
+    //             .get_genesis_timestamp()
+    //             .checked_mul(1000)
+    //             .ok_or(ServiceError::Application("Genesis timestamp overflow".into()))?,
+    //     )
+    //     .into(),
+    // ));
     let mining_engine = Arc::new(MiningEngine::new(
         mining_mode,
         transaction_pool.clone(),
