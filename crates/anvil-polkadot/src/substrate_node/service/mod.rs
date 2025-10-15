@@ -21,9 +21,9 @@ use polkadot_sdk::{
     cumulus_client_parachain_inherent::MockValidationDataInherentDataProvider, 
     sp_arithmetic::traits::UniqueSaturatedInto,
     substrate_frame_rpc_system::SystemApiServer,
-     sc_utils::mpsc::tracing_unbounded,
-     sc_network_types::{self, multiaddr::Multiaddr}, 
-     sc_rpc_api::DenyUnsafe, 
+     sc_chain_spec,
+     polkadot_primitives::{self, Id, PersistedValidationData},
+     cumulus_client_service::ParachainHostFunctions, 
 };
 use std::sync::Arc;
 use substrate_runtime::{OpaqueBlock as Block, RuntimeApi, Hash};
@@ -227,6 +227,7 @@ pub fn new(
     anvil_config: &AnvilNodeConfig,
     mut config: Configuration,
 ) -> Result<(Service, TaskManager), ServiceError> {
+<<<<<<< HEAD:crates/anvil-polkadot/src/substrate_node/service/mod.rs
     let storage_overrides = Arc::new(Mutex::new(StorageOverrides::default()));
 
     let (client, backend, keystore, mut task_manager) = client::new_client(
@@ -235,6 +236,18 @@ pub fn new(
         sc_service::new_wasm_executor(&config.executor),
         storage_overrides.clone(),
     )?;
+=======
+   // let backend = sc_service::new_db_backend(config.db_config())?;
+
+   // let wasm_executor = sc_service::new_wasm_executor(&config.executor);
+    // let genesis_block_builder = DevelopmentGenesisBlockBuilder::new(
+    //     anvil_config.get_genesis_number(),
+    //     config.chain_spec.as_storage_builder(),
+    //     !config.no_genesis(),
+    //     backend.clone(),
+    //     wasm_executor.clone(),
+    // )?;
+>>>>>>> 0670fdd4d (use our state fetching post rebase):crates/anvil-polkadot/src/substrate_node/service.rs
     if let Some(ref fork_url) = anvil_config.fork_url {
         let http_url = fork_url.clone();
         let fork_block_hash = anvil_config.fork_block_hash.clone();
@@ -280,6 +293,27 @@ pub fn new(
         }
     }
 
+<<<<<<< HEAD:crates/anvil-polkadot/src/substrate_node/service/mod.rs
+=======
+    // let (client, backend, keystore_container, mut task_manager) =
+    //     sc_service::new_full_parts_with_genesis_builder(
+    //         &config,
+    //         None,
+    //         wasm_executor,
+    //         backend,
+    //         genesis_block_builder,
+    //         false,
+    //     )?;
+
+      let (client, backend, keystore_container, mut task_manager) =
+        sc_service::new_full_parts::<Block, RuntimeApi, _>(
+            &config,
+            None,
+            sc_service::new_wasm_executor(&config.executor),
+        )?;
+    let client = Arc::new(client);
+
+>>>>>>> 0670fdd4d (use our state fetching post rebase):crates/anvil-polkadot/src/substrate_node/service.rs
     let transaction_pool = Arc::from(
         sc_transaction_pool::Builder::new(
             task_manager.spawn_essential_handle(),
