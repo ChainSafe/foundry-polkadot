@@ -71,6 +71,7 @@ polkadot-sdk = { git = "https://github.com/paritytech/polkadot-sdk.git", branch 
 	"cumulus-client-parachain-inherent",
 	"sp-arithmetic",
 	"cumulus-client-service",
+	"cumulus-primitives-aura",
 
 ] }
 anvil.workspace = true

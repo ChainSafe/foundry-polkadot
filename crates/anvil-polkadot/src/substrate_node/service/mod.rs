@@ -8,7 +8,7 @@ use crate::{
 use anvil::eth::backend::time::TimeManager;
 use parking_lot::Mutex;
 use polkadot_sdk::{
-    parachains_common::opaque::Block,
+    parachains_common::{SLOT_DURATION, opaque::Block, Hash},
     sc_basic_authorship, sc_consensus, sc_consensus_manual_seal::{self, consensus::aura::AuraConsensusDataProvider}, sc_executor,
     sc_service::{
         self, Configuration, RpcHandlers, SpawnTaskHandle, TaskManager,
@@ -23,10 +23,10 @@ use polkadot_sdk::{
     substrate_frame_rpc_system::SystemApiServer,
      sc_chain_spec,
      polkadot_primitives::{self, Id, PersistedValidationData, UpgradeGoAhead},
-    sp_api::{ApiExt, ProvideRuntimeApi},
+   sp_api::{ApiExt, ProvideRuntimeApi},
+   cumulus_primitives_aura::AuraUnincludedSegmentApi,
 };
 use std::sync::Arc;
-use substrate_runtime::{RuntimeApi, Hash};
 use tokio_stream::wrappers::ReceiverStream;
 use tokio::runtime::Builder as TokioRtBuilder;
 
@@ -195,18 +195,18 @@ fn create_manual_seal_inherent_data_providers(
         //     .map(|info| info.new_validation_code.is_some())
         //     .unwrap_or_default();
 
-        // // The API version is relevant here because the constraints in the runtime changed
-        // // in https://github.com/paritytech/polkadot-sdk/pull/6825. In general, the logic
-        // // here assumes that we are using the aura-ext consensushook in the parachain
-        // // runtime.
-        // let requires_relay_progress = client_for_cidp
-        //     .runtime_api()
-        //     .has_api_with::<dyn AuraUnincludedSegmentApi<NodeSpec::Block>, _>(
-        //         block,
-        //         |version| version > 1,
-        //     )
-        //     .ok()
-        //     .unwrap_or_default();
+        // The API version is relevant here because the constraints in the runtime changed
+        // in https://github.com/paritytech/polkadot-sdk/pull/6825. In general, the logic
+        // here assumes that we are using the aura-ext consensushook in the parachain
+        // runtime.
+        let requires_relay_progress = client
+            .runtime_api()
+            .has_api_with::<dyn AuraUnincludedSegmentApi<Block>, _>(
+                block,
+                |version| version > 1,
+            )
+            .ok()
+            .unwrap_or_default();
 
         let current_para_block_head =
 				Some(polkadot_primitives::HeadData(current_para_head.hash().as_bytes().to_vec()));
@@ -218,11 +218,11 @@ fn create_manual_seal_inherent_data_providers(
             current_para_block: current_block_number,
             para_id: para_id,
             current_para_block_head,
-            // relay_offset: 0,
-            // relay_blocks_per_para_block: requires_relay_progress
-            //     .then(|| 1)
-            //     .unwrap_or_default(),
-            relay_blocks_per_para_block: 1,
+            relay_offset: 0,
+            relay_blocks_per_para_block: requires_relay_progress
+                .then(|| 1)
+                .unwrap_or_default(),
+         //   relay_blocks_per_para_block: 1,
             para_blocks_per_relay_epoch: 10,
             // upgrade_go_ahead: should_send_go_ahead.then(|| {
             //     //log::info!("Detected pending validation code, sending go-ahead signal.");
@@ -237,7 +237,6 @@ fn create_manual_seal_inherent_data_providers(
 
 
         futures::future::ready(Ok((timestamp_provider, mocked_parachain)))
-        //Ok((timestamp_provider, mocked_parachain))
 		}
 	}
 
@@ -291,7 +290,7 @@ pub fn new(
         }
     }
 
-     let storage_overrides = Arc::new(Mutex::new(StorageOverrides::default()));
+    let storage_overrides = Arc::new(Mutex::new(StorageOverrides::default()));
 
     let (client, backend, keystore, mut task_manager) = client::new_client(
         anvil_config.get_genesis_number(),
@@ -365,7 +364,7 @@ pub fn new(
     // let slot_duration = sc_consensus_aura::slot_duration(&*client)
     //     .expect("slot_duration is always present; qed.");
 
-    let slot_duration= sc_consensus_aura::SlotDuration::from_millis(6000);
+    let slot_duration= sc_consensus_aura::SlotDuration::from_millis(SLOT_DURATION);
 
     // The aura digest provider will provide digests that match the provided timestamp data.
     // Without this, the AURA parachain runtimes complain about slot mismatches.
