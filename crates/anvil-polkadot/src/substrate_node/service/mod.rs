@@ -8,8 +8,12 @@ use crate::{
 use anvil::eth::backend::time::TimeManager;
 use parking_lot::Mutex;
 use polkadot_sdk::{
+<<<<<<< HEAD:crates/anvil-polkadot/src/substrate_node/service/mod.rs
     parachains_common::opaque::Block,
     sc_basic_authorship, sc_consensus, sc_consensus_manual_seal,
+=======
+    sc_basic_authorship, sc_consensus, sc_consensus_manual_seal::{self, consensus::aura::AuraConsensusDataProvider}, sc_executor,
+>>>>>>> 1930a4976 (wip/work on requiring relay progress):crates/anvil-polkadot/src/substrate_node/service.rs
     sc_service::{
         self, Configuration, RpcHandlers, SpawnTaskHandle, TaskManager,
         error::Error as ServiceError,
@@ -22,15 +26,15 @@ use polkadot_sdk::{
     sp_arithmetic::traits::UniqueSaturatedInto,
     substrate_frame_rpc_system::SystemApiServer,
      sc_chain_spec,
-     polkadot_primitives::{self, Id, PersistedValidationData},
+     polkadot_primitives::{self, Id, PersistedValidationData, UpgradeGoAhead},
      cumulus_client_service::ParachainHostFunctions, 
+    sp_api::{ApiExt, ProvideRuntimeApi},
 };
 use std::sync::Arc;
 use substrate_runtime::{OpaqueBlock as Block, RuntimeApi, Hash};
 use tokio_stream::wrappers::ReceiverStream;
 use tokio::runtime::Builder as TokioRtBuilder;
 //use substrate_runtime::Hash;
-//use crate::substrate_node::service::sc_consensus_manual_seal::consensus::aura::AuraConsensusDataProvider;
 
 use serde_json::{json, Map, Value};
 
@@ -188,10 +192,29 @@ fn create_manual_seal_inherent_data_providers(
 	> + Send
 	       + Sync{
 		move |block: Hash, ()| {
-			let current_para_head = client
-				.header(block)
-				.expect("Header lookup should succeed")
-				.expect("Header passed in as parent should be present in backend.");
+        let current_para_head = client
+            .header(block)
+            .expect("Header lookup should succeed")
+            .expect("Header passed in as parent should be present in backend.");
+
+        // let should_send_go_ahead = client
+        //     .runtime_api()
+        //     .collect_collation_info(block, &current_para_head)
+        //     .map(|info| info.new_validation_code.is_some())
+        //     .unwrap_or_default();
+
+        // // The API version is relevant here because the constraints in the runtime changed
+        // // in https://github.com/paritytech/polkadot-sdk/pull/6825. In general, the logic
+        // // here assumes that we are using the aura-ext consensushook in the parachain
+        // // runtime.
+        // let requires_relay_progress = client_for_cidp
+        //     .runtime_api()
+        //     .has_api_with::<dyn AuraUnincludedSegmentApi<NodeSpec::Block>, _>(
+        //         block,
+        //         |version| version > 1,
+        //     )
+        //     .ok()
+        //     .unwrap_or_default();
 
         let current_para_block_head =
 				Some(polkadot_primitives::HeadData(current_para_head.hash().as_bytes().to_vec()));
@@ -203,10 +226,14 @@ fn create_manual_seal_inherent_data_providers(
             current_para_block: current_block_number,
             para_id: para_id,
             current_para_block_head,
+            // relay_offset: 0,
+            // relay_blocks_per_para_block: requires_relay_progress
+            //     .then(|| 1)
+            //     .unwrap_or_default(),
             relay_blocks_per_para_block: 1,
             para_blocks_per_relay_epoch: 10,
             // upgrade_go_ahead: should_send_go_ahead.then(|| {
-            //     log::info!("Detected pending validation code, sending go-ahead signal.");
+            //     //log::info!("Detected pending validation code, sending go-ahead signal.");
             //     UpgradeGoAhead::GoAhead
             // }),
             ..Default::default()
@@ -227,16 +254,6 @@ pub fn new(
     anvil_config: &AnvilNodeConfig,
     mut config: Configuration,
 ) -> Result<(Service, TaskManager), ServiceError> {
-<<<<<<< HEAD:crates/anvil-polkadot/src/substrate_node/service/mod.rs
-    let storage_overrides = Arc::new(Mutex::new(StorageOverrides::default()));
-
-    let (client, backend, keystore, mut task_manager) = client::new_client(
-        anvil_config.get_genesis_number(),
-        &config,
-        sc_service::new_wasm_executor(&config.executor),
-        storage_overrides.clone(),
-    )?;
-=======
    // let backend = sc_service::new_db_backend(config.db_config())?;
 
    // let wasm_executor = sc_service::new_wasm_executor(&config.executor);
@@ -247,7 +264,6 @@ pub fn new(
     //     backend.clone(),
     //     wasm_executor.clone(),
     // )?;
->>>>>>> 0670fdd4d (use our state fetching post rebase):crates/anvil-polkadot/src/substrate_node/service.rs
     if let Some(ref fork_url) = anvil_config.fork_url {
         let http_url = fork_url.clone();
         let fork_block_hash = anvil_config.fork_block_hash.clone();
@@ -293,8 +309,6 @@ pub fn new(
         }
     }
 
-<<<<<<< HEAD:crates/anvil-polkadot/src/substrate_node/service/mod.rs
-=======
     // let (client, backend, keystore_container, mut task_manager) =
     //     sc_service::new_full_parts_with_genesis_builder(
     //         &config,
@@ -313,7 +327,6 @@ pub fn new(
         )?;
     let client = Arc::new(client);
 
->>>>>>> 0670fdd4d (use our state fetching post rebase):crates/anvil-polkadot/src/substrate_node/service.rs
     let transaction_pool = Arc::from(
         sc_transaction_pool::Builder::new(
             task_manager.spawn_essential_handle(),
@@ -383,16 +396,16 @@ pub fn new(
     // };
 
     // Note: Changing slot durations are currently not supported
-		// let slot_duration = sc_consensus_aura::slot_duration(&*client)
-		// 	.expect("slot_duration is always present; qed.");
+    // let slot_duration = sc_consensus_aura::slot_duration(&*client)
+    //     .expect("slot_duration is always present; qed.");
 
-       let slot_duration= sc_consensus_aura::SlotDuration::from_millis(6000);
+    let slot_duration= sc_consensus_aura::SlotDuration::from_millis(6000);
 
         // The aura digest provider will provide digests that match the provided timestamp data.
 		// Without this, the AURA parachain runtimes complain about slot mismatches.
-	//	let aura_digest_provider = AuraConsensusDataProvider::new(client);
+	let aura_digest_provider = AuraConsensusDataProvider::new_with_slot_duration(slot_duration);
 
-    let para_id = Id::new(0);
+    let para_id = Id::new(anvil_config.get_chain_id().try_into().unwrap());
 
     let create_inherent_data_providers = create_manual_seal_inherent_data_providers(
 			client.clone(),
