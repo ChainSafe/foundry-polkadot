@@ -8,12 +8,8 @@ use crate::{
 use anvil::eth::backend::time::TimeManager;
 use parking_lot::Mutex;
 use polkadot_sdk::{
-<<<<<<< HEAD:crates/anvil-polkadot/src/substrate_node/service/mod.rs
     parachains_common::opaque::Block,
-    sc_basic_authorship, sc_consensus, sc_consensus_manual_seal,
-=======
     sc_basic_authorship, sc_consensus, sc_consensus_manual_seal::{self, consensus::aura::AuraConsensusDataProvider}, sc_executor,
->>>>>>> 1930a4976 (wip/work on requiring relay progress):crates/anvil-polkadot/src/substrate_node/service.rs
     sc_service::{
         self, Configuration, RpcHandlers, SpawnTaskHandle, TaskManager,
         error::Error as ServiceError,
@@ -27,14 +23,12 @@ use polkadot_sdk::{
     substrate_frame_rpc_system::SystemApiServer,
      sc_chain_spec,
      polkadot_primitives::{self, Id, PersistedValidationData, UpgradeGoAhead},
-     cumulus_client_service::ParachainHostFunctions, 
     sp_api::{ApiExt, ProvideRuntimeApi},
 };
 use std::sync::Arc;
-use substrate_runtime::{OpaqueBlock as Block, RuntimeApi, Hash};
+use substrate_runtime::{RuntimeApi, Hash};
 use tokio_stream::wrappers::ReceiverStream;
 use tokio::runtime::Builder as TokioRtBuilder;
-//use substrate_runtime::Hash;
 
 use serde_json::{json, Map, Value};
 
@@ -42,8 +36,6 @@ use jsonrpsee::http_client::{HttpClient, HttpClientBuilder, HeaderMap, HeaderVal
 use jsonrpsee::core::client::ClientT as JsonClientT;
 use jsonrpsee::rpc_params;
 use indicatif::{ProgressBar, ProgressStyle};
-
-use crate::AnvilNodeConfig;
 
 pub use backend::{BackendError, BackendWithOverlay, StorageOverrides};
 pub use client::Client;
@@ -177,7 +169,7 @@ fn build_forked_chainspec_from_raw_top(
 }
 
 fn create_manual_seal_inherent_data_providers(
-		client: Arc<FullClient>,
+		client: Arc<Client>,
 		para_id: Id,
 		slot_duration: sc_consensus_aura::SlotDuration,
 	) -> impl Fn(
@@ -254,16 +246,6 @@ pub fn new(
     anvil_config: &AnvilNodeConfig,
     mut config: Configuration,
 ) -> Result<(Service, TaskManager), ServiceError> {
-   // let backend = sc_service::new_db_backend(config.db_config())?;
-
-   // let wasm_executor = sc_service::new_wasm_executor(&config.executor);
-    // let genesis_block_builder = DevelopmentGenesisBlockBuilder::new(
-    //     anvil_config.get_genesis_number(),
-    //     config.chain_spec.as_storage_builder(),
-    //     !config.no_genesis(),
-    //     backend.clone(),
-    //     wasm_executor.clone(),
-    // )?;
     if let Some(ref fork_url) = anvil_config.fork_url {
         let http_url = fork_url.clone();
         let fork_block_hash = anvil_config.fork_block_hash.clone();
@@ -309,23 +291,14 @@ pub fn new(
         }
     }
 
-    // let (client, backend, keystore_container, mut task_manager) =
-    //     sc_service::new_full_parts_with_genesis_builder(
-    //         &config,
-    //         None,
-    //         wasm_executor,
-    //         backend,
-    //         genesis_block_builder,
-    //         false,
-    //     )?;
+     let storage_overrides = Arc::new(Mutex::new(StorageOverrides::default()));
 
-      let (client, backend, keystore_container, mut task_manager) =
-        sc_service::new_full_parts::<Block, RuntimeApi, _>(
-            &config,
-            None,
-            sc_service::new_wasm_executor(&config.executor),
-        )?;
-    let client = Arc::new(client);
+    let (client, backend, keystore, mut task_manager) = client::new_client(
+        anvil_config.get_genesis_number(),
+        &config,
+        sc_service::new_wasm_executor(&config.executor),
+        storage_overrides.clone(),
+    )?;
 
     let transaction_pool = Arc::from(
         sc_transaction_pool::Builder::new(
@@ -388,22 +361,15 @@ pub fn new(
         None,
     );
 
-    // let create_inherent_data_providers = {
-    //     move |_, ()| {
-    //         let next_timestamp = sp_timestamp::Timestamp::current();
-    //         async move { Ok(sp_timestamp::InherentDataProvider::new(next_timestamp.into())) }
-    //     }
-    // };
-
     // Note: Changing slot durations are currently not supported
     // let slot_duration = sc_consensus_aura::slot_duration(&*client)
     //     .expect("slot_duration is always present; qed.");
 
     let slot_duration= sc_consensus_aura::SlotDuration::from_millis(6000);
 
-        // The aura digest provider will provide digests that match the provided timestamp data.
-		// Without this, the AURA parachain runtimes complain about slot mismatches.
-	let aura_digest_provider = AuraConsensusDataProvider::new_with_slot_duration(slot_duration);
+    // The aura digest provider will provide digests that match the provided timestamp data.
+    // Without this, the AURA parachain runtimes complain about slot mismatches.
+	//let aura_digest_provider = AuraConsensusDataProvider::new_with_slot_duration(slot_duration);
 
     let para_id = Id::new(anvil_config.get_chain_id().try_into().unwrap());
 
@@ -413,40 +379,7 @@ pub fn new(
 			slot_duration,
 		);
 
-    //  let create_inherent_data_providers = move |block: Hash, ()| async move {
-	// 	let current_para_head = client
-	// 			.header(block)
-	// 			.expect("Header lookup should succeed")
-	// 			.expect("Header passed in as parent should be present in backend.");
-
-    //     let current_para_block_head =
-	// 			Some(polkadot_primitives::HeadData(current_para_head.hash().as_bytes().to_vec()));
-
-    //             let current_block_number =
-	// 			UniqueSaturatedInto::<u32>::unique_saturated_into(*current_para_head.number()) + 1;
-
-    //     let mocked_parachain = MockValidationDataInherentDataProvider::<()> {
-    //         current_para_block: 0,
-    //         para_id: para_id,
-    //         current_para_block_head,
-    //         relay_blocks_per_para_block: 1,
-    //         para_blocks_per_relay_epoch: 10,
-    //         // upgrade_go_ahead: should_send_go_ahead.then(|| {
-    //         //     log::info!("Detected pending validation code, sending go-ahead signal.");
-    //         //     UpgradeGoAhead::GoAhead
-    //         // }),
-    //         ..Default::default()
-    //     };
-
-    //     let timestamp_provider = sp_timestamp::InherentDataProvider::new(
-    //         (slot_duration.as_millis() * current_block_number as u64).into(),
-    //     );
-
-
-    //     Ok((timestamp_provider, mocked_parachain))
-	// };
-
-
+    // Moonbeam logic for reference
     //   let create_inherent_data_providers = move |_, _| async move {
 	// 	//let time = sp_timestamp::InherentDataProvider::from_system_time();
     //     let time = sp_timestamp::InherentDataProvider::new(sp_timestamp::Timestamp::new(0));
