@@ -5,12 +5,12 @@ use polkadot_sdk::{
         blockchain::{self, BlockStatus, HeaderBackend},
         leaves::LeafSet,
     },
+    sc_service::{Configuration, Error},
     sp_blockchain::{self, CachedHeaderMetadata, HeaderMetadata},
-    sp_core,
-    sp_core::{offchain::storage::InMemOffchainStorage, storage::well_known_keys},
+    sp_core::{self, H256, offchain::storage::InMemOffchainStorage, storage::well_known_keys},
     sp_runtime::{
-        Justification, Justifications, StateVersion, Storage,
-        generic::BlockId,
+        Justification, Justifications, StateVersion, Storage, 
+        generic::{SignedBlock, BlockId},
         traits::{Block as BlockT, HashingFor, Header as HeaderT, NumberFor, Zero},
     },
     sp_state_machine::{
@@ -27,6 +27,9 @@ use std::{
     ptr,
     sync::Arc,
 };
+use std::time::Duration;
+use super::LazyLoadingConfig;
+use super::rpc_client::{RPCClient, RPC};
 
 struct PendingBlock<B: BlockT> {
     block: StoredBlock<B>,
@@ -98,12 +101,12 @@ struct BlockchainStorage<Block: BlockT> {
 
 /// In-memory blockchain. Supports concurrent reads.
 #[derive(Clone)]
-pub struct Blockchain<Block: BlockT + DeserializeOwned, R: super::rpc_client::RPCClient<Block>> {
+pub struct Blockchain<Block: BlockT + DeserializeOwned, R: super::rpc_client::RPCClient> {
     rpc_client: Arc<R>,
     storage: Arc<parking_lot::RwLock<BlockchainStorage<Block>>>,
 }
 
-impl<Block: BlockT + DeserializeOwned, R: super::rpc_client::RPCClient<Block>> Blockchain<Block, R> {
+impl<Block: BlockT + DeserializeOwned, R: super::rpc_client::RPCClient> Blockchain<Block, R> {
     /// Get header hash of given block.
     pub fn id(&self, id: BlockId<Block>) -> Option<Block::Hash> {
         match id {
@@ -113,7 +116,7 @@ impl<Block: BlockT + DeserializeOwned, R: super::rpc_client::RPCClient<Block>> B
                 match block_hash {
                     None => {
                         let block_hash =
-                            self.rpc_client.block_hash(Some(n)).ok().flatten();
+                            self.rpc_client.block_hash::<Block>(Some(n)).ok().flatten();
 
                         block_hash.clone().map(|h| {
                             self.storage.write().hashes.insert(n, h);
@@ -299,7 +302,7 @@ impl<Block: BlockT + DeserializeOwned, R: super::rpc_client::RPCClient<Block>> B
     }
 }
 
-impl<Block: BlockT + DeserializeOwned, R: super::rpc_client::RPCClient<Block>> HeaderBackend<Block> for Blockchain<Block, R> {
+impl<Block: BlockT + DeserializeOwned, R: super::rpc_client::RPCClient> HeaderBackend<Block> for Blockchain<Block, R> {
     fn header(
         &self,
         hash: Block::Hash,
@@ -311,7 +314,7 @@ impl<Block: BlockT + DeserializeOwned, R: super::rpc_client::RPCClient<Block>> H
 
         // If not found in local storage, fetch from RPC client
         let header =
-            self.rpc_client.block(Some(hash)).ok().flatten().map(|full_block| {
+            self.rpc_client.block::<Block, _>(Some(hash)).ok().flatten().map(|full_block| {
                 // Cache block header
                 let block = full_block.block.clone();
                 self.storage
@@ -357,7 +360,7 @@ impl<Block: BlockT + DeserializeOwned, R: super::rpc_client::RPCClient<Block>> H
     fn number(&self, hash: Block::Hash) -> sp_blockchain::Result<Option<NumberFor<Block>>> {
         let number = match self.storage.read().blocks.get(&hash) {
             Some(block) => *block.header().number(),
-            _ => match self.rpc_client.block(Some(hash)) {
+            _ => match self.rpc_client.block::<Block, _>(Some(hash)) {
                 Ok(Some(block)) => *block.block.header().number(),
                 err => {
                     return Err(sp_blockchain::Error::UnknownBlock(
@@ -378,7 +381,7 @@ impl<Block: BlockT + DeserializeOwned, R: super::rpc_client::RPCClient<Block>> H
     }
 }
 
-impl<Block: BlockT + DeserializeOwned, R: super::rpc_client::RPCClient<Block>> HeaderMetadata<Block> for Blockchain<Block, R> {
+impl<Block: BlockT + DeserializeOwned, R: super::rpc_client::RPCClient> HeaderMetadata<Block> for Blockchain<Block, R> {
     type Error = sp_blockchain::Error;
 
     fn header_metadata(
@@ -400,20 +403,24 @@ impl<Block: BlockT + DeserializeOwned, R: super::rpc_client::RPCClient<Block>> H
     }
 }
 
-impl<Block: BlockT + DeserializeOwned, R: super::rpc_client::RPCClient<Block>> blockchain::Backend<Block> for Blockchain<Block, R> {
+impl<Block: BlockT + DeserializeOwned, R: super::rpc_client::RPCClient> blockchain::Backend<Block> for Blockchain<Block, R> {
     fn body(
         &self,
         hash: Block::Hash,
     ) -> sp_blockchain::Result<Option<Vec<<Block as BlockT>::Extrinsic>>> {
         // First, try to get the header from local storage
-        if let Some(extrinsics) =
-            self.storage.read().blocks.get(&hash).and_then(|b| b.extrinsics().map(|x| x.to_vec()))
+            if let Some(extrinsics) = self
+            .storage
+            .read()
+            .blocks
+            .get(&hash)
+            .and_then(|b| b.extrinsics().map(|x| x.to_vec()))
         {
             return Ok(Some(extrinsics));
         }
         let extrinsics = self
             .rpc_client
-            .block(Some(hash))
+            .block::<Block, Block::Hash>(Some(hash))
             .ok()
             .flatten()
             .map(|b| b.block.extrinsics().to_vec());
@@ -453,7 +460,7 @@ impl<Block: BlockT + DeserializeOwned, R: super::rpc_client::RPCClient<Block>> b
     }
 }
 
-impl<Block: BlockT + DeserializeOwned, R: super::rpc_client::RPCClient<Block>> backend::AuxStore for Blockchain<Block, R> {
+impl<Block: BlockT + DeserializeOwned, R: super::rpc_client::RPCClient> backend::AuxStore for Blockchain<Block, R> {
     fn insert_aux<
         'a,
         'b: 'a,
@@ -480,7 +487,7 @@ impl<Block: BlockT + DeserializeOwned, R: super::rpc_client::RPCClient<Block>> b
     }
 }
 
-pub struct BlockImportOperation<Block: BlockT + DeserializeOwned, R: super::rpc_client::RPCClient<Block>> {
+pub struct BlockImportOperation<Block: BlockT + DeserializeOwned, R: super::rpc_client::RPCClient> {
     pending_block: Option<PendingBlock<Block>>,
     old_state: ForkedLazyBackend<Block, R>,
     new_state: Option<BackendTransaction<HashingFor<Block>>>,
@@ -491,7 +498,7 @@ pub struct BlockImportOperation<Block: BlockT + DeserializeOwned, R: super::rpc_
     pub(crate) before_fork: bool,
 }
 
-impl<Block: BlockT + DeserializeOwned, R: super::rpc_client::RPCClient<Block>> BlockImportOperation<Block, R> {
+impl<Block: BlockT + DeserializeOwned, R: super::rpc_client::RPCClient> BlockImportOperation<Block, R> {
     fn apply_storage(
         &mut self,
         storage: Storage,
@@ -529,7 +536,7 @@ impl<Block: BlockT + DeserializeOwned, R: super::rpc_client::RPCClient<Block>> B
     }
 }
 
-impl<Block: BlockT + DeserializeOwned, R: super::rpc_client::RPCClient<Block>> backend::BlockImportOperation<Block>
+impl<Block: BlockT + DeserializeOwned, R: super::rpc_client::RPCClient> backend::BlockImportOperation<Block>
     for BlockImportOperation<Block, R>
 {
     type State = ForkedLazyBackend<Block, R>;
@@ -642,13 +649,13 @@ pub struct RawIterArgs {
 }
 
 /// A raw iterator over the `BenchmarkingState`.
-pub struct RawIter<Block: BlockT + DeserializeOwned, R: super::rpc_client::RPCClient<Block>> {
+pub struct RawIter<Block: BlockT + DeserializeOwned, R: super::rpc_client::RPCClient> {
     pub(crate) args: RawIterArgs,
     complete: bool,
     _phantom: PhantomData<(Block, R)>,
 }
 
-impl<Block: BlockT + DeserializeOwned, R: super::rpc_client::RPCClient<Block>> sp_state_machine::StorageIterator<HashingFor<Block>>
+impl<Block: BlockT + DeserializeOwned, R: super::rpc_client::RPCClient> sp_state_machine::StorageIterator<HashingFor<Block>>
     for RawIter<Block, R>
 {
     type Backend = ForkedLazyBackend<Block, R>;
@@ -852,7 +859,7 @@ impl<Block: BlockT + DeserializeOwned, R: super::rpc_client::RPCClient<Block>> s
 }
 
 #[derive(Debug, Clone)]
-pub struct ForkedLazyBackend<Block: BlockT + DeserializeOwned, R: super::rpc_client::RPCClient<Block>> {
+pub struct ForkedLazyBackend<Block: BlockT + DeserializeOwned, R: super::rpc_client::RPCClient> {
     rpc_client: Arc<R>,
     block_hash: Option<Block::Hash>,
     fork_block: Block::Hash,
@@ -861,7 +868,7 @@ pub struct ForkedLazyBackend<Block: BlockT + DeserializeOwned, R: super::rpc_cli
     before_fork: bool,
 }
 
-impl<Block: BlockT + DeserializeOwned, R: super::rpc_client::RPCClient<Block>> ForkedLazyBackend<Block, R> {
+impl<Block: BlockT + DeserializeOwned, R: super::rpc_client::RPCClient> ForkedLazyBackend<Block, R> {
     fn update_storage(&self, key: &[u8], value: &Option<Vec<u8>>) {
         if let Some(val) = value {
             let mut entries: HashMap<Option<ChildInfo>, StorageCollection> = Default::default();
@@ -872,7 +879,7 @@ impl<Block: BlockT + DeserializeOwned, R: super::rpc_client::RPCClient<Block>> F
     }
 }
 
-impl<Block: BlockT + DeserializeOwned, R: super::rpc_client::RPCClient<Block>> sp_state_machine::Backend<HashingFor<Block>>
+impl<Block: BlockT + DeserializeOwned, R: super::rpc_client::RPCClient> sp_state_machine::Backend<HashingFor<Block>>
     for ForkedLazyBackend<Block, R>
 {
     type Error = <DbState<Block> as sp_state_machine::Backend<HashingFor<Block>>>::Error;
@@ -1080,7 +1087,7 @@ impl<Block: BlockT + DeserializeOwned, R: super::rpc_client::RPCClient<Block>> s
     }
 }
 
-impl<B: BlockT + DeserializeOwned, R: super::rpc_client::RPCClient<B>> sp_state_machine::backend::AsTrieBackend<HashingFor<B>> for ForkedLazyBackend<B, R> {
+impl<B: BlockT + DeserializeOwned, R: super::rpc_client::RPCClient> sp_state_machine::backend::AsTrieBackend<HashingFor<B>> for ForkedLazyBackend<B, R> {
     type TrieBackendStorage = PrefixedMemoryDB<HashingFor<B>>;
 
     fn as_trie_backend(
@@ -1091,7 +1098,7 @@ impl<B: BlockT + DeserializeOwned, R: super::rpc_client::RPCClient<B>> sp_state_
 }
 
 /// Lazy loading (In-memory) backend. Keeps all states and blocks in memory.
-pub struct Backend<Block: BlockT + DeserializeOwned, R: super::rpc_client::RPCClient<Block>> {
+pub struct Backend<Block: BlockT + DeserializeOwned, R: super::rpc_client::RPCClient> {
     pub(crate) rpc_client: Arc<R>,
     states: parking_lot::RwLock<HashMap<Block::Hash, ForkedLazyBackend<Block, R>>>,
     pub(crate) blockchain: Blockchain<Block, R>,
@@ -1100,7 +1107,7 @@ pub struct Backend<Block: BlockT + DeserializeOwned, R: super::rpc_client::RPCCl
     pub(crate) fork_checkpoint: Block::Header,
 }
 
-impl<Block: BlockT + DeserializeOwned, R: super::rpc_client::RPCClient<Block>> Backend<Block, R> {
+impl<Block: BlockT + DeserializeOwned, R: super::rpc_client::RPCClient> Backend<Block, R> {
     fn new(rpc_client: Arc<R>, fork_checkpoint: Block::Header) -> Self {
         Backend {
             rpc_client: rpc_client.clone(),
@@ -1113,7 +1120,7 @@ impl<Block: BlockT + DeserializeOwned, R: super::rpc_client::RPCClient<Block>> B
     }
 }
 
-impl<Block: BlockT + DeserializeOwned, R: super::rpc_client::RPCClient<Block>> backend::AuxStore for Backend<Block, R> {
+impl<Block: BlockT + DeserializeOwned, R: super::rpc_client::RPCClient> backend::AuxStore for Backend<Block, R> {
     fn insert_aux<
         'a,
         'b: 'a,
@@ -1133,7 +1140,7 @@ impl<Block: BlockT + DeserializeOwned, R: super::rpc_client::RPCClient<Block>> b
     }
 }
 
-impl<Block: BlockT + DeserializeOwned, R: super::rpc_client::RPCClient<Block>> backend::Backend<Block> for Backend<Block, R> {
+impl<Block: BlockT + DeserializeOwned, R: super::rpc_client::RPCClient> backend::Backend<Block> for Backend<Block, R> {
     type BlockImportOperation = BlockImportOperation<Block, R>;
     type Blockchain = Blockchain<Block, R>;
     type State = ForkedLazyBackend<Block, R>;
@@ -1257,7 +1264,7 @@ impl<Block: BlockT + DeserializeOwned, R: super::rpc_client::RPCClient<Block>> b
             self.states.read().get(&hash).cloned().map(|state| Ok((state, false))).unwrap_or_else(
                 || {
                     self.rpc_client
-                        .header(Some(hash))
+                        .header::<Block>(Some(hash))
                         .ok()
                         .flatten()
                         .ok_or(sp_blockchain::Error::UnknownBlock(
@@ -1334,7 +1341,7 @@ impl<Block: BlockT + DeserializeOwned, R: super::rpc_client::RPCClient<Block>> b
     }
 }
 
-impl<Block: BlockT + DeserializeOwned, R: super::rpc_client::RPCClient<Block>> backend::LocalBackend<Block> for Backend<Block, R> {}
+impl<Block: BlockT + DeserializeOwned, R: super::rpc_client::RPCClient> backend::LocalBackend<Block> for Backend<Block, R> {}
 
 /// Check that genesis storage is valid.
 pub fn check_genesis_storage(storage: &Storage) -> sp_blockchain::Result<()> {
@@ -1351,6 +1358,60 @@ pub fn check_genesis_storage(storage: &Storage) -> sp_blockchain::Result<()> {
     }
 
     Ok(())
+}
+
+pub fn new_backend<Block>(
+    config: &mut Configuration,
+    lazy_loading_config: &LazyLoadingConfig,
+) -> Result<Arc<Backend<Block, super::rpc_client::RPC>>, Error>
+where
+    Block: BlockT + DeserializeOwned,
+    Block::Hash: From<H256>,
+{
+    let http_client = jsonrpsee::http_client::HttpClientBuilder::default()
+        .max_request_size(u32::MAX)
+        .max_response_size(u32::MAX)
+        .request_timeout(Duration::from_secs(10))
+        .build(lazy_loading_config.state_rpc.clone())
+        .map_err(|e| {
+            sp_blockchain::Error::Backend(format!("failed to build http client: {e}"))
+        })?;
+
+    let rpc = RPC::new(
+        http_client,
+        lazy_loading_config.delay_between_requests,
+        lazy_loading_config.max_retries_per_request,
+    );
+
+    let block_hash: Option<Block::Hash> = lazy_loading_config
+        .from_block
+        .map(Into::into);
+
+    let checkpoint: SignedBlock<Block> = rpc
+        .block(block_hash)
+        .map_err(|e| sp_blockchain::Error::Backend(format!("failed to fetch checkpoint block: {e}")))?
+        .ok_or_else(|| sp_blockchain::Error::Backend("fork checkpoint not found".into()))?;
+
+    let backend: Arc<Backend<Block, RPC>> =
+        Arc::new(Backend::new(Arc::new(rpc), checkpoint.block.header().clone()));
+
+    let chain_name = backend
+        .rpc_client
+        .system_chain()
+        .map_err(|e| sp_blockchain::Error::Backend(format!("failed to fetch system_chain: {e}")))?;
+
+    let chain_properties = backend
+        .rpc_client
+        .system_properties()
+        .map_err(|e| sp_blockchain::Error::Backend(format!("failed to fetch system_properties: {e}")))?;
+
+    let spec_builder = super::spec_builder()
+        .with_name(chain_name.as_str())
+        .with_properties(chain_properties);
+
+    config.chain_spec = Box::new(spec_builder.build());
+
+    Ok(backend)
 }
 
 #[cfg(test)]
