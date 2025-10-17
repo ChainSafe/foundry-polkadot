@@ -16,13 +16,14 @@ use polkadot_sdk::{
     sp_storage::ChildInfo,
     sp_version,
     sp_wasm_interface::ExtendedHostFunctions,
+    cumulus_client_service::ParachainHostFunctions, 
 };
 use std::{cell::RefCell, sync::Arc};
 
 /// Wasm executor which overrides the signature checking host functions for impersonation.
 pub type WasmExecutor = sc_executor::WasmExecutor<
     ExtendedHostFunctions<
-        ExtendedHostFunctions<sp_io::SubstrateHostFunctions, SenderAddressRecoveryOverride>,
+        ExtendedHostFunctions<ParachainHostFunctions, SenderAddressRecoveryOverride>,
         PublicKeyToHashOverride,
     >,
 >;
