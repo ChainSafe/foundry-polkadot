@@ -10,6 +10,7 @@ use foundry_common::shell;
 use foundry_config::Chain;
 use rand_08::{SeedableRng, rngs::StdRng};
 use std::{net::IpAddr, path::PathBuf, time::Duration};
+use polkadot_sdk::sp_core::H256;
 
 #[derive(Clone, Debug, Parser)]
 pub struct NodeArgs {
@@ -97,6 +98,9 @@ pub struct NodeArgs {
 
     #[command(flatten)]
     pub server_config: ServerConfig,
+
+    #[command(flatten)]
+    pub fork: ForkArgs,
 }
 
 /// The default IPC endpoint
@@ -134,7 +138,9 @@ impl NodeArgs {
             .with_code_size_limit(self.evm.code_size_limit)
             .disable_code_size_limit(self.evm.disable_code_size_limit)
             .with_disable_default_create2_deployer(self.evm.disable_default_create2_deployer)
-            .with_memory_limit(self.evm.memory_limit);
+            .with_memory_limit(self.evm.memory_limit)
+            .with_fork_url(self.fork.fork_url)
+            .with_fork_block_hash(self.fork.fork_block_hash);
 
         let substrate_node_config = SubstrateNodeConfig::new(&anvil_config);
 
@@ -243,6 +249,22 @@ pub struct AnvilEvmArgs {
     /// The memory limit per EVM execution in bytes.
     #[arg(long)]
     pub memory_limit: Option<u64>,
+}
+
+#[derive(Clone, Debug, Parser)]
+#[command(next_help_heading = "Fork options")]
+pub struct ForkArgs {
+    /// Fetch state over a remote endpoint instead of starting from an empty state.
+    #[arg(
+        long = "fork-url",
+        short = 'f',
+        value_name = "URL",
+    )]
+    pub fork_url: Option<String>,
+
+    /// Fetch state from a specific block hash over a remote endpoint.
+    #[arg(long, value_name = "BLOCK")]
+    pub fork_block_hash: Option<H256>,
 }
 
 /// Clap's value parser for genesis. Loads a genesis.json file.
