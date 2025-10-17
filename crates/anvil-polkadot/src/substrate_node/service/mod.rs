@@ -9,7 +9,7 @@ use std::marker::PhantomData;
 use anvil::eth::backend::time::TimeManager;
 use parking_lot::Mutex;
 use polkadot_sdk::{
-    sc_consensus_manual_seal::{ManualSealParams, run_manual_seal},
+    sc_consensus_manual_seal::{ManualSealParams, run_manual_seal, consensus::aura::AuraConsensusDataProvider},
     parachains_common::{SLOT_DURATION, opaque::Block, Hash},
     sc_basic_authorship, sc_consensus, sc_executor,
     sc_service::{
@@ -19,7 +19,7 @@ use polkadot_sdk::{
     sc_transaction_pool::{self, TransactionPoolWrapper}, sp_io, sp_timestamp,
     sp_wasm_interface::ExtendedHostFunctions,
     sp_keystore::KeystorePtr,
-    //sc_consensus_aura::{self, AuraApi},
+    sc_consensus_aura::{self, AuraApi},
     cumulus_client_parachain_inherent::MockValidationDataInherentDataProvider, 
     sp_arithmetic::traits::UniqueSaturatedInto,
     substrate_frame_rpc_system::SystemApiServer,
@@ -27,12 +27,8 @@ use polkadot_sdk::{
      polkadot_primitives::{self, Id, PersistedValidationData, UpgradeGoAhead},
    sp_api::{ApiExt, ProvideRuntimeApi},
    cumulus_primitives_aura::AuraUnincludedSegmentApi,
-   sc_consensus_aura::SlotDuration,
-  // sp_consensus_slots::SlotDuration,
 };
-//use crate::substrate_node::service::sp_consensus_aura::SlotDuration;
 
-use sc_consensus_manual_seal::consensus::aura::AuraConsensusDataProvider;
 use std::sync::Arc;
 use tokio_stream::wrappers::ReceiverStream;
 use tokio::runtime::Builder as TokioRtBuilder;
@@ -167,8 +163,6 @@ fn build_forked_chainspec_from_raw_top(
         "genesis": { "raw": { "top": top_map, "childrenDefault": children_default }}
     });
 
-    // Maybe here can migrate to dev chain spec with genesis
-
     let bytes = serde_json::to_vec(&spec_json)
         .map_err(|e| ServiceError::Other(format!("serialize spec json failed: {e}")))?;
     type EmptyExt = Option<()>;
@@ -209,6 +203,7 @@ fn create_manual_seal_inherent_data_providers(
         // in https://github.com/paritytech/polkadot-sdk/pull/6825. In general, the logic
         // here assumes that we are using the aura-ext consensushook in the parachain
         // runtime.
+        // Note: Taken from https://github.com/paritytech/polkadot-sdk/issues/7341, but unsure if needed or not
         let requires_relay_progress = client
             .runtime_api()
             .has_api_with::<dyn AuraUnincludedSegmentApi<Block>, _>(
@@ -232,7 +227,6 @@ fn create_manual_seal_inherent_data_providers(
             relay_blocks_per_para_block: requires_relay_progress
                 .then(|| 1)
                 .unwrap_or_default(),
-         //   relay_blocks_per_para_block: 1,
             para_blocks_per_relay_epoch: 1,
             // upgrade_go_ahead: should_send_go_ahead.then(|| {
             //     //log::info!("Detected pending validation code, sending go-ahead signal.");
@@ -249,36 +243,6 @@ fn create_manual_seal_inherent_data_providers(
         futures::future::ready(Ok((timestamp_provider, mocked_parachain)))
 		}
 	}
-
-// pub struct DataProvider<B, P> {
-// 	// slot duration
-// 	slot_duration: sc_consensus_aura::SlotDuration,
-// 	// phantom data for required generics
-// 	_phantom: PhantomData<(B, P)>,
-// }
-
-// impl<B, P> DataProvider<B, P>
-// where
-// 	B: BlockT,
-// {
-// 	/// Creates a new instance of the [`AuraConsensusDataProvider`], requires that `client`
-// 	/// implements [`sp_consensus_aura::AuraApi`]
-// 	pub fn new<C>(client: Arc<C>) -> Self
-// 	where
-// 		C: AuxStore + ProvideRuntimeApi<B> + UsageProvider<B>,
-// 		C::Api: AuraApi<B, AuthorityId>,
-// 	{
-// 		let slot_duration = sc_consensus_aura::slot_duration(&*client)
-// 			.expect("slot_duration is always present; qed.");
-
-// 		Self { slot_duration, _phantom: PhantomData }
-// 	}
-
-// 	/// Creates a new instance of the [`AuraConsensusDataProvider`]
-// 	pub fn new_with_slot_duration(slot_duration: SlotDuration) -> Self {
-// 		Self { slot_duration, _phantom: PhantomData }
-// 	}
-// }
 
 /// Builds a new service for a full client.
 pub fn new(
@@ -400,15 +364,11 @@ pub fn new(
         None,
     );
 
-    // Note: Changing slot durations are currently not supported
-    // let slot_duration = sc_consensus_aura::slot_duration(&*client)
-    //     .expect("slot_duration is always present; qed.");
+   let slot_duration= sc_consensus_aura::SlotDuration::from_millis(SLOT_DURATION);
 
-    let slot_duration= SlotDuration::from_millis(SLOT_DURATION);
-
-    // The aura digest provider will provide digests that match the provided timestamp data.
-    // Without this, the AURA parachain runtimes complain about slot mismatches.
-	let aura_digest_provider = AuraConsensusDataProvider::new_with_slot_duration(slot_duration);
+    // Polkadot-sdk doesnt use the latest changes here, so this function isnt available yet. Can use `new()` instead be our client 
+    // doesnt implement all the needed traits
+	// let aura_digest_provider = AuraConsensusDataProvider::new_with_slot_duration(slot_duration);
 
     let para_id = Id::new(anvil_config.get_chain_id().try_into().unwrap());
 
@@ -417,34 +377,6 @@ pub fn new(
 			para_id,
 			slot_duration,
 		);
-
-    // Moonbeam logic for reference
-    //   let create_inherent_data_providers = move |_, _| async move {
-	// 	//let time = sp_timestamp::InherentDataProvider::from_system_time();
-    //     let time = sp_timestamp::InherentDataProvider::new(sp_timestamp::Timestamp::new(0));
-	// 	// Create a dummy parachain inherent data provider which is required to pass
-	// 	// the checks by the para chain system. We use dummy values because in the 'pending context'
-	// 	// neither do we have access to the real values nor do we need them.
-	// 	let (relay_parent_storage_root, relay_chain_state) =
-	// 		RelayStateSproofBuilder::default().into_state_root_and_proof();
-	// 	let vfp = PersistedValidationData {
-	// 		// This is a hack to make `cumulus_pallet_parachain_system::RelayNumberStrictlyIncreases`
-	// 		// happy. Relay parent number can't be bigger than u32::MAX.
-	// 		relay_parent_number: u32::MAX,
-	// 		relay_parent_storage_root,
-	// 		..Default::default()
-	// 	};
-
-	// 	let parachain_inherent_data = ParachainInherentData {
-	// 		validation_data: vfp,
-	// 		relay_chain_state,
-	// 		downward_messages: Default::default(),
-	// 		horizontal_messages: Default::default(),
-    //         relay_parent_descendants: Vec::new(),
-	// 		collator_peer_id: None,
-	// 	};
-	// 	Ok((time, parachain_inherent_data))
-	// };
 
     let params = ManualSealParams {
         block_import: client.clone(),

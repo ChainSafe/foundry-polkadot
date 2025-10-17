@@ -76,7 +76,7 @@ polkadot-sdk = { git = "https://github.com/paritytech/polkadot-sdk.git", branch 
 
 ] }
 
-sc-consensus-manual-seal = { git = "https://github.com/paritytech/polkadot-sdk.git", package = "sc-consensus-manual-seal"}
+#sc-consensus-manual-seal = { git = "https://github.com/paritytech/polkadot-sdk.git", package = "sc-consensus-manual-seal"}
 anvil.workspace = true
 anvil-core.workspace = true
 anvil-server = { workspace = true, features = ["clap"] }
