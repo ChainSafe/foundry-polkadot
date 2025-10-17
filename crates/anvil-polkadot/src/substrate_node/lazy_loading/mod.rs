@@ -3,6 +3,7 @@ use std::path::PathBuf;
 
 mod backend;
 mod rpc_client;
+mod call_executor;
 
 pub const LAZY_LOADING_LOG_TARGET: &str = "lazy-loading";
 
