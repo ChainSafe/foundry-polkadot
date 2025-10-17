@@ -5,11 +5,13 @@ use crate::{
         rpc::spawn_rpc_server,
     },
 };
+use std::marker::PhantomData;
 use anvil::eth::backend::time::TimeManager;
 use parking_lot::Mutex;
 use polkadot_sdk::{
+    sc_consensus_manual_seal::{ManualSealParams, run_manual_seal},
     parachains_common::{SLOT_DURATION, opaque::Block, Hash},
-    sc_basic_authorship, sc_consensus, sc_consensus_manual_seal::{self, consensus::aura::AuraConsensusDataProvider}, sc_executor,
+    sc_basic_authorship, sc_consensus, sc_executor,
     sc_service::{
         self, Configuration, RpcHandlers, SpawnTaskHandle, TaskManager,
         error::Error as ServiceError,
@@ -17,7 +19,7 @@ use polkadot_sdk::{
     sc_transaction_pool::{self, TransactionPoolWrapper}, sp_io, sp_timestamp,
     sp_wasm_interface::ExtendedHostFunctions,
     sp_keystore::KeystorePtr,
-    sc_consensus_aura,
+    //sc_consensus_aura::{self, AuraApi},
     cumulus_client_parachain_inherent::MockValidationDataInherentDataProvider, 
     sp_arithmetic::traits::UniqueSaturatedInto,
     substrate_frame_rpc_system::SystemApiServer,
@@ -25,7 +27,12 @@ use polkadot_sdk::{
      polkadot_primitives::{self, Id, PersistedValidationData, UpgradeGoAhead},
    sp_api::{ApiExt, ProvideRuntimeApi},
    cumulus_primitives_aura::AuraUnincludedSegmentApi,
+   sc_consensus_aura::SlotDuration,
+  // sp_consensus_slots::SlotDuration,
 };
+//use crate::substrate_node::service::sp_consensus_aura::SlotDuration;
+
+use sc_consensus_manual_seal::consensus::aura::AuraConsensusDataProvider;
 use std::sync::Arc;
 use tokio_stream::wrappers::ReceiverStream;
 use tokio::runtime::Builder as TokioRtBuilder;
@@ -159,6 +166,9 @@ fn build_forked_chainspec_from_raw_top(
         "consensusEngine": null,
         "genesis": { "raw": { "top": top_map, "childrenDefault": children_default }}
     });
+
+    // Maybe here can migrate to dev chain spec with genesis
+
     let bytes = serde_json::to_vec(&spec_json)
         .map_err(|e| ServiceError::Other(format!("serialize spec json failed: {e}")))?;
     type EmptyExt = Option<()>;
@@ -223,7 +233,7 @@ fn create_manual_seal_inherent_data_providers(
                 .then(|| 1)
                 .unwrap_or_default(),
          //   relay_blocks_per_para_block: 1,
-            para_blocks_per_relay_epoch: 10,
+            para_blocks_per_relay_epoch: 1,
             // upgrade_go_ahead: should_send_go_ahead.then(|| {
             //     //log::info!("Detected pending validation code, sending go-ahead signal.");
             //     UpgradeGoAhead::GoAhead
@@ -239,6 +249,36 @@ fn create_manual_seal_inherent_data_providers(
         futures::future::ready(Ok((timestamp_provider, mocked_parachain)))
 		}
 	}
+
+// pub struct DataProvider<B, P> {
+// 	// slot duration
+// 	slot_duration: sc_consensus_aura::SlotDuration,
+// 	// phantom data for required generics
+// 	_phantom: PhantomData<(B, P)>,
+// }
+
+// impl<B, P> DataProvider<B, P>
+// where
+// 	B: BlockT,
+// {
+// 	/// Creates a new instance of the [`AuraConsensusDataProvider`], requires that `client`
+// 	/// implements [`sp_consensus_aura::AuraApi`]
+// 	pub fn new<C>(client: Arc<C>) -> Self
+// 	where
+// 		C: AuxStore + ProvideRuntimeApi<B> + UsageProvider<B>,
+// 		C::Api: AuraApi<B, AuthorityId>,
+// 	{
+// 		let slot_duration = sc_consensus_aura::slot_duration(&*client)
+// 			.expect("slot_duration is always present; qed.");
+
+// 		Self { slot_duration, _phantom: PhantomData }
+// 	}
+
+// 	/// Creates a new instance of the [`AuraConsensusDataProvider`]
+// 	pub fn new_with_slot_duration(slot_duration: SlotDuration) -> Self {
+// 		Self { slot_duration, _phantom: PhantomData }
+// 	}
+// }
 
 /// Builds a new service for a full client.
 pub fn new(
@@ -364,11 +404,11 @@ pub fn new(
     // let slot_duration = sc_consensus_aura::slot_duration(&*client)
     //     .expect("slot_duration is always present; qed.");
 
-    let slot_duration= sc_consensus_aura::SlotDuration::from_millis(SLOT_DURATION);
+    let slot_duration= SlotDuration::from_millis(SLOT_DURATION);
 
     // The aura digest provider will provide digests that match the provided timestamp data.
     // Without this, the AURA parachain runtimes complain about slot mismatches.
-	//let aura_digest_provider = AuraConsensusDataProvider::new_with_slot_duration(slot_duration);
+	let aura_digest_provider = AuraConsensusDataProvider::new_with_slot_duration(slot_duration);
 
     let para_id = Id::new(anvil_config.get_chain_id().try_into().unwrap());
 
@@ -406,7 +446,7 @@ pub fn new(
 	// 	Ok((time, parachain_inherent_data))
 	// };
 
-    let params = sc_consensus_manual_seal::ManualSealParams {
+    let params = ManualSealParams {
         block_import: client.clone(),
         env: proposer,
         client: client.clone(),
@@ -416,7 +456,7 @@ pub fn new(
         consensus_data_provider: None,
         create_inherent_data_providers,
     };
-    let authorship_future = sc_consensus_manual_seal::run_manual_seal(params);
+    let authorship_future = run_manual_seal(params);
 
     task_manager.spawn_essential_handle().spawn_blocking(
         "manual-seal",

@@ -72,8 +72,11 @@ polkadot-sdk = { git = "https://github.com/paritytech/polkadot-sdk.git", branch 
 	"sp-arithmetic",
 	"cumulus-client-service",
 	"cumulus-primitives-aura",
+	#"sp-consensus-aura",
 
 ] }
+
+sc-consensus-manual-seal = { git = "https://github.com/paritytech/polkadot-sdk.git", package = "sc-consensus-manual-seal"}
 anvil.workspace = true
 anvil-core.workspace = true
 anvil-server = { workspace = true, features = ["clap"] }
@@ -151,7 +154,7 @@ tokio-stream = "0.1.17"
 jsonrpsee = "0.24.9"
 sqlx = "0.8.6"
 indicatif.workspace = true
-sc-consensus-manual-seal = "0.54.0"
+#sc-consensus-manual-seal = "0.54.0"
 
 [dev-dependencies]
 alloy-provider = { workspace = true, features = ["txpool-api"] }
