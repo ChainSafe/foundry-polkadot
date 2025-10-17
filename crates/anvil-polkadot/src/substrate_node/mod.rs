@@ -1,5 +1,9 @@
 pub mod chain_spec;
+pub mod genesis;
+pub mod host;
+pub mod impersonation;
 pub mod in_mem_rpc;
 mod lazy_loading;
 pub mod mining_engine;
+pub mod rpc;
 pub mod service;
