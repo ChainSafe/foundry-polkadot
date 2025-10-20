@@ -193,6 +193,7 @@ fn create_manual_seal_inherent_data_providers(
             .expect("Header lookup should succeed")
             .expect("Header passed in as parent should be present in backend.");
 
+        // NOTE: Our runtime API doesnt seem to have collect_collation_info available
         // let should_send_go_ahead = client
         //     .runtime_api()
         //     .collect_collation_info(block, &current_para_head)
@@ -366,7 +367,7 @@ pub fn new(
 
    let slot_duration= sc_consensus_aura::SlotDuration::from_millis(SLOT_DURATION);
 
-    // Polkadot-sdk doesnt use the latest changes here, so this function isnt available yet. Can use `new()` instead be our client 
+    // Polkadot-sdk doesnt seem to use the latest changes here, so this function isnt available yet. Can use `new()` instead but our client 
     // doesnt implement all the needed traits
 	// let aura_digest_provider = AuraConsensusDataProvider::new_with_slot_duration(slot_duration);
 
