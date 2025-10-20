@@ -1,0 +1,1072 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `crates/forge/src/cmd/test/mod.rs`."><title>mod.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../../static.files/rustdoc-ca0dd0c4.css"><meta name="rustdoc-vars" data-root-path="../../../../" data-static-root-path="../../../../static.files/" data-current-crate="forge" data-themes="" data-resource-suffix="" data-rustdoc-version="1.92.0-nightly (f04e3dfc8 2025-10-19)" data-channel="nightly" data-search-js="search-8d3311b9.js" data-stringdex-js="stringdex-c3e638e9.js" data-settings-js="settings-c38705f0.js" ><script src="../../../../static.files/storage-e2aeef58.js"></script><script defer src="../../../../static.files/src-script-813739b1.js"></script><script defer src="../../../../src-files.js"></script><script defer src="../../../../static.files/main-ce535bd0.js"></script><noscript><link rel="stylesheet" href="../../../../static.files/noscript-263c88ec.css"></noscript><link rel="alternate icon" type="image/png" href="../../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">forge/cmd/test/</div>mod.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-4"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="kw">use super</span><a href="../../lockfile.rs.html#270">::{<a href="../mod.rs.html#25">install</a>, <a href="filter.rs.html#172-175">test::filter::ProjectPathsAwareFilter</a>, <a href="../watch.rs.html#38-70">watch::WatchArgs</a>};
+<a href=#2 id=2 data-nosnippet>2</a></a><span class="kw">use crate</span><a href="../../lockfile.rs.html#270">::{
+<a href=#3 id=3 data-nosnippet>3</a>    <a href="../../multi_runner.rs.html#49-70">MultiContractRunner</a>, <a href="../../multi_runner.rs.html#398-420">MultiContractRunnerBuilder</a>, <a href="../../../../forge/trait.TestFilter.html">TestFilter</a>,
+<a href=#4 id=4 data-nosnippet>4</a>    <a href="../../../../forge/decode/fn.decode_console_logs.html">decode::decode_console_logs</a>,
+<a href=#5 id=5 data-nosnippet>5</a>    <a href="../../gas_report.rs.html#21-35">gas_report::GasReport</a>,
+<a href=#6 id=6 data-nosnippet>6</a>    <a href="../../multi_runner.rs.html#569-572">multi_runner::matches_contract</a>,
+<a href=#7 id=7 data-nosnippet>7</a>    result::{<a href="../../result.rs.html#206-214">SuiteResult</a>, <a href="../../result.rs.html#30-45">TestOutcome</a>, <a href="../../result.rs.html#344-349">TestStatus</a>},
+<a href=#8 id=8 data-nosnippet>8</a>    traces::{
+<a href=#9 id=9 data-nosnippet>9</a>        <a href="../../../../forge/traces/struct.CallTraceDecoderBuilder.html">CallTraceDecoderBuilder</a>, <a href="../../../../forge/traces/enum.InternalTraceMode.html">InternalTraceMode</a>, <a href="../../../../forge/traces/enum.TraceKind.html">TraceKind</a>,
+<a href=#10 id=10 data-nosnippet>10</a>        debug::{<a href="../../../../forge/traces/debug/struct.ContractSources.html">ContractSources</a>, <a href="../../../../forge/traces/struct.DebugTraceIdentifier.html">DebugTraceIdentifier</a>},
+<a href=#11 id=11 data-nosnippet>11</a>        <a href="../../../../forge/traces/fn.decode_trace_arena.html">decode_trace_arena</a>, <a href="../../../../forge/traces/folded_stack_trace/index.html">folded_stack_trace</a>,
+<a href=#12 id=12 data-nosnippet>12</a>        <a href="../../../../forge/traces/identifier/struct.SignaturesIdentifier.html">identifier::SignaturesIdentifier</a>,
+<a href=#13 id=13 data-nosnippet>13</a>    },
+<a href=#14 id=14 data-nosnippet>14</a>};
+<a href=#15 id=15 data-nosnippet>15</a></a><span class="kw">use </span><a href="../../lockfile.rs.html#270"><a href="../../../../forge/revm/primitives/type.U256.html">alloy_primitives::U256</a>;
+<a href=#16 id=16 data-nosnippet>16</a></a><span class="kw">use </span><a href="../../lockfile.rs.html#270"><a href="https://docs.rs/chrono/latest/chrono/offset/utc/struct.Utc.html">chrono::Utc</a>;
+<a href=#17 id=17 data-nosnippet>17</a></a><span class="kw">use </span><a href="../../lockfile.rs.html#270">clap::{Parser, ValueHint};
+<a href=#18 id=18 data-nosnippet>18</a></a><span class="kw">use </span><a href="../../lockfile.rs.html#270">eyre::{<a href="https://docs.rs/eyre/0.6.12/eyre/trait.WrapErr.html">Context</a>, <a href="https://docs.rs/eyre/0.6.12/eyre/trait.OptionExt.html">OptionExt</a>, </a><a class="prelude-ty" href="https://docs.rs/eyre/0.6.12/eyre/type.Result.html">Result</a><a href="../../lockfile.rs.html#270">, <a href="https://docs.rs/eyre/0.6.12/eyre/macro.bail.html">bail</a>};
+<a href=#19 id=19 data-nosnippet>19</a></a><span class="kw">use </span><a href="../../lockfile.rs.html#270">foundry_block_explorers::EtherscanApiVersion;
+<a href=#20 id=20 data-nosnippet>20</a></a><span class="kw">use </span><a href="../../lockfile.rs.html#270">foundry_cli::{
+<a href=#21 id=21 data-nosnippet>21</a>    opts::{BuildOpts, GlobalArgs},
+<a href=#22 id=22 data-nosnippet>22</a>    utils::{</a><span class="self">self</span><a href="../../lockfile.rs.html#270">, LoadConfig},
+<a href=#23 id=23 data-nosnippet>23</a>};
+<a href=#24 id=24 data-nosnippet>24</a></a><span class="kw">use </span><a href="../../lockfile.rs.html#270">foundry_common::{<a href="../../../../foundry_common/traits/trait.TestFunctionExt.html">TestFunctionExt</a>, <a href="../../../../foundry_common/compile/struct.ProjectCompiler.html">compile::ProjectCompiler</a>, <a href="../../../../foundry_common/evm/struct.EvmArgs.html">evm::EvmArgs</a>, <a href="../../../../foundry_common/fs/index.html">fs</a>, <a href="../../../../foundry_common/io/shell/index.html">shell</a>};
+<a href=#25 id=25 data-nosnippet>25</a></a><span class="kw">use </span><a href="../../lockfile.rs.html#270">foundry_compilers::{
+<a href=#26 id=26 data-nosnippet>26</a>    ProjectCompileOutput,
+<a href=#27 id=27 data-nosnippet>27</a>    artifacts::output_selection::OutputSelection,
+<a href=#28 id=28 data-nosnippet>28</a>    compilers::{
+<a href=#29 id=29 data-nosnippet>29</a>        Language,
+<a href=#30 id=30 data-nosnippet>30</a>        multi::{MultiCompiler, MultiCompilerLanguage},
+<a href=#31 id=31 data-nosnippet>31</a>        resolc::dual_compiled_contracts::DualCompiledContracts,
+<a href=#32 id=32 data-nosnippet>32</a>    },
+<a href=#33 id=33 data-nosnippet>33</a>    utils::source_files_iter,
+<a href=#34 id=34 data-nosnippet>34</a>};
+<a href=#35 id=35 data-nosnippet>35</a></a><span class="kw">use </span><a href="../../lockfile.rs.html#270">foundry_config::{
+<a href=#36 id=36 data-nosnippet>36</a>    <a href="../../../../foundry_config/struct.Config.html">Config</a>, figment,
+<a href=#37 id=37 data-nosnippet>37</a>    figment::{
+<a href=#38 id=38 data-nosnippet>38</a>        Metadata, Profile, Provider,
+<a href=#39 id=39 data-nosnippet>39</a>        value::{Dict, Map},
+<a href=#40 id=40 data-nosnippet>40</a>    },
+<a href=#41 id=41 data-nosnippet>41</a>    <a href="../../../../foundry_config/filter/struct.GlobMatcher.html">filter::GlobMatcher</a>,
+<a href=#42 id=42 data-nosnippet>42</a>    <a href="../../../../foundry_config/revive/index.html">revive</a>,
+<a href=#43 id=43 data-nosnippet>43</a>};
+<a href=#44 id=44 data-nosnippet>44</a></a><span class="kw">use </span><a href="../../lockfile.rs.html#270"><a href="../../../../foundry_debugger/debugger/struct.Debugger.html">foundry_debugger::Debugger</a>;
+<a href=#45 id=45 data-nosnippet>45</a></a><span class="kw">use </span><a href="../../lockfile.rs.html#270"><a href="../../../../forge/traces/identifier/struct.TraceIdentifiers.html">foundry_evm::traces::identifier::TraceIdentifiers</a>;
+<a href=#46 id=46 data-nosnippet>46</a></a><span class="kw">use </span><a href="../../lockfile.rs.html#270">regex::Regex;
+<a href=#47 id=47 data-nosnippet>47</a></a><span class="kw">use </span><a href="../../lockfile.rs.html#270">std::{
+<a href=#48 id=48 data-nosnippet>48</a>    collections::{<a href="https://doc.rust-lang.org/nightly/alloc/collections/btree/map/struct.BTreeMap.html">BTreeMap</a>, <a href="https://doc.rust-lang.org/nightly/alloc/collections/btree/set/struct.BTreeSet.html">BTreeSet</a>},
+<a href=#49 id=49 data-nosnippet>49</a>    <a href="https://doc.rust-lang.org/nightly/core/fmt/trait.Write.html">fmt::Write</a>,
+<a href=#50 id=50 data-nosnippet>50</a>    <a href="https://doc.rust-lang.org/nightly/std/path/struct.PathBuf.html">path::PathBuf</a>,
+<a href=#51 id=51 data-nosnippet>51</a>    sync::{<a href="https://doc.rust-lang.org/nightly/alloc/sync/struct.Arc.html">Arc</a>, <a href="https://doc.rust-lang.org/nightly/std/sync/mpsc/fn.channel.html">mpsc::channel</a>},
+<a href=#52 id=52 data-nosnippet>52</a>    time::{<a href="https://doc.rust-lang.org/nightly/core/time/struct.Duration.html">Duration</a>, <a href="https://doc.rust-lang.org/nightly/std/time/struct.Instant.html">Instant</a>},
+<a href=#53 id=53 data-nosnippet>53</a>};
+<a href=#54 id=54 data-nosnippet>54</a></a><span class="kw">use </span><a href="../../lockfile.rs.html#270">yansi::Paint;
+<a href=#55 id=55 data-nosnippet>55</a>
+<a href=#56 id=56 data-nosnippet>56</a></a><span class="kw">mod </span><a href="../../lockfile.rs.html#270"><a href="filter.rs.html#1-229">filter</a>;
+<a href=#57 id=57 data-nosnippet>57</a></a><span class="kw">mod </span><a href="../../lockfile.rs.html#270"><a href="summary.rs.html#1-226">summary</a>;
+<a href=#58 id=58 data-nosnippet>58</a></a><span class="kw">use crate</span><a href="../../lockfile.rs.html#270">::{<a href="../../result.rs.html#740-759">result::TestKind</a>, <a href="../../../../forge/traces/fn.render_trace_arena_inner.html">traces::render_trace_arena_inner</a>};
+<a href=#59 id=59 data-nosnippet>59</a></a><span class="kw">pub use </span><a href="../../lockfile.rs.html#270"><a href="filter.rs.html#12-45">filter::FilterArgs</a>;
+<a href=#60 id=60 data-nosnippet>60</a></a><span class="kw">use </span><a href="../../lockfile.rs.html#270">quick_junit::{NonSuccessKind, Report, TestCase, TestCaseStatus, TestSuite};
+<a href=#61 id=61 data-nosnippet>61</a></a><span class="kw">use </span><a href="../../lockfile.rs.html#270">summary::{<a href="summary.rs.html#10-17">TestSummaryReport</a>, <a href="summary.rs.html#140-190">format_invariant_metrics_table</a>};
+<a href=#62 id=62 data-nosnippet>62</a>
+<a href=#63 id=63 data-nosnippet>63</a></a><span class="comment">// Loads project's figment and merges the build cli arguments into it
+<a href=#64 id=64 data-nosnippet>64</a></span><a class="macro" href="../../../../foundry_config/macro.merge_impl_figment_convert.html">foundry_config::merge_impl_figment_convert!</a><a href="../../lockfile.rs.html#270">(<a href="#69-202">TestArgs</a>, build, evm);
+<a href=#65 id=65 data-nosnippet>65</a>
+<a href=#66 id=66 data-nosnippet>66</a></a><span class="doccomment">/// CLI arguments for `forge test`.
+<a href=#67 id=67 data-nosnippet>67</a></span><span class="attr"><a href="../../lockfile.rs.html#270">#[derive(<a href="#69-202">Clone</a>, <a href="https://doc.rust-lang.org/nightly/core/fmt/type.Result.html">Debug</a>, Parser)]
+<a href=#68 id=68 data-nosnippet>68</a>#[command(next_help_heading = </a><span class="string">"Test options"</span>)]
+<a href=#69 id=69 data-nosnippet>69</a></span><span class="kw">pub struct </span><a href="../../lockfile.rs.html#270"><a href="#69-202">TestArgs</a> {
+<a href=#70 id=70 data-nosnippet>70</a>    </a><span class="comment">// Include global options for users of this struct.
+<a href=#71 id=71 data-nosnippet>71</a>    </span><span class="attr">#[command(flatten)]
+<a href=#72 id=72 data-nosnippet>72</a>    </span><span class="kw">pub </span><a href="../../lockfile.rs.html#270">global: GlobalArgs,
+<a href=#73 id=73 data-nosnippet>73</a>
+<a href=#74 id=74 data-nosnippet>74</a>    </a><span class="doccomment">/// The contract file you want to test, it's a shortcut for --match-path.
+<a href=#75 id=75 data-nosnippet>75</a>    </span><span class="attr">#[arg(value_hint = ValueHint::FilePath)]
+<a href=#76 id=76 data-nosnippet>76</a>    </span><span class="kw">pub </span><a href="../../lockfile.rs.html#270">path: </a><a class="prelude-ty" href="https://doc.rust-lang.org/nightly/core/option/enum.Option.html">Option</a><a href="../../lockfile.rs.html#270">&lt;<a href="../../../../foundry_config/filter/struct.GlobMatcher.html">GlobMatcher</a>&gt;,
+<a href=#77 id=77 data-nosnippet>77</a>
+<a href=#78 id=78 data-nosnippet>78</a>    </a><span class="doccomment">/// Run a single test in the debugger.
+<a href=#79 id=79 data-nosnippet>79</a>    ///
+<a href=#80 id=80 data-nosnippet>80</a>    /// The matching test will be opened in the debugger regardless of the outcome of the test.
+<a href=#81 id=81 data-nosnippet>81</a>    ///
+<a href=#82 id=82 data-nosnippet>82</a>    /// If the matching test is a fuzz test, then it will open the debugger on the first failure
+<a href=#83 id=83 data-nosnippet>83</a>    /// case. If the fuzz test does not fail, it will open the debugger on the last fuzz case.
+<a href=#84 id=84 data-nosnippet>84</a>    </span><span class="attr"><a href="../../lockfile.rs.html#270">#[arg(long, conflicts_with_all = [</a><span class="string">"flamegraph"</span>, <span class="string">"flamechart"</span>, <span class="string">"decode_internal"</span>, <span class="string">"rerun"</span>]</span><a href="../../lockfile.rs.html#270">)]
+<a href=#85 id=85 data-nosnippet>85</a>    debug: <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>,
+<a href=#86 id=86 data-nosnippet>86</a>
+<a href=#87 id=87 data-nosnippet>87</a>    </a><span class="doccomment">/// Generate a flamegraph for a single test. Implies `--decode-internal`.
+<a href=#88 id=88 data-nosnippet>88</a>    ///
+<a href=#89 id=89 data-nosnippet>89</a>    /// A flame graph is used to visualize which functions or operations within the smart contract
+<a href=#90 id=90 data-nosnippet>90</a>    /// are consuming the most gas overall in a sorted manner.
+<a href=#91 id=91 data-nosnippet>91</a>    </span><span class="attr">#[arg(long)]
+<a href=#92 id=92 data-nosnippet>92</a>    </span><a href="../../lockfile.rs.html#270">flamegraph: <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>,
+<a href=#93 id=93 data-nosnippet>93</a>
+<a href=#94 id=94 data-nosnippet>94</a>    </a><span class="doccomment">/// Generate a flamechart for a single test. Implies `--decode-internal`.
+<a href=#95 id=95 data-nosnippet>95</a>    ///
+<a href=#96 id=96 data-nosnippet>96</a>    /// A flame chart shows the gas usage over time, illustrating when each function is
+<a href=#97 id=97 data-nosnippet>97</a>    /// called (execution order) and how much gas it consumes at each point in the timeline.
+<a href=#98 id=98 data-nosnippet>98</a>    </span><span class="attr"><a href="../../lockfile.rs.html#270">#[arg(long, conflicts_with = </a><span class="string">"flamegraph"</span>)]
+<a href=#99 id=99 data-nosnippet>99</a>    </span><a href="../../lockfile.rs.html#270">flamechart: <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>,
+<a href=#100 id=100 data-nosnippet>100</a>
+<a href=#101 id=101 data-nosnippet>101</a>    </a><span class="doccomment">/// Identify internal functions in traces.
+<a href=#102 id=102 data-nosnippet>102</a>    ///
+<a href=#103 id=103 data-nosnippet>103</a>    /// This will trace internal functions and decode stack parameters.
+<a href=#104 id=104 data-nosnippet>104</a>    ///
+<a href=#105 id=105 data-nosnippet>105</a>    /// Parameters stored in memory (such as bytes or arrays) are currently decoded only when a
+<a href=#106 id=106 data-nosnippet>106</a>    /// single function is matched, similarly to `--debug`, for performance reasons.
+<a href=#107 id=107 data-nosnippet>107</a>    </span><span class="attr">#[arg(long)]
+<a href=#108 id=108 data-nosnippet>108</a>    </span><a href="../../lockfile.rs.html#270">decode_internal: <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>,
+<a href=#109 id=109 data-nosnippet>109</a>
+<a href=#110 id=110 data-nosnippet>110</a>    </a><span class="doccomment">/// Dumps all debugger steps to file.
+<a href=#111 id=111 data-nosnippet>111</a>    </span><span class="attr"><a href="../../lockfile.rs.html#270">#[arg(
+<a href=#112 id=112 data-nosnippet>112</a>        long,
+<a href=#113 id=113 data-nosnippet>113</a>        requires = </a><span class="string">"debug"</span><a href="../../lockfile.rs.html#270">,
+<a href=#114 id=114 data-nosnippet>114</a>        value_hint = ValueHint::FilePath,
+<a href=#115 id=115 data-nosnippet>115</a>        value_name = </a><span class="string">"PATH"
+<a href=#116 id=116 data-nosnippet>116</a>    </span>)]
+<a href=#117 id=117 data-nosnippet>117</a>    </span><a href="../../lockfile.rs.html#270">dump: </a><a class="prelude-ty" href="https://doc.rust-lang.org/nightly/core/option/enum.Option.html">Option</a><a href="../../lockfile.rs.html#270">&lt;<a href="https://doc.rust-lang.org/nightly/std/path/struct.PathBuf.html">PathBuf</a>&gt;,
+<a href=#118 id=118 data-nosnippet>118</a>
+<a href=#119 id=119 data-nosnippet>119</a>    </a><span class="doccomment">/// Print a gas report.
+<a href=#120 id=120 data-nosnippet>120</a>    </span><span class="attr"><a href="../../lockfile.rs.html#270">#[arg(long, env = </a><span class="string">"FORGE_GAS_REPORT"</span>)]
+<a href=#121 id=121 data-nosnippet>121</a>    </span><a href="../../lockfile.rs.html#270">gas_report: <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>,
+<a href=#122 id=122 data-nosnippet>122</a>
+<a href=#123 id=123 data-nosnippet>123</a>    </a><span class="doccomment">/// Check gas snapshots against previous runs.
+<a href=#124 id=124 data-nosnippet>124</a>    </span><span class="attr"><a href="../../lockfile.rs.html#270">#[arg(long, env = </a><span class="string">"FORGE_SNAPSHOT_CHECK"</span>)]
+<a href=#125 id=125 data-nosnippet>125</a>    </span><a href="../../lockfile.rs.html#270">gas_snapshot_check: </a><a class="prelude-ty" href="https://doc.rust-lang.org/nightly/core/option/enum.Option.html">Option</a><a href="../../lockfile.rs.html#270">&lt;<a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>&gt;,
+<a href=#126 id=126 data-nosnippet>126</a>
+<a href=#127 id=127 data-nosnippet>127</a>    </a><span class="doccomment">/// Enable/disable recording of gas snapshot results.
+<a href=#128 id=128 data-nosnippet>128</a>    </span><span class="attr"><a href="../../lockfile.rs.html#270">#[arg(long, env = </a><span class="string">"FORGE_SNAPSHOT_EMIT"</span>)]
+<a href=#129 id=129 data-nosnippet>129</a>    </span><a href="../../lockfile.rs.html#270">gas_snapshot_emit: </a><a class="prelude-ty" href="https://doc.rust-lang.org/nightly/core/option/enum.Option.html">Option</a><a href="../../lockfile.rs.html#270">&lt;<a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>&gt;,
+<a href=#130 id=130 data-nosnippet>130</a>
+<a href=#131 id=131 data-nosnippet>131</a>    </a><span class="doccomment">/// Exit with code 0 even if a test fails.
+<a href=#132 id=132 data-nosnippet>132</a>    </span><span class="attr"><a href="../../lockfile.rs.html#270">#[arg(long, env = </a><span class="string">"FORGE_ALLOW_FAILURE"</span>)]
+<a href=#133 id=133 data-nosnippet>133</a>    </span><a href="../../lockfile.rs.html#270">allow_failure: <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>,
+<a href=#134 id=134 data-nosnippet>134</a>
+<a href=#135 id=135 data-nosnippet>135</a>    </a><span class="doccomment">/// Suppress successful test traces and show only traces for failures.
+<a href=#136 id=136 data-nosnippet>136</a>    </span><span class="attr"><a href="../../lockfile.rs.html#270">#[arg(long, short, env = </a><span class="string">"FORGE_SUPPRESS_SUCCESSFUL_TRACES"</span><a href="../../lockfile.rs.html#270">, help_heading = </a><span class="string">"Display options"</span>)]
+<a href=#137 id=137 data-nosnippet>137</a>    </span><a href="../../lockfile.rs.html#270">suppress_successful_traces: <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>,
+<a href=#138 id=138 data-nosnippet>138</a>
+<a href=#139 id=139 data-nosnippet>139</a>    </a><span class="doccomment">/// Output test results as JUnit XML report.
+<a href=#140 id=140 data-nosnippet>140</a>    </span><span class="attr"><a href="../../lockfile.rs.html#270">#[arg(long, conflicts_with_all = [</a><span class="string">"quiet"</span>, <span class="string">"json"</span>, <span class="string">"gas_report"</span>, <span class="string">"summary"</span>, <span class="string">"list"</span>, <span class="string">"show_progress"</span>]</span><a href="../../lockfile.rs.html#270">, help_heading = </a><span class="string">"Display options"</span>)]
+<a href=#141 id=141 data-nosnippet>141</a>    <span class="kw">pub </span><a href="../../lockfile.rs.html#270">junit: <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>,
+<a href=#142 id=142 data-nosnippet>142</a>
+<a href=#143 id=143 data-nosnippet>143</a>    </a><span class="doccomment">/// Stop running tests after the first failure.
+<a href=#144 id=144 data-nosnippet>144</a>    </span><span class="attr">#[arg(long)]
+<a href=#145 id=145 data-nosnippet>145</a>    </span><span class="kw">pub </span><a href="../../lockfile.rs.html#270">fail_fast: <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>,
+<a href=#146 id=146 data-nosnippet>146</a>
+<a href=#147 id=147 data-nosnippet>147</a>    </a><span class="doccomment">/// The Etherscan (or equivalent) API key.
+<a href=#148 id=148 data-nosnippet>148</a>    </span><span class="attr"><a href="../../lockfile.rs.html#270">#[arg(long, env = </a><span class="string">"ETHERSCAN_API_KEY"</span><a href="../../lockfile.rs.html#270">, value_name = </a><span class="string">"KEY"</span>)]
+<a href=#149 id=149 data-nosnippet>149</a>    </span><a href="../../lockfile.rs.html#270">etherscan_api_key: </a><a class="prelude-ty" href="https://doc.rust-lang.org/nightly/core/option/enum.Option.html">Option</a><a href="../../lockfile.rs.html#270">&lt;<a href="../../../../forge/revm/primitives/hardfork/struct.String.html">String</a>&gt;,
+<a href=#150 id=150 data-nosnippet>150</a>
+<a href=#151 id=151 data-nosnippet>151</a>    </a><span class="doccomment">/// The Etherscan API version.
+<a href=#152 id=152 data-nosnippet>152</a>    </span><span class="attr"><a href="../../lockfile.rs.html#270">#[arg(long, env = </a><span class="string">"ETHERSCAN_API_VERSION"</span><a href="../../lockfile.rs.html#270">, value_name = </a><span class="string">"VERSION"</span>)]
+<a href=#153 id=153 data-nosnippet>153</a>    </span><a href="../../lockfile.rs.html#270">etherscan_api_version: </a><a class="prelude-ty" href="https://doc.rust-lang.org/nightly/core/option/enum.Option.html">Option</a><a href="../../lockfile.rs.html#270">&lt;EtherscanApiVersion&gt;,
+<a href=#154 id=154 data-nosnippet>154</a>
+<a href=#155 id=155 data-nosnippet>155</a>    </a><span class="doccomment">/// List tests instead of running them.
+<a href=#156 id=156 data-nosnippet>156</a>    </span><span class="attr"><a href="../../lockfile.rs.html#270">#[arg(long, short, conflicts_with_all = [</a><span class="string">"show_progress"</span>, <span class="string">"decode_internal"</span>, <span class="string">"summary"</span>]</span><a href="../../lockfile.rs.html#270">, help_heading = </a><span class="string">"Display options"</span><a href="../../lockfile.rs.html#270">)]
+<a href=#157 id=157 data-nosnippet>157</a>    list: <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>,
+<a href=#158 id=158 data-nosnippet>158</a>
+<a href=#159 id=159 data-nosnippet>159</a>    </a><span class="doccomment">/// Set seed used to generate randomness during your fuzz runs.
+<a href=#160 id=160 data-nosnippet>160</a>    </span><span class="attr">#[arg(long)]
+<a href=#161 id=161 data-nosnippet>161</a>    </span><span class="kw">pub </span><a href="../../lockfile.rs.html#270">fuzz_seed: </a><a class="prelude-ty" href="https://doc.rust-lang.org/nightly/core/option/enum.Option.html">Option</a><a href="../../lockfile.rs.html#270">&lt;<a href="../../../../forge/revm/primitives/type.U256.html">U256</a>&gt;,
+<a href=#162 id=162 data-nosnippet>162</a>
+<a href=#163 id=163 data-nosnippet>163</a>    </a><span class="attr"><a href="../../lockfile.rs.html#270">#[arg(long, env = </a><span class="string">"FOUNDRY_FUZZ_RUNS"</span><a href="../../lockfile.rs.html#270">, value_name = </a><span class="string">"RUNS"</span>)]
+<a href=#164 id=164 data-nosnippet>164</a>    </span><span class="kw">pub </span><a href="../../lockfile.rs.html#270">fuzz_runs: </a><a class="prelude-ty" href="https://doc.rust-lang.org/nightly/core/option/enum.Option.html">Option</a><a href="../../lockfile.rs.html#270">&lt;<a href="https://doc.rust-lang.org/nightly/std/primitive.u64.html">u64</a>&gt;,
+<a href=#165 id=165 data-nosnippet>165</a>
+<a href=#166 id=166 data-nosnippet>166</a>    </a><span class="doccomment">/// Timeout for each fuzz run in seconds.
+<a href=#167 id=167 data-nosnippet>167</a>    </span><span class="attr"><a href="../../lockfile.rs.html#270">#[arg(long, env = </a><span class="string">"FOUNDRY_FUZZ_TIMEOUT"</span><a href="../../lockfile.rs.html#270">, value_name = </a><span class="string">"TIMEOUT"</span>)]
+<a href=#168 id=168 data-nosnippet>168</a>    </span><span class="kw">pub </span><a href="../../lockfile.rs.html#270">fuzz_timeout: </a><a class="prelude-ty" href="https://doc.rust-lang.org/nightly/core/option/enum.Option.html">Option</a><a href="../../lockfile.rs.html#270">&lt;<a href="https://doc.rust-lang.org/nightly/std/primitive.u64.html">u64</a>&gt;,
+<a href=#169 id=169 data-nosnippet>169</a>
+<a href=#170 id=170 data-nosnippet>170</a>    </a><span class="doccomment">/// File to rerun fuzz failures from.
+<a href=#171 id=171 data-nosnippet>171</a>    </span><span class="attr">#[arg(long)]
+<a href=#172 id=172 data-nosnippet>172</a>    </span><span class="kw">pub </span><a href="../../lockfile.rs.html#270">fuzz_input_file: </a><a class="prelude-ty" href="https://doc.rust-lang.org/nightly/core/option/enum.Option.html">Option</a><a href="../../lockfile.rs.html#270">&lt;<a href="../../../../forge/revm/primitives/hardfork/struct.String.html">String</a>&gt;,
+<a href=#173 id=173 data-nosnippet>173</a>
+<a href=#174 id=174 data-nosnippet>174</a>    </a><span class="doccomment">/// Show test execution progress.
+<a href=#175 id=175 data-nosnippet>175</a>    </span><span class="attr"><a href="../../lockfile.rs.html#270">#[arg(long, conflicts_with_all = [</a><span class="string">"quiet"</span>, <span class="string">"json"</span>]</span><a href="../../lockfile.rs.html#270">, help_heading = </a><span class="string">"Display options"</span>)]
+<a href=#176 id=176 data-nosnippet>176</a>    <span class="kw">pub </span><a href="../../lockfile.rs.html#270">show_progress: <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>,
+<a href=#177 id=177 data-nosnippet>177</a>
+<a href=#178 id=178 data-nosnippet>178</a>    </a><span class="doccomment">/// Re-run recorded test failures from last run.
+<a href=#179 id=179 data-nosnippet>179</a>    /// If no failure recorded then regular test run is performed.
+<a href=#180 id=180 data-nosnippet>180</a>    </span><span class="attr">#[arg(long)]
+<a href=#181 id=181 data-nosnippet>181</a>    </span><span class="kw">pub </span><a href="../../lockfile.rs.html#270">rerun: <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>,
+<a href=#182 id=182 data-nosnippet>182</a>
+<a href=#183 id=183 data-nosnippet>183</a>    </a><span class="doccomment">/// Print test summary table.
+<a href=#184 id=184 data-nosnippet>184</a>    </span><span class="attr"><a href="../../lockfile.rs.html#270">#[arg(long, help_heading = </a><span class="string">"Display options"</span>)]
+<a href=#185 id=185 data-nosnippet>185</a>    </span><span class="kw">pub </span><a href="../../lockfile.rs.html#270">summary: <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>,
+<a href=#186 id=186 data-nosnippet>186</a>
+<a href=#187 id=187 data-nosnippet>187</a>    </a><span class="doccomment">/// Print detailed test summary table.
+<a href=#188 id=188 data-nosnippet>188</a>    </span><span class="attr"><a href="../../lockfile.rs.html#270">#[arg(long, help_heading = </a><span class="string">"Display options"</span><a href="../../lockfile.rs.html#270">, requires = </a><span class="string">"summary"</span>)]
+<a href=#189 id=189 data-nosnippet>189</a>    </span><span class="kw">pub </span><a href="../../lockfile.rs.html#270">detailed: <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>,
+<a href=#190 id=190 data-nosnippet>190</a>
+<a href=#191 id=191 data-nosnippet>191</a>    </a><span class="attr">#[command(flatten)]
+<a href=#192 id=192 data-nosnippet>192</a>    </span><a href="../../lockfile.rs.html#270">filter: <a href="filter.rs.html#12-45">FilterArgs</a>,
+<a href=#193 id=193 data-nosnippet>193</a>
+<a href=#194 id=194 data-nosnippet>194</a>    </a><span class="attr">#[command(flatten)]
+<a href=#195 id=195 data-nosnippet>195</a>    </span><a href="../../lockfile.rs.html#270">evm: <a href="../../../../foundry_common/evm/struct.EvmArgs.html">EvmArgs</a>,
+<a href=#196 id=196 data-nosnippet>196</a>
+<a href=#197 id=197 data-nosnippet>197</a>    </a><span class="attr">#[command(flatten)]
+<a href=#198 id=198 data-nosnippet>198</a>    </span><span class="kw">pub </span><a href="../../lockfile.rs.html#270">build: BuildOpts,
+<a href=#199 id=199 data-nosnippet>199</a>
+<a href=#200 id=200 data-nosnippet>200</a>    </a><span class="attr">#[command(flatten)]
+<a href=#201 id=201 data-nosnippet>201</a>    </span><span class="kw">pub </span><a href="../../lockfile.rs.html#270">watch: <a href="../watch.rs.html#38-70">WatchArgs</a>,
+<a href=#202 id=202 data-nosnippet>202</a>}
+<a href=#203 id=203 data-nosnippet>203</a>
+<a href=#204 id=204 data-nosnippet>204</a></a><span class="kw">impl </span><a href="../../lockfile.rs.html#270"><a href="#69-202">TestArgs</a> {
+<a href=#205 id=205 data-nosnippet>205</a>    </a><span class="kw">pub async fn </span><a href="../../lockfile.rs.html#270">run(</a><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span><a href="../../lockfile.rs.html#270">&lt;TestOutcome&gt; {
+<a href=#206 id=206 data-nosnippet>206</a>        </a><span class="macro">trace!</span><a href="../../lockfile.rs.html#270">(target: </a><span class="string">"forge::test"</span>, <span class="string">"executing test command"</span>);
+<a href=#207 id=207 data-nosnippet>207</a>        <span class="self">self</span><a href="../../lockfile.rs.html#270">.execute_tests().</a><span class="kw">await
+<a href=#208 id=208 data-nosnippet>208</a>    </span>}
+<a href=#209 id=209 data-nosnippet>209</a>
+<a href=#210 id=210 data-nosnippet>210</a>    <span class="doccomment">/// Returns sources which include any tests to be executed.
+<a href=#211 id=211 data-nosnippet>211</a>    /// If no filters are provided, sources are filtered by existence of test/invariant methods in
+<a href=#212 id=212 data-nosnippet>212</a>    /// them, If filters are provided, sources are additionally filtered by them.
+<a href=#213 id=213 data-nosnippet>213</a>    </span><span class="kw">pub fn </span><a href="../../lockfile.rs.html#270">get_sources_to_compile(
+<a href=#214 id=214 data-nosnippet>214</a>        </a><span class="kw-2">&amp;</span><span class="self">self</span><a href="../../lockfile.rs.html#270">,
+<a href=#215 id=215 data-nosnippet>215</a>        config: </a><span class="kw-2">&amp;</span><a href="../../lockfile.rs.html#270"><a href="../../../../foundry_config/struct.Config.html">Config</a>,
+<a href=#216 id=216 data-nosnippet>216</a>        filter: </a><span class="kw-2">&amp;</span><a href="../../lockfile.rs.html#270"><a href="filter.rs.html#172-175">ProjectPathsAwareFilter</a>,
+<a href=#217 id=217 data-nosnippet>217</a>    ) -&gt; </a><a class="prelude-ty" href="https://docs.rs/eyre/0.6.12/eyre/type.Result.html">Result</a><a href="../../lockfile.rs.html#270">&lt;<a href="https://doc.rust-lang.org/nightly/alloc/collections/btree/set/struct.BTreeSet.html">BTreeSet</a>&lt;<a href="https://doc.rust-lang.org/nightly/std/path/struct.PathBuf.html">PathBuf</a>&gt;&gt; {
+<a href=#218 id=218 data-nosnippet>218</a>        </a><span class="kw">let </span><span class="kw-2">mut </span><a href="../../lockfile.rs.html#270">project = <a href="#215">config</a>.<a href="../../../../foundry_config/struct.Config.html#method.create_project">create_project</a>(</a><span class="bool-val">true</span>, <span class="bool-val">true</span>)<span class="question-mark">?</span><a href="../../lockfile.rs.html#270">;
+<a href=#219 id=219 data-nosnippet>219</a>        <a href="#218">project</a>.update_output_selection(|selection| {
+<a href=#220 id=220 data-nosnippet>220</a>            </a><span class="kw-2">*</span><a href="../../lockfile.rs.html#270"><a href="#219">selection</a> = OutputSelection::common_output_selection([</a><span class="string">"abi"</span><a href="../../lockfile.rs.html#270">.<a href="../../../../forge/revm/primitives/hardfork/trait.ToString.html">to_string</a>()]);
+<a href=#221 id=221 data-nosnippet>221</a>        });
+<a href=#222 id=222 data-nosnippet>222</a>
+<a href=#223 id=223 data-nosnippet>223</a>        </a><span class="kw">let </span><a href="../../lockfile.rs.html#270">output = <a href="#218">project</a>.compile()</a><span class="question-mark">?</span>;
+<a href=#224 id=224 data-nosnippet>224</a>
+<a href=#225 id=225 data-nosnippet>225</a>        <span class="kw">if </span><a href="../../lockfile.rs.html#270"><a href="#223">output</a>.has_compiler_errors() {
+<a href=#226 id=226 data-nosnippet>226</a>            </a><a class="macro" href="../../../../foundry_common/macro.sh_println.html">sh_println!</a>(<span class="string">"{output}"</span>)<span class="question-mark">?</span>;
+<a href=#227 id=227 data-nosnippet>227</a>            <a class="macro" href="https://docs.rs/eyre/0.6.12/eyre/macro.bail.html">eyre::bail!</a>(<span class="string">"Compilation failed"</span>);
+<a href=#228 id=228 data-nosnippet>228</a>        }
+<a href=#229 id=229 data-nosnippet>229</a>
+<a href=#230 id=230 data-nosnippet>230</a>        <span class="comment">// ABIs of all sources
+<a href=#231 id=231 data-nosnippet>231</a>        </span><span class="kw">let </span><a href="../../lockfile.rs.html#270">abis = <a href="#223">output</a>
+<a href=#232 id=232 data-nosnippet>232</a>            .into_artifacts()
+<a href=#233 id=233 data-nosnippet>233</a>            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html#tymethod.filter_map">filter_map</a>(|(id, artifact)| <a href="#233">artifact</a>.abi.<a href="https://doc.rust-lang.org/nightly/core/option/enum.Option.html#method.map">map</a>(|abi| (<a href="#233">id</a>, <a href="#233">abi</a>)))
+<a href=#234 id=234 data-nosnippet>234</a>            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html#tymethod.collect">collect</a>::&lt;<a href="https://doc.rust-lang.org/nightly/alloc/collections/btree/map/struct.BTreeMap.html">BTreeMap</a>&lt;</a><span class="kw">_</span>, <span class="kw">_</span>&gt;&gt;();
+<a href=#235 id=235 data-nosnippet>235</a>
+<a href=#236 id=236 data-nosnippet>236</a>        <span class="comment">// Filter sources by their abis and contract names.
+<a href=#237 id=237 data-nosnippet>237</a>        </span><span class="kw">let </span><span class="kw-2">mut </span><a href="../../lockfile.rs.html#270">test_sources = <a href="#231">abis</a>
+<a href=#238 id=238 data-nosnippet>238</a>            .<a href="https://doc.rust-lang.org/nightly/alloc/collections/btree/map/struct.BTreeMap.html#method.iter">iter</a>()
+<a href=#239 id=239 data-nosnippet>239</a>            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html#tymethod.filter">filter</a>(|(id, abi)| <a href="../../multi_runner.rs.html#569-572">matches_contract</a>(<a href="#239">id</a>, <a href="#239">abi</a>, <a href="#216">filter</a>))
+<a href=#240 id=240 data-nosnippet>240</a>            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html#tymethod.map">map</a>(|(id, </a><span class="kw">_</span><a href="../../lockfile.rs.html#270">)| <a href="#240">id</a>.source.<a href="https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html#tymethod.clone">clone</a>())
+<a href=#241 id=241 data-nosnippet>241</a>            .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html#tymethod.collect">collect</a>::&lt;<a href="https://doc.rust-lang.org/nightly/alloc/collections/btree/set/struct.BTreeSet.html">BTreeSet</a>&lt;</a><span class="kw">_</span>&gt;&gt;();
+<a href=#242 id=242 data-nosnippet>242</a>
+<a href=#243 id=243 data-nosnippet>243</a>        <span class="kw">if </span><a href="../../lockfile.rs.html#270"><a href="#237">test_sources</a>.<a href="https://doc.rust-lang.org/nightly/alloc/collections/btree/set/struct.BTreeSet.html#method.is_empty">is_empty</a>() {
+<a href=#244 id=244 data-nosnippet>244</a>            </a><span class="kw">if </span><a href="../../lockfile.rs.html#270"><a href="#216">filter</a>.<a href="filter.rs.html#179-181">is_empty</a>() {
+<a href=#245 id=245 data-nosnippet>245</a>                </a><a class="macro" href="../../../../foundry_common/macro.sh_println.html">sh_println!</a>(
+<a href=#246 id=246 data-nosnippet>246</a>                    <span class="string">"No tests found in project! \
+<a href=#247 id=247 data-nosnippet>247</a>                        Forge looks for functions that starts with `test`."
+<a href=#248 id=248 data-nosnippet>248</a>                </span>)<span class="question-mark">?</span>;
+<a href=#249 id=249 data-nosnippet>249</a>            } <span class="kw">else </span>{
+<a href=#250 id=250 data-nosnippet>250</a>                <a class="macro" href="../../../../foundry_common/macro.sh_println.html">sh_println!</a>(<span class="string">"No tests match the provided pattern:"</span>)<span class="question-mark">?</span>;
+<a href=#251 id=251 data-nosnippet>251</a>                <a class="macro" href="../../../../foundry_common/macro.sh_print.html">sh_print!</a>(<span class="string">"{filter}"</span>)<span class="question-mark">?</span>;
+<a href=#252 id=252 data-nosnippet>252</a>
+<a href=#253 id=253 data-nosnippet>253</a>                <span class="comment">// Try to suggest a test when there's no match
+<a href=#254 id=254 data-nosnippet>254</a>                </span><span class="kw">if let </span><a class="prelude-val" href="https://doc.rust-lang.org/nightly/core/option/enum.Option.html#variant.Some">Some</a><a href="../../lockfile.rs.html#270">(test_pattern) = </a><span class="kw-2">&amp;</span><a href="../../lockfile.rs.html#270"><a href="#216">filter</a>.<a href="filter.rs.html#184-186">args</a>().test_pattern {
+<a href=#255 id=255 data-nosnippet>255</a>                    </a><span class="kw">let </span><a href="../../lockfile.rs.html#270">test_name = <a href="#254">test_pattern</a>.as_str();
+<a href=#256 id=256 data-nosnippet>256</a>                    </a><span class="kw">let </span><a href="../../lockfile.rs.html#270">candidates = <a href="#231">abis</a>
+<a href=#257 id=257 data-nosnippet>257</a>                        .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/collect/trait.IntoIterator.html#tymethod.into_iter">into_iter</a>()
+<a href=#258 id=258 data-nosnippet>258</a>                        .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html#tymethod.filter">filter</a>(|(id, </a><span class="kw">_</span><a href="../../lockfile.rs.html#270">)| {
+<a href=#259 id=259 data-nosnippet>259</a>                            <a href="#216">filter</a>.<a href="../../../../forge/trait.TestFilter.html">matches_path</a>(</a><span class="kw-2">&amp;</span><a href="../../lockfile.rs.html#270"><a href="#258">id</a>.source) &amp;&amp; <a href="#216">filter</a>.<a href="../../../../forge/trait.TestFilter.html">matches_contract</a>(</a><span class="kw-2">&amp;</span><a href="../../lockfile.rs.html#270"><a href="#258">id</a>.name)
+<a href=#260 id=260 data-nosnippet>260</a>                        })
+<a href=#261 id=261 data-nosnippet>261</a>                        .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html#tymethod.flat_map">flat_map</a>(|(</a><span class="kw">_</span><a href="../../lockfile.rs.html#270">, abi)| <a href="#261">abi</a>.functions.<a href="https://doc.rust-lang.org/nightly/alloc/collections/btree/map/struct.BTreeMap.html#method.into_keys">into_keys</a>())
+<a href=#262 id=262 data-nosnippet>262</a>                        .<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html#tymethod.collect">collect</a>::&lt;<a href="https://doc.rust-lang.org/nightly/alloc/vec/struct.Vec.html">Vec</a>&lt;</a><span class="kw">_</span>&gt;&gt;();
+<a href=#263 id=263 data-nosnippet>263</a>                    <span class="kw">if let </span><a class="prelude-val" href="https://doc.rust-lang.org/nightly/core/option/enum.Option.html#variant.Some">Some</a><a href="../../lockfile.rs.html#270">(suggestion) = utils::did_you_mean(<a href="#255">test_name</a>, <a href="#256">candidates</a>).<a href="https://doc.rust-lang.org/nightly/alloc/vec/struct.Vec.html#method.pop">pop</a>() {
+<a href=#264 id=264 data-nosnippet>264</a>                        </a><a class="macro" href="../../../../foundry_common/macro.sh_println.html">sh_println!</a>(<span class="string">"\nDid you mean `{suggestion}`?"</span>)<span class="question-mark">?</span>;
+<a href=#265 id=265 data-nosnippet>265</a>                    }
+<a href=#266 id=266 data-nosnippet>266</a>                }
+<a href=#267 id=267 data-nosnippet>267</a>            }
+<a href=#268 id=268 data-nosnippet>268</a>
+<a href=#269 id=269 data-nosnippet>269</a>            <a class="macro" href="https://docs.rs/eyre/0.6.12/eyre/macro.bail.html">eyre::bail!</a>(<span class="string">"No tests to run"</span>);
+<a href=#270 id=270 data-nosnippet>270</a>        }
+<a href=#271 id=271 data-nosnippet>271</a>
+<a href=#272 id=272 data-nosnippet>272</a>        <span class="comment">// Always recompile all sources to ensure that `getCode` cheatcode can use any artifact.
+<a href=#273 id=273 data-nosnippet>273</a>        </span><a href="../../lockfile.rs.html#270"><a href="#237">test_sources</a>.<a href="https://doc.rust-lang.org/nightly/core/iter/traits/collect/trait.Extend.html#tymethod.extend">extend</a>(source_files_iter(
+<a href=#274 id=274 data-nosnippet>274</a>            </a><span class="kw-2">&amp;</span><a href="../../lockfile.rs.html#270"><a href="#218">project</a>.paths.sources,
+<a href=#275 id=275 data-nosnippet>275</a>            MultiCompilerLanguage::FILE_EXTENSIONS,
+<a href=#276 id=276 data-nosnippet>276</a>        ));
+<a href=#277 id=277 data-nosnippet>277</a>
+<a href=#278 id=278 data-nosnippet>278</a>        </a><a class="prelude-val" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html#variant.Ok">Ok</a><a href="../../lockfile.rs.html#270">(<a href="#237">test_sources</a>)
+<a href=#279 id=279 data-nosnippet>279</a>    }
+<a href=#280 id=280 data-nosnippet>280</a>
+<a href=#281 id=281 data-nosnippet>281</a>    </a><span class="doccomment">/// Executes all the tests in the project.
+<a href=#282 id=282 data-nosnippet>282</a>    ///
+<a href=#283 id=283 data-nosnippet>283</a>    /// This will trigger the build process first. On success all test contracts that match the
+<a href=#284 id=284 data-nosnippet>284</a>    /// configured filter will be executed
+<a href=#285 id=285 data-nosnippet>285</a>    ///
+<a href=#286 id=286 data-nosnippet>286</a>    /// Returns the test results for all matching tests.
+<a href=#287 id=287 data-nosnippet>287</a>    </span><span class="kw">pub async fn </span><a href="../../lockfile.rs.html#270">execute_tests(</a><span class="kw-2">mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span><a href="../../lockfile.rs.html#270">&lt;TestOutcome&gt; {
+<a href=#288 id=288 data-nosnippet>288</a>        </a><span class="comment">// Merge all configs.
+<a href=#289 id=289 data-nosnippet>289</a>        </span><span class="kw">let </span>(<span class="kw-2">mut </span><a href="../../lockfile.rs.html#270">config, </a><span class="kw-2">mut </span><a href="../../lockfile.rs.html#270">evm_opts) = </a><span class="self">self</span><a href="../../lockfile.rs.html#270">.load_config_and_evm_opts()</a><span class="question-mark">?</span>;
+<a href=#290 id=290 data-nosnippet>290</a>
+<a href=#291 id=291 data-nosnippet>291</a>        <span class="kw">let </span><span class="kw-2">mut </span><a href="../../lockfile.rs.html#270">strategy = utils::get_executor_strategy(</a><span class="kw-2">&amp;</span><a href="../../lockfile.rs.html#270">config);
+<a href=#292 id=292 data-nosnippet>292</a>
+<a href=#293 id=293 data-nosnippet>293</a>        </a><span class="comment">// Explicitly enable isolation for gas reports for more correct gas accounting.
+<a href=#294 id=294 data-nosnippet>294</a>        </span><span class="kw">if </span><span class="self">self</span><a href="../../lockfile.rs.html#270">.gas_report {
+<a href=#295 id=295 data-nosnippet>295</a>            evm_opts.isolate = </a><span class="bool-val">true</span>;
+<a href=#296 id=296 data-nosnippet>296</a>        } <span class="kw">else </span>{
+<a href=#297 id=297 data-nosnippet>297</a>            <span class="comment">// Do not collect gas report traces if gas report is not enabled.
+<a href=#298 id=298 data-nosnippet>298</a>            </span><a href="../../lockfile.rs.html#270">config.fuzz.gas_report_samples = </a><span class="number">0</span><a href="../../lockfile.rs.html#270">;
+<a href=#299 id=299 data-nosnippet>299</a>            config.invariant.gas_report_samples = </a><span class="number">0</span>;
+<a href=#300 id=300 data-nosnippet>300</a>        }
+<a href=#301 id=301 data-nosnippet>301</a>
+<a href=#302 id=302 data-nosnippet>302</a>        <span class="comment">// Install missing dependencies.
+<a href=#303 id=303 data-nosnippet>303</a>        </span><span class="kw">if </span><a href="../../lockfile.rs.html#270">install::install_missing_dependencies(</a><span class="kw-2">&amp;mut </span><a href="../../lockfile.rs.html#270">config) &amp;&amp; config.auto_detect_remappings {
+<a href=#304 id=304 data-nosnippet>304</a>            </a><span class="comment">// need to re-configure here to also catch additional remappings
+<a href=#305 id=305 data-nosnippet>305</a>            </span><a href="../../lockfile.rs.html#270">config = </a><span class="self">self</span><a href="../../lockfile.rs.html#270">.load_config()</a><span class="question-mark">?</span>;
+<a href=#306 id=306 data-nosnippet>306</a>        }
+<a href=#307 id=307 data-nosnippet>307</a>
+<a href=#308 id=308 data-nosnippet>308</a>        <span class="comment">// Set up the project.
+<a href=#309 id=309 data-nosnippet>309</a>        </span><span class="kw">let </span><a href="../../lockfile.rs.html#270">project = config.project()</a><span class="question-mark">?</span>;
+<a href=#310 id=310 data-nosnippet>310</a>
+<a href=#311 id=311 data-nosnippet>311</a>        <span class="kw">let </span><a href="../../lockfile.rs.html#270">filter = </a><span class="self">self</span><a href="../../lockfile.rs.html#270">.filter(</a><span class="kw-2">&amp;</span><a href="../../lockfile.rs.html#270">config)</a><span class="question-mark">?</span>;
+<a href=#312 id=312 data-nosnippet>312</a>        <span class="macro">trace!</span><a href="../../lockfile.rs.html#270">(target: </a><span class="string">"forge::test"</span>, <span class="question-mark">?</span><a href="../../lockfile.rs.html#270">filter, </a><span class="string">"using filter"</span>);
+<a href=#313 id=313 data-nosnippet>313</a>
+<a href=#314 id=314 data-nosnippet>314</a>        <span class="kw">let </span><a href="../../lockfile.rs.html#270">sources_to_compile = </a><span class="self">self</span><a href="../../lockfile.rs.html#270">.get_sources_to_compile(</a><span class="kw-2">&amp;</span><a href="../../lockfile.rs.html#270">config, </a><span class="kw-2">&amp;</span><a href="../../lockfile.rs.html#270">filter)</a><span class="question-mark">?</span>;
+<a href=#315 id=315 data-nosnippet>315</a>
+<a href=#316 id=316 data-nosnippet>316</a>        <span class="comment">// Handle compilation based on whether dual compilation is enabled
+<a href=#317 id=317 data-nosnippet>317</a>        </span><span class="kw">let </span><a href="../../lockfile.rs.html#270">(output, dual_compiled_contracts) = </a><span class="kw">if </span><a href="../../lockfile.rs.html#270">config.resolc.resolc_compile {
+<a href=#318 id=318 data-nosnippet>318</a>            </a><span class="comment">// Dual compilation mode: compile both solc and resolc
+<a href=#319 id=319 data-nosnippet>319</a>
+<a href=#320 id=320 data-nosnippet>320</a>            // Compile with solc to a subdirectory
+<a href=#321 id=321 data-nosnippet>321</a>            </span><span class="kw">let </span><span class="kw-2">mut </span><a href="../../lockfile.rs.html#270">solc_config = config.clone();
+<a href=#322 id=322 data-nosnippet>322</a>            solc_config.out = solc_config.out.join(revive::SOLC_ARTIFACTS_SUBDIR);
+<a href=#323 id=323 data-nosnippet>323</a>            solc_config.resolc = Default::default();
+<a href=#324 id=324 data-nosnippet>324</a>            solc_config.build_info_path = </a><span class="prelude-val">Some</span><a href="../../lockfile.rs.html#270">(solc_config.out.join(</a><span class="string">"build-info"</span>));
+<a href=#325 id=325 data-nosnippet>325</a>            <span class="kw">let </span><a href="../../lockfile.rs.html#270">solc_project = solc_config.project()</a><span class="question-mark">?</span>;
+<a href=#326 id=326 data-nosnippet>326</a>
+<a href=#327 id=327 data-nosnippet>327</a>            <span class="kw">let </span><a href="../../lockfile.rs.html#270">compiler = ProjectCompiler::new()
+<a href=#328 id=328 data-nosnippet>328</a>                .dynamic_test_linking(config.dynamic_test_linking)
+<a href=#329 id=329 data-nosnippet>329</a>                .quiet(shell::is_json() || </a><span class="self">self</span><a href="../../lockfile.rs.html#270">.junit)
+<a href=#330 id=330 data-nosnippet>330</a>                .files(sources_to_compile.clone());
+<a href=#331 id=331 data-nosnippet>331</a>
+<a href=#332 id=332 data-nosnippet>332</a>            </a><span class="kw">let </span><a href="../../lockfile.rs.html#270">solc_output = compiler.compile(</a><span class="kw-2">&amp;</span><a href="../../lockfile.rs.html#270">solc_project)</a><span class="question-mark">?</span>;
+<a href=#333 id=333 data-nosnippet>333</a>
+<a href=#334 id=334 data-nosnippet>334</a>            <span class="comment">// Compile with resolc to the main output directory
+<a href=#335 id=335 data-nosnippet>335</a>            </span><span class="kw">let </span><a href="../../lockfile.rs.html#270">resolc_project = config.clone().project()</a><span class="question-mark">?</span>;
+<a href=#336 id=336 data-nosnippet>336</a>
+<a href=#337 id=337 data-nosnippet>337</a>            <span class="kw">let </span><a href="../../lockfile.rs.html#270">resolc_compiler = ProjectCompiler::new()
+<a href=#338 id=338 data-nosnippet>338</a>                .quiet(shell::is_json() || </a><span class="self">self</span><a href="../../lockfile.rs.html#270">.junit)
+<a href=#339 id=339 data-nosnippet>339</a>                .files(sources_to_compile)
+<a href=#340 id=340 data-nosnippet>340</a>                .size_limits(revive::CONTRACT_SIZE_LIMIT, revive::CONTRACT_SIZE_LIMIT);
+<a href=#341 id=341 data-nosnippet>341</a>
+<a href=#342 id=342 data-nosnippet>342</a>            </a><span class="kw">let </span><a href="../../lockfile.rs.html#270">resolc_output = resolc_compiler.compile(</a><span class="kw-2">&amp;</span><a href="../../lockfile.rs.html#270">resolc_project)</a><span class="question-mark">?</span>;
+<a href=#343 id=343 data-nosnippet>343</a>
+<a href=#344 id=344 data-nosnippet>344</a>            <span class="comment">// Create dual compiled contracts
+<a href=#345 id=345 data-nosnippet>345</a>            </span><span class="kw">let </span><a href="../../lockfile.rs.html#270">dual_compiled_contracts = DualCompiledContracts::new(
+<a href=#346 id=346 data-nosnippet>346</a>                </a><span class="kw-2">&amp;</span><a href="../../lockfile.rs.html#270">solc_output,
+<a href=#347 id=347 data-nosnippet>347</a>                </a><span class="kw-2">&amp;</span><a href="../../lockfile.rs.html#270">resolc_output,
+<a href=#348 id=348 data-nosnippet>348</a>                </a><span class="kw-2">&amp;</span><a href="../../lockfile.rs.html#270">solc_project.paths,
+<a href=#349 id=349 data-nosnippet>349</a>                </a><span class="kw-2">&amp;</span><a href="../../lockfile.rs.html#270">resolc_project.paths,
+<a href=#350 id=350 data-nosnippet>350</a>            );
+<a href=#351 id=351 data-nosnippet>351</a>
+<a href=#352 id=352 data-nosnippet>352</a>            (solc_output, </a><span class="prelude-val">Some</span><a href="../../lockfile.rs.html#270">(dual_compiled_contracts))
+<a href=#353 id=353 data-nosnippet>353</a>        } </a><span class="kw">else </span>{
+<a href=#354 id=354 data-nosnippet>354</a>            <span class="comment">// Single compilation mode: compile only with solc
+<a href=#355 id=355 data-nosnippet>355</a>
+<a href=#356 id=356 data-nosnippet>356</a>            </span><span class="kw">let </span><a href="../../lockfile.rs.html#270">compiler: ProjectCompiler = ProjectCompiler::new()
+<a href=#357 id=357 data-nosnippet>357</a>                .dynamic_test_linking(config.dynamic_test_linking)
+<a href=#358 id=358 data-nosnippet>358</a>                .quiet(shell::is_json() || </a><span class="self">self</span><a href="../../lockfile.rs.html#270">.junit)
+<a href=#359 id=359 data-nosnippet>359</a>                .files(sources_to_compile.clone());
+<a href=#360 id=360 data-nosnippet>360</a>
+<a href=#361 id=361 data-nosnippet>361</a>            </a><span class="kw">let </span><a href="../../lockfile.rs.html#270">solc_output = compiler.compile(</a><span class="kw-2">&amp;</span><a href="../../lockfile.rs.html#270">project)</a><span class="question-mark">?</span><a href="../../lockfile.rs.html#270">;
+<a href=#362 id=362 data-nosnippet>362</a>
+<a href=#363 id=363 data-nosnippet>363</a>            (solc_output, </a><span class="prelude-val">None</span>)
+<a href=#364 id=364 data-nosnippet>364</a>        };
+<a href=#365 id=365 data-nosnippet>365</a>
+<a href=#366 id=366 data-nosnippet>366</a>        <span class="comment">// Create test options from general project settings and compiler output.
+<a href=#367 id=367 data-nosnippet>367</a>        </span><span class="kw">let </span><a href="../../lockfile.rs.html#270">project_root = </a><span class="kw-2">&amp;</span><a href="../../lockfile.rs.html#270">project.paths.root;
+<a href=#368 id=368 data-nosnippet>368</a>
+<a href=#369 id=369 data-nosnippet>369</a>        </a><span class="kw">let </span><a href="../../lockfile.rs.html#270">should_debug = </a><span class="self">self</span><a href="../../lockfile.rs.html#270">.debug;
+<a href=#370 id=370 data-nosnippet>370</a>        </a><span class="kw">let </span><a href="../../lockfile.rs.html#270">should_draw = </a><span class="self">self</span><a href="../../lockfile.rs.html#270">.flamegraph || </a><span class="self">self</span><a href="../../lockfile.rs.html#270">.flamechart;
+<a href=#371 id=371 data-nosnippet>371</a>
+<a href=#372 id=372 data-nosnippet>372</a>        </a><span class="comment">// Determine print verbosity and executor verbosity.
+<a href=#373 id=373 data-nosnippet>373</a>        </span><span class="kw">let </span><a href="../../lockfile.rs.html#270">verbosity = evm_opts.verbosity;
+<a href=#374 id=374 data-nosnippet>374</a>        </a><span class="kw">if </span>(<span class="self">self</span><a href="../../lockfile.rs.html#270">.gas_report &amp;&amp; evm_opts.verbosity &lt; </a><span class="number">3</span>) || <span class="self">self</span><a href="../../lockfile.rs.html#270">.flamegraph || </a><span class="self">self</span><a href="../../lockfile.rs.html#270">.flamechart {
+<a href=#375 id=375 data-nosnippet>375</a>            evm_opts.verbosity = </a><span class="number">3</span>;
+<a href=#376 id=376 data-nosnippet>376</a>        }
+<a href=#377 id=377 data-nosnippet>377</a>
+<a href=#378 id=378 data-nosnippet>378</a>        <span class="kw">let </span><a href="../../lockfile.rs.html#270">env = evm_opts.evm_env().</a><span class="kw">await</span><span class="question-mark">?</span>;
+<a href=#379 id=379 data-nosnippet>379</a>
+<a href=#380 id=380 data-nosnippet>380</a>        <span class="comment">// Enable internal tracing for more informative flamegraph.
+<a href=#381 id=381 data-nosnippet>381</a>        </span><span class="kw">if </span><a href="../../lockfile.rs.html#270">should_draw &amp;&amp; !</a><span class="self">self</span><a href="../../lockfile.rs.html#270">.decode_internal {
+<a href=#382 id=382 data-nosnippet>382</a>            </a><span class="self">self</span><a href="../../lockfile.rs.html#270">.decode_internal = </a><span class="bool-val">true</span>;
+<a href=#383 id=383 data-nosnippet>383</a>        }
+<a href=#384 id=384 data-nosnippet>384</a>
+<a href=#385 id=385 data-nosnippet>385</a>        <span class="comment">// Choose the internal function tracing mode, if --decode-internal is provided.
+<a href=#386 id=386 data-nosnippet>386</a>        </span><span class="kw">let </span><a href="../../lockfile.rs.html#270">decode_internal = </a><span class="kw">if </span><span class="self">self</span><a href="../../lockfile.rs.html#270">.decode_internal {
+<a href=#387 id=387 data-nosnippet>387</a>            </a><span class="comment">// If more than one function matched, we enable simple tracing.
+<a href=#388 id=388 data-nosnippet>388</a>            // If only one function matched, we enable full tracing. This is done in `run_tests`.
+<a href=#389 id=389 data-nosnippet>389</a>            </span><a href="../../lockfile.rs.html#270">InternalTraceMode::Simple
+<a href=#390 id=390 data-nosnippet>390</a>        } </a><span class="kw">else </span><a href="../../lockfile.rs.html#270">{
+<a href=#391 id=391 data-nosnippet>391</a>            InternalTraceMode::None
+<a href=#392 id=392 data-nosnippet>392</a>        };
+<a href=#393 id=393 data-nosnippet>393</a>
+<a href=#394 id=394 data-nosnippet>394</a>        </a><span class="comment">// Prepare the test builder.
+<a href=#395 id=395 data-nosnippet>395</a>        </span><span class="kw">let </span><a href="../../lockfile.rs.html#270">config = Arc::new(config);
+<a href=#396 id=396 data-nosnippet>396</a>
+<a href=#397 id=397 data-nosnippet>397</a>        </a><span class="comment">// Set dual compiled contracts on the strategy
+<a href=#398 id=398 data-nosnippet>398</a>        </span><a href="../../lockfile.rs.html#270">strategy.runner.revive_set_dual_compiled_contracts(
+<a href=#399 id=399 data-nosnippet>399</a>            strategy.context.as_mut(),
+<a href=#400 id=400 data-nosnippet>400</a>            dual_compiled_contracts.unwrap_or_default(),
+<a href=#401 id=401 data-nosnippet>401</a>        );
+<a href=#402 id=402 data-nosnippet>402</a>
+<a href=#403 id=403 data-nosnippet>403</a>        </a><span class="kw">let </span><a href="../../lockfile.rs.html#270">runner = MultiContractRunnerBuilder::new(config.clone())
+<a href=#404 id=404 data-nosnippet>404</a>            .set_debug(should_debug)
+<a href=#405 id=405 data-nosnippet>405</a>            .set_decode_internal(decode_internal)
+<a href=#406 id=406 data-nosnippet>406</a>            .initial_balance(evm_opts.initial_balance)
+<a href=#407 id=407 data-nosnippet>407</a>            .evm_spec(config.evm_spec_id())
+<a href=#408 id=408 data-nosnippet>408</a>            .sender(evm_opts.sender)
+<a href=#409 id=409 data-nosnippet>409</a>            .with_fork(evm_opts.get_fork(</a><span class="kw-2">&amp;</span><a href="../../lockfile.rs.html#270">config, env.clone()))
+<a href=#410 id=410 data-nosnippet>410</a>            .enable_isolation(evm_opts.isolate)
+<a href=#411 id=411 data-nosnippet>411</a>            .odyssey(evm_opts.odyssey)
+<a href=#412 id=412 data-nosnippet>412</a>            .build::&lt;MultiCompiler&gt;(strategy, project_root, </a><span class="kw-2">&amp;</span><a href="../../lockfile.rs.html#270">output, env, evm_opts)</a><span class="question-mark">?</span>;
+<a href=#413 id=413 data-nosnippet>413</a>
+<a href=#414 id=414 data-nosnippet>414</a>        <span class="kw">let </span><a href="../../lockfile.rs.html#270">libraries = runner.libraries.clone();
+<a href=#415 id=415 data-nosnippet>415</a>        </a><span class="kw">let </span><span class="kw-2">mut </span><a href="../../lockfile.rs.html#270">outcome = </a><span class="self">self</span><a href="../../lockfile.rs.html#270">.run_tests(runner, config, verbosity, </a><span class="kw-2">&amp;</span><a href="../../lockfile.rs.html#270">filter, </a><span class="kw-2">&amp;</span><a href="../../lockfile.rs.html#270">output).</a><span class="kw">await</span><span class="question-mark">?</span>;
+<a href=#416 id=416 data-nosnippet>416</a>
+<a href=#417 id=417 data-nosnippet>417</a>        <span class="kw">if </span><a href="../../lockfile.rs.html#270">should_draw {
+<a href=#418 id=418 data-nosnippet>418</a>            </a><span class="kw">let </span><a href="../../lockfile.rs.html#270">(suite_name, test_name, </a><span class="kw-2">mut </span><a href="../../lockfile.rs.html#270">test_result) =
+<a href=#419 id=419 data-nosnippet>419</a>                outcome.remove_first().ok_or_eyre(</a><span class="string">"no tests were executed"</span>)<span class="question-mark">?</span>;
+<a href=#420 id=420 data-nosnippet>420</a>
+<a href=#421 id=421 data-nosnippet>421</a>            <span class="kw">let </span>(<span class="kw">_</span><a href="../../lockfile.rs.html#270">, arena) = test_result
+<a href=#422 id=422 data-nosnippet>422</a>                .traces
+<a href=#423 id=423 data-nosnippet>423</a>                .iter_mut()
+<a href=#424 id=424 data-nosnippet>424</a>                .find(|(kind, </a><span class="kw">_</span>)| <span class="kw-2">*</span><a href="../../lockfile.rs.html#270">kind == TraceKind::Execution)
+<a href=#425 id=425 data-nosnippet>425</a>                .unwrap();
+<a href=#426 id=426 data-nosnippet>426</a>
+<a href=#427 id=427 data-nosnippet>427</a>            </a><span class="comment">// Decode traces.
+<a href=#428 id=428 data-nosnippet>428</a>            </span><span class="kw">let </span><a href="../../lockfile.rs.html#270">decoder = outcome.last_run_decoder.as_ref().unwrap();
+<a href=#429 id=429 data-nosnippet>429</a>            decode_trace_arena(arena, decoder).</a><span class="kw">await</span>;
+<a href=#430 id=430 data-nosnippet>430</a>            <span class="kw">let </span><span class="kw-2">mut </span><a href="../../lockfile.rs.html#270">fst = folded_stack_trace::build(arena);
+<a href=#431 id=431 data-nosnippet>431</a>
+<a href=#432 id=432 data-nosnippet>432</a>            </a><span class="kw">let </span><a href="../../lockfile.rs.html#270">label = </a><span class="kw">if </span><span class="self">self</span><a href="../../lockfile.rs.html#270">.flamegraph { </a><span class="string">"flamegraph" </span>} <span class="kw">else </span>{ <span class="string">"flamechart" </span>};
+<a href=#433 id=433 data-nosnippet>433</a>            <span class="kw">let </span><a href="../../lockfile.rs.html#270">contract = suite_name.split(</a><span class="string">':'</span><a href="../../lockfile.rs.html#270">).next_back().unwrap();
+<a href=#434 id=434 data-nosnippet>434</a>            </a><span class="kw">let </span><a href="../../lockfile.rs.html#270">test_name = test_name.trim_end_matches(</a><span class="string">"()"</span>);
+<a href=#435 id=435 data-nosnippet>435</a>            <span class="kw">let </span><a href="../../lockfile.rs.html#270">file_name = </a><span class="macro">format!</span>(<span class="string">"cache/{label}_{contract}_{test_name}.svg"</span>);
+<a href=#436 id=436 data-nosnippet>436</a>            <span class="kw">let </span><a href="../../lockfile.rs.html#270">file = std::fs::File::create(</a><span class="kw-2">&amp;</span><a href="../../lockfile.rs.html#270">file_name).wrap_err(</a><span class="string">"failed to create file"</span>)<span class="question-mark">?</span>;
+<a href=#437 id=437 data-nosnippet>437</a>            <span class="kw">let </span><a href="../../lockfile.rs.html#270">file = std::io::BufWriter::new(file);
+<a href=#438 id=438 data-nosnippet>438</a>
+<a href=#439 id=439 data-nosnippet>439</a>            </a><span class="kw">let </span><span class="kw-2">mut </span><a href="../../lockfile.rs.html#270">options = inferno::flamegraph::Options::default();
+<a href=#440 id=440 data-nosnippet>440</a>            options.title = </a><span class="macro">format!</span>(<span class="string">"{label} {contract}::{test_name}"</span><a href="../../lockfile.rs.html#270">);
+<a href=#441 id=441 data-nosnippet>441</a>            options.count_name = </a><span class="string">"gas"</span><a href="../../lockfile.rs.html#270">.to_string();
+<a href=#442 id=442 data-nosnippet>442</a>            </a><span class="kw">if </span><span class="self">self</span><a href="../../lockfile.rs.html#270">.flamechart {
+<a href=#443 id=443 data-nosnippet>443</a>                options.flame_chart = </a><span class="bool-val">true</span><a href="../../lockfile.rs.html#270">;
+<a href=#444 id=444 data-nosnippet>444</a>                fst.reverse();
+<a href=#445 id=445 data-nosnippet>445</a>            }
+<a href=#446 id=446 data-nosnippet>446</a>
+<a href=#447 id=447 data-nosnippet>447</a>            </a><span class="comment">// Generate SVG.
+<a href=#448 id=448 data-nosnippet>448</a>            </span><a href="../../lockfile.rs.html#270">inferno::flamegraph::from_lines(</a><span class="kw-2">&amp;mut </span><a href="../../lockfile.rs.html#270">options, fst.iter().map(String::as_str), file)
+<a href=#449 id=449 data-nosnippet>449</a>                .wrap_err(</a><span class="string">"failed to write svg"</span>)<span class="question-mark">?</span>;
+<a href=#450 id=450 data-nosnippet>450</a>            <span class="macro">sh_println!</span>(<span class="string">"Saved to {file_name}"</span>)<span class="question-mark">?</span>;
+<a href=#451 id=451 data-nosnippet>451</a>
+<a href=#452 id=452 data-nosnippet>452</a>            <span class="comment">// Open SVG in default program.
+<a href=#453 id=453 data-nosnippet>453</a>            </span><span class="kw">if let </span><span class="prelude-val">Err</span><a href="../../lockfile.rs.html#270">(e) = opener::open(</a><span class="kw-2">&amp;</span><a href="../../lockfile.rs.html#270">file_name) {
+<a href=#454 id=454 data-nosnippet>454</a>                </a><span class="macro">sh_err!</span>(<span class="string">"Failed to open {file_name}; please open it manually: {e}"</span>)<span class="question-mark">?</span>;
+<a href=#455 id=455 data-nosnippet>455</a>            }
+<a href=#456 id=456 data-nosnippet>456</a>        }
+<a href=#457 id=457 data-nosnippet>457</a>
+<a href=#458 id=458 data-nosnippet>458</a>        <span class="kw">if </span><a href="../../lockfile.rs.html#270">should_debug {
+<a href=#459 id=459 data-nosnippet>459</a>            </a><span class="comment">// Get first non-empty suite result. We will have only one such entry.
+<a href=#460 id=460 data-nosnippet>460</a>            </span><span class="kw">let </span>(<span class="kw">_</span>, <span class="kw">_</span><a href="../../lockfile.rs.html#270">, test_result) =
+<a href=#461 id=461 data-nosnippet>461</a>                outcome.remove_first().ok_or_eyre(</a><span class="string">"no tests were executed"</span>)<span class="question-mark">?</span>;
+<a href=#462 id=462 data-nosnippet>462</a>
+<a href=#463 id=463 data-nosnippet>463</a>            <span class="kw">let </span><a href="../../lockfile.rs.html#270">sources =
+<a href=#464 id=464 data-nosnippet>464</a>                ContractSources::from_project_output(</a><span class="kw-2">&amp;</span><a href="../../lockfile.rs.html#270">output, project.root(), </a><span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span><a href="../../lockfile.rs.html#270">libraries))</a><span class="question-mark">?</span>;
+<a href=#465 id=465 data-nosnippet>465</a>
+<a href=#466 id=466 data-nosnippet>466</a>            <span class="comment">// Run the debugger.
+<a href=#467 id=467 data-nosnippet>467</a>            </span><span class="kw">let </span><span class="kw-2">mut </span><a href="../../lockfile.rs.html#270">builder = Debugger::builder()
+<a href=#468 id=468 data-nosnippet>468</a>                .traces(
+<a href=#469 id=469 data-nosnippet>469</a>                    test_result.traces.iter().filter(|(t, </a><span class="kw">_</span><a href="../../lockfile.rs.html#270">)| t.is_execution()).cloned().collect(),
+<a href=#470 id=470 data-nosnippet>470</a>                )
+<a href=#471 id=471 data-nosnippet>471</a>                .sources(sources)
+<a href=#472 id=472 data-nosnippet>472</a>                .breakpoints(test_result.breakpoints.clone());
+<a href=#473 id=473 data-nosnippet>473</a>
+<a href=#474 id=474 data-nosnippet>474</a>            </a><span class="kw">if let </span><span class="prelude-val">Some</span><a href="../../lockfile.rs.html#270">(decoder) = </a><span class="kw-2">&amp;</span><a href="../../lockfile.rs.html#270">outcome.last_run_decoder {
+<a href=#475 id=475 data-nosnippet>475</a>                builder = builder.decoder(decoder);
+<a href=#476 id=476 data-nosnippet>476</a>            }
+<a href=#477 id=477 data-nosnippet>477</a>
+<a href=#478 id=478 data-nosnippet>478</a>            </a><span class="kw">let </span><span class="kw-2">mut </span><a href="../../lockfile.rs.html#270">debugger = builder.build();
+<a href=#479 id=479 data-nosnippet>479</a>            </a><span class="kw">if let </span><span class="prelude-val">Some</span><a href="../../lockfile.rs.html#270">(dump_path) = </a><span class="self">self</span><a href="../../lockfile.rs.html#270">.dump {
+<a href=#480 id=480 data-nosnippet>480</a>                debugger.dump_to_file(</a><span class="kw-2">&amp;</span><a href="../../lockfile.rs.html#270">dump_path)</a><span class="question-mark">?</span>;
+<a href=#481 id=481 data-nosnippet>481</a>            } <span class="kw">else </span><a href="../../lockfile.rs.html#270">{
+<a href=#482 id=482 data-nosnippet>482</a>                debugger.try_run_tui()</a><span class="question-mark">?</span>;
+<a href=#483 id=483 data-nosnippet>483</a>            }
+<a href=#484 id=484 data-nosnippet>484</a>        }
+<a href=#485 id=485 data-nosnippet>485</a>
+<a href=#486 id=486 data-nosnippet>486</a>        <span class="prelude-val">Ok</span><a href="../../lockfile.rs.html#270">(outcome)
+<a href=#487 id=487 data-nosnippet>487</a>    }
+<a href=#488 id=488 data-nosnippet>488</a>
+<a href=#489 id=489 data-nosnippet>489</a>    </a><span class="doccomment">/// Run all tests that matches the filter predicate from a test runner
+<a href=#490 id=490 data-nosnippet>490</a>    </span><span class="kw">pub async fn </span><a href="../../lockfile.rs.html#270">run_tests(
+<a href=#491 id=491 data-nosnippet>491</a>        </a><span class="kw-2">&amp;</span><span class="self">self</span>,
+<a href=#492 id=492 data-nosnippet>492</a>        <span class="kw-2">mut </span><a href="../../lockfile.rs.html#270">runner: <a href="../../multi_runner.rs.html#49-70">MultiContractRunner</a>,
+<a href=#493 id=493 data-nosnippet>493</a>        config: <a href="https://doc.rust-lang.org/nightly/alloc/sync/struct.Arc.html">Arc</a>&lt;<a href="../../../../foundry_config/struct.Config.html">Config</a>&gt;,
+<a href=#494 id=494 data-nosnippet>494</a>        verbosity: <a href="https://doc.rust-lang.org/nightly/std/primitive.u8.html">u8</a>,
+<a href=#495 id=495 data-nosnippet>495</a>        filter: </a><span class="kw-2">&amp;</span><a href="../../lockfile.rs.html#270"><a href="filter.rs.html#172-175">ProjectPathsAwareFilter</a>,
+<a href=#496 id=496 data-nosnippet>496</a>        output: </a><span class="kw-2">&amp;</span><a href="../../lockfile.rs.html#270">ProjectCompileOutput,
+<a href=#497 id=497 data-nosnippet>497</a>    ) -&gt; eyre::Result&lt;TestOutcome&gt; {
+<a href=#498 id=498 data-nosnippet>498</a>        </a><span class="kw">if </span><span class="self">self</span><a href="../../lockfile.rs.html#270">.list {
+<a href=#499 id=499 data-nosnippet>499</a>            </a><span class="kw">return </span><a href="../../lockfile.rs.html#270">list(runner, filter);
+<a href=#500 id=500 data-nosnippet>500</a>        }
+<a href=#501 id=501 data-nosnippet>501</a>
+<a href=#502 id=502 data-nosnippet>502</a>        </a><span class="macro">trace!</span><a href="../../lockfile.rs.html#270">(target: </a><span class="string">"forge::test"</span>, <span class="string">"running all tests"</span>);
+<a href=#503 id=503 data-nosnippet>503</a>
+<a href=#504 id=504 data-nosnippet>504</a>        <span class="comment">// If we need to render to a serialized format, we should not print anything else to stdout.
+<a href=#505 id=505 data-nosnippet>505</a>        </span><span class="kw">let </span><a href="../../lockfile.rs.html#270">silent = </a><span class="self">self</span><a href="../../lockfile.rs.html#270">.gas_report &amp;&amp; shell::is_json() || </a><span class="self">self</span><a href="../../lockfile.rs.html#270">.summary &amp;&amp; shell::is_json();
+<a href=#506 id=506 data-nosnippet>506</a>
+<a href=#507 id=507 data-nosnippet>507</a>        </a><span class="kw">let </span><a href="../../lockfile.rs.html#270">num_filtered = runner.matching_test_functions(filter).count();
+<a href=#508 id=508 data-nosnippet>508</a>        </a><span class="kw">if </span><a href="../../lockfile.rs.html#270">num_filtered != </a><span class="number">1 </span>&amp;&amp; (<span class="self">self</span><a href="../../lockfile.rs.html#270">.debug || </a><span class="self">self</span><a href="../../lockfile.rs.html#270">.flamegraph || </a><span class="self">self</span><a href="../../lockfile.rs.html#270">.flamechart) {
+<a href=#509 id=509 data-nosnippet>509</a>            </a><span class="kw">let </span><a href="../../lockfile.rs.html#270">action = </a><span class="kw">if </span><span class="self">self</span><a href="../../lockfile.rs.html#270">.flamegraph {
+<a href=#510 id=510 data-nosnippet>510</a>                </a><span class="string">"generate a flamegraph"
+<a href=#511 id=511 data-nosnippet>511</a>            </span>} <span class="kw">else if </span><span class="self">self</span><a href="../../lockfile.rs.html#270">.flamechart {
+<a href=#512 id=512 data-nosnippet>512</a>                </a><span class="string">"generate a flamechart"
+<a href=#513 id=513 data-nosnippet>513</a>            </span>} <span class="kw">else </span>{
+<a href=#514 id=514 data-nosnippet>514</a>                <span class="string">"run the debugger"
+<a href=#515 id=515 data-nosnippet>515</a>            </span>};
+<a href=#516 id=516 data-nosnippet>516</a>            <span class="kw">let </span><a href="../../lockfile.rs.html#270">filter = </a><span class="kw">if </span><a href="../../lockfile.rs.html#270">filter.is_empty() {
+<a href=#517 id=517 data-nosnippet>517</a>                String::new()
+<a href=#518 id=518 data-nosnippet>518</a>            } </a><span class="kw">else </span>{
+<a href=#519 id=519 data-nosnippet>519</a>                <span class="macro">format!</span>(<span class="string">"\n\nFilter used:\n{filter}"</span>)
+<a href=#520 id=520 data-nosnippet>520</a>            };
+<a href=#521 id=521 data-nosnippet>521</a>            <span class="macro">eyre::bail!</span>(
+<a href=#522 id=522 data-nosnippet>522</a>                <span class="string">"{num_filtered} tests matched your criteria, but exactly 1 test must match in order to {action}.\n\n\
+<a href=#523 id=523 data-nosnippet>523</a>                 Use --match-contract and --match-path to further limit the search.{filter}"</span>,
+<a href=#524 id=524 data-nosnippet>524</a>            );
+<a href=#525 id=525 data-nosnippet>525</a>        }
+<a href=#526 id=526 data-nosnippet>526</a>
+<a href=#527 id=527 data-nosnippet>527</a>        <span class="comment">// If exactly one test matched, we enable full tracing.
+<a href=#528 id=528 data-nosnippet>528</a>        </span><span class="kw">if </span><a href="../../lockfile.rs.html#270">num_filtered == </a><span class="number">1 </span>&amp;&amp; <span class="self">self</span><a href="../../lockfile.rs.html#270">.decode_internal {
+<a href=#529 id=529 data-nosnippet>529</a>            runner.decode_internal = InternalTraceMode::Full;
+<a href=#530 id=530 data-nosnippet>530</a>        }
+<a href=#531 id=531 data-nosnippet>531</a>
+<a href=#532 id=532 data-nosnippet>532</a>        </a><span class="comment">// Run tests in a non-streaming fashion and collect results for serialization.
+<a href=#533 id=533 data-nosnippet>533</a>        </span><span class="kw">if </span>!<span class="self">self</span><a href="../../lockfile.rs.html#270">.gas_report &amp;&amp; !</a><span class="self">self</span><a href="../../lockfile.rs.html#270">.summary &amp;&amp; shell::is_json() {
+<a href=#534 id=534 data-nosnippet>534</a>            </a><span class="kw">let </span><span class="kw-2">mut </span><a href="../../lockfile.rs.html#270">results = runner.test_collect(filter)</a><span class="question-mark">?</span><a href="../../lockfile.rs.html#270">;
+<a href=#535 id=535 data-nosnippet>535</a>            results.values_mut().for_each(|suite_result| {
+<a href=#536 id=536 data-nosnippet>536</a>                </a><span class="kw">for </span><a href="../../lockfile.rs.html#270">test_result </a><span class="kw">in </span><a href="../../lockfile.rs.html#270">suite_result.test_results.values_mut() {
+<a href=#537 id=537 data-nosnippet>537</a>                    </a><span class="kw">if </span><a href="../../lockfile.rs.html#270">verbosity &gt;= </a><span class="number">2 </span>{
+<a href=#538 id=538 data-nosnippet>538</a>                        <span class="comment">// Decode logs at level 2 and above.
+<a href=#539 id=539 data-nosnippet>539</a>                        </span><a href="../../lockfile.rs.html#270">test_result.decoded_logs = decode_console_logs(</a><span class="kw-2">&amp;</span><a href="../../lockfile.rs.html#270">test_result.logs);
+<a href=#540 id=540 data-nosnippet>540</a>                    } </a><span class="kw">else </span>{
+<a href=#541 id=541 data-nosnippet>541</a>                        <span class="comment">// Empty logs for non verbose runs.
+<a href=#542 id=542 data-nosnippet>542</a>                        </span><a href="../../lockfile.rs.html#270">test_result.logs = </a><span class="macro">vec!</span>[];
+<a href=#543 id=543 data-nosnippet>543</a>                    }
+<a href=#544 id=544 data-nosnippet>544</a>                }
+<a href=#545 id=545 data-nosnippet>545</a>            });
+<a href=#546 id=546 data-nosnippet>546</a>            <span class="macro">sh_println!</span>(<span class="string">"{}"</span><a href="../../lockfile.rs.html#270">, serde_json::to_string(</a><span class="kw-2">&amp;</span><a href="../../lockfile.rs.html#270">results)</a><span class="question-mark">?</span>)<span class="question-mark">?</span>;
+<a href=#547 id=547 data-nosnippet>547</a>            <span class="kw">return </span><span class="prelude-val">Ok</span><a href="../../lockfile.rs.html#270">(TestOutcome::new(results, </a><span class="self">self</span><a href="../../lockfile.rs.html#270">.allow_failure));
+<a href=#548 id=548 data-nosnippet>548</a>        }
+<a href=#549 id=549 data-nosnippet>549</a>
+<a href=#550 id=550 data-nosnippet>550</a>        </a><span class="kw">if </span><span class="self">self</span><a href="../../lockfile.rs.html#270">.junit {
+<a href=#551 id=551 data-nosnippet>551</a>            </a><span class="kw">let </span><a href="../../lockfile.rs.html#270">results = runner.test_collect(filter)</a><span class="question-mark">?</span>;
+<a href=#552 id=552 data-nosnippet>552</a>            <span class="macro">sh_println!</span>(<span class="string">"{}"</span><a href="../../lockfile.rs.html#270">, junit_xml_report(</a><span class="kw-2">&amp;</span><a href="../../lockfile.rs.html#270">results, verbosity).to_string()</a><span class="question-mark">?</span>)<span class="question-mark">?</span>;
+<a href=#553 id=553 data-nosnippet>553</a>            <span class="kw">return </span><span class="prelude-val">Ok</span><a href="../../lockfile.rs.html#270">(TestOutcome::new(results, </a><span class="self">self</span><a href="../../lockfile.rs.html#270">.allow_failure));
+<a href=#554 id=554 data-nosnippet>554</a>        }
+<a href=#555 id=555 data-nosnippet>555</a>
+<a href=#556 id=556 data-nosnippet>556</a>        </a><span class="kw">let </span><a href="../../lockfile.rs.html#270">remote_chain_id = runner.evm_opts.get_remote_chain_id().</a><span class="kw">await</span>;
+<a href=#557 id=557 data-nosnippet>557</a>        <span class="kw">let </span><a href="../../lockfile.rs.html#270">known_contracts = runner.known_contracts.clone();
+<a href=#558 id=558 data-nosnippet>558</a>
+<a href=#559 id=559 data-nosnippet>559</a>        </a><span class="kw">let </span><a href="../../lockfile.rs.html#270">libraries = runner.libraries.clone();
+<a href=#560 id=560 data-nosnippet>560</a>
+<a href=#561 id=561 data-nosnippet>561</a>        </a><span class="comment">// Run tests in a streaming fashion.
+<a href=#562 id=562 data-nosnippet>562</a>        </span><span class="kw">let </span><a href="../../lockfile.rs.html#270">(tx, rx) = channel::&lt;(String, SuiteResult)&gt;();
+<a href=#563 id=563 data-nosnippet>563</a>        </a><span class="kw">let </span><a href="../../lockfile.rs.html#270">timer = Instant::now();
+<a href=#564 id=564 data-nosnippet>564</a>        </a><span class="kw">let </span><a href="../../lockfile.rs.html#270">show_progress = config.show_progress;
+<a href=#565 id=565 data-nosnippet>565</a>        </a><span class="kw">let </span><a href="../../lockfile.rs.html#270">handle = tokio::task::spawn_blocking({
+<a href=#566 id=566 data-nosnippet>566</a>            </a><span class="kw">let </span><a href="../../lockfile.rs.html#270">filter = filter.clone();
+<a href=#567 id=567 data-nosnippet>567</a>            </a><span class="kw">move </span><a href="../../lockfile.rs.html#270">|| runner.test(</a><span class="kw-2">&amp;</span><a href="../../lockfile.rs.html#270">filter, tx, show_progress)
+<a href=#568 id=568 data-nosnippet>568</a>        });
+<a href=#569 id=569 data-nosnippet>569</a>
+<a href=#570 id=570 data-nosnippet>570</a>        </a><span class="comment">// Set up trace identifiers.
+<a href=#571 id=571 data-nosnippet>571</a>        </span><span class="kw">let </span><span class="kw-2">mut </span><a href="../../lockfile.rs.html#270">identifier = TraceIdentifiers::new().with_local(</a><span class="kw-2">&amp;</span><a href="../../lockfile.rs.html#270">known_contracts);
+<a href=#572 id=572 data-nosnippet>572</a>
+<a href=#573 id=573 data-nosnippet>573</a>        </a><span class="comment">// Avoid using etherscan for gas report as we decode more traces and this will be
+<a href=#574 id=574 data-nosnippet>574</a>        // expensive.
+<a href=#575 id=575 data-nosnippet>575</a>        </span><span class="kw">if </span>!<span class="self">self</span><a href="../../lockfile.rs.html#270">.gas_report {
+<a href=#576 id=576 data-nosnippet>576</a>            identifier = identifier.with_etherscan(</a><span class="kw-2">&amp;</span><a href="../../lockfile.rs.html#270">config, remote_chain_id)</a><span class="question-mark">?</span>;
+<a href=#577 id=577 data-nosnippet>577</a>        }
+<a href=#578 id=578 data-nosnippet>578</a>
+<a href=#579 id=579 data-nosnippet>579</a>        <span class="comment">// Build the trace decoder.
+<a href=#580 id=580 data-nosnippet>580</a>        </span><span class="kw">let </span><span class="kw-2">mut </span><a href="../../lockfile.rs.html#270">builder = CallTraceDecoderBuilder::new()
+<a href=#581 id=581 data-nosnippet>581</a>            .with_known_contracts(</a><span class="kw-2">&amp;</span><a href="../../lockfile.rs.html#270">known_contracts)
+<a href=#582 id=582 data-nosnippet>582</a>            .with_verbosity(verbosity);
+<a href=#583 id=583 data-nosnippet>583</a>        </a><span class="comment">// Signatures are of no value for gas reports.
+<a href=#584 id=584 data-nosnippet>584</a>        </span><span class="kw">if </span>!<span class="self">self</span><a href="../../lockfile.rs.html#270">.gas_report {
+<a href=#585 id=585 data-nosnippet>585</a>            builder =
+<a href=#586 id=586 data-nosnippet>586</a>                builder.with_signature_identifier(SignaturesIdentifier::from_config(</a><span class="kw-2">&amp;</span><a href="../../lockfile.rs.html#270">config)</a><span class="question-mark">?</span>);
+<a href=#587 id=587 data-nosnippet>587</a>        }
+<a href=#588 id=588 data-nosnippet>588</a>
+<a href=#589 id=589 data-nosnippet>589</a>        <span class="kw">if </span><span class="self">self</span><a href="../../lockfile.rs.html#270">.decode_internal {
+<a href=#590 id=590 data-nosnippet>590</a>            </a><span class="kw">let </span><a href="../../lockfile.rs.html#270">sources =
+<a href=#591 id=591 data-nosnippet>591</a>                ContractSources::from_project_output(output, </a><span class="kw-2">&amp;</span><a href="../../lockfile.rs.html#270">config.root, </a><span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span><a href="../../lockfile.rs.html#270">libraries))</a><span class="question-mark">?</span><a href="../../lockfile.rs.html#270">;
+<a href=#592 id=592 data-nosnippet>592</a>            builder = builder.with_debug_identifier(DebugTraceIdentifier::new(sources));
+<a href=#593 id=593 data-nosnippet>593</a>        }
+<a href=#594 id=594 data-nosnippet>594</a>        </a><span class="kw">let </span><span class="kw-2">mut </span><a href="../../lockfile.rs.html#270">decoder = builder.build();
+<a href=#595 id=595 data-nosnippet>595</a>
+<a href=#596 id=596 data-nosnippet>596</a>        </a><span class="kw">let </span><span class="kw-2">mut </span><a href="../../lockfile.rs.html#270">gas_report = </a><span class="self">self</span><a href="../../lockfile.rs.html#270">.gas_report.then(|| {
+<a href=#597 id=597 data-nosnippet>597</a>            GasReport::new(
+<a href=#598 id=598 data-nosnippet>598</a>                config.gas_reports.clone(),
+<a href=#599 id=599 data-nosnippet>599</a>                config.gas_reports_ignore.clone(),
+<a href=#600 id=600 data-nosnippet>600</a>                config.gas_reports_include_tests,
+<a href=#601 id=601 data-nosnippet>601</a>            )
+<a href=#602 id=602 data-nosnippet>602</a>        });
+<a href=#603 id=603 data-nosnippet>603</a>
+<a href=#604 id=604 data-nosnippet>604</a>        </a><span class="kw">let </span><span class="kw-2">mut </span><a href="../../lockfile.rs.html#270">gas_snapshots = BTreeMap::&lt;String, BTreeMap&lt;String, String&gt;&gt;::new();
+<a href=#605 id=605 data-nosnippet>605</a>
+<a href=#606 id=606 data-nosnippet>606</a>        </a><span class="kw">let </span><span class="kw-2">mut </span><a href="../../lockfile.rs.html#270">outcome = TestOutcome::empty(</a><span class="self">self</span><a href="../../lockfile.rs.html#270">.allow_failure);
+<a href=#607 id=607 data-nosnippet>607</a>
+<a href=#608 id=608 data-nosnippet>608</a>        </a><span class="kw">let </span><span class="kw-2">mut </span><a href="../../lockfile.rs.html#270">any_test_failed = </a><span class="bool-val">false</span>;
+<a href=#609 id=609 data-nosnippet>609</a>        <span class="kw">for </span><a href="../../lockfile.rs.html#270">(contract_name, suite_result) </a><span class="kw">in </span><a href="../../lockfile.rs.html#270">rx {
+<a href=#610 id=610 data-nosnippet>610</a>            </a><span class="kw">let </span><a href="../../lockfile.rs.html#270">tests = </a><span class="kw-2">&amp;</span><a href="../../lockfile.rs.html#270">suite_result.test_results;
+<a href=#611 id=611 data-nosnippet>611</a>
+<a href=#612 id=612 data-nosnippet>612</a>            </a><span class="comment">// Clear the addresses and labels from previous test.
+<a href=#613 id=613 data-nosnippet>613</a>            </span><a href="../../lockfile.rs.html#270">decoder.clear_addresses();
+<a href=#614 id=614 data-nosnippet>614</a>
+<a href=#615 id=615 data-nosnippet>615</a>            </a><span class="comment">// We identify addresses if we're going to print *any* trace or gas report.
+<a href=#616 id=616 data-nosnippet>616</a>            </span><span class="kw">let </span><a href="../../lockfile.rs.html#270">identify_addresses = verbosity &gt;= </a><span class="number">3
+<a href=#617 id=617 data-nosnippet>617</a>                </span>|| <span class="self">self</span><a href="../../lockfile.rs.html#270">.gas_report
+<a href=#618 id=618 data-nosnippet>618</a>                || </a><span class="self">self</span><a href="../../lockfile.rs.html#270">.debug
+<a href=#619 id=619 data-nosnippet>619</a>                || </a><span class="self">self</span><a href="../../lockfile.rs.html#270">.flamegraph
+<a href=#620 id=620 data-nosnippet>620</a>                || </a><span class="self">self</span><a href="../../lockfile.rs.html#270">.flamechart;
+<a href=#621 id=621 data-nosnippet>621</a>
+<a href=#622 id=622 data-nosnippet>622</a>            </a><span class="comment">// Print suite header.
+<a href=#623 id=623 data-nosnippet>623</a>            </span><span class="kw">if </span><a href="../../lockfile.rs.html#270">!silent {
+<a href=#624 id=624 data-nosnippet>624</a>                </a><span class="macro">sh_println!</span>()<span class="question-mark">?</span>;
+<a href=#625 id=625 data-nosnippet>625</a>                <span class="kw">for </span><a href="../../lockfile.rs.html#270">warning </a><span class="kw">in </span><span class="kw-2">&amp;</span><a href="../../lockfile.rs.html#270">suite_result.warnings {
+<a href=#626 id=626 data-nosnippet>626</a>                    </a><span class="macro">sh_warn!</span>(<span class="string">"{warning}"</span>)<span class="question-mark">?</span>;
+<a href=#627 id=627 data-nosnippet>627</a>                }
+<a href=#628 id=628 data-nosnippet>628</a>                <span class="kw">if </span><a href="../../lockfile.rs.html#270">!tests.is_empty() {
+<a href=#629 id=629 data-nosnippet>629</a>                    </a><span class="kw">let </span><a href="../../lockfile.rs.html#270">len = tests.len();
+<a href=#630 id=630 data-nosnippet>630</a>                    </a><span class="kw">let </span><a href="../../lockfile.rs.html#270">tests = </a><span class="kw">if </span><a href="../../lockfile.rs.html#270">len &gt; </a><span class="number">1 </span>{ <span class="string">"tests" </span>} <span class="kw">else </span>{ <span class="string">"test" </span>};
+<a href=#631 id=631 data-nosnippet>631</a>                    <span class="macro">sh_println!</span>(<span class="string">"Ran {len} {tests} for {contract_name}"</span>)<span class="question-mark">?</span>;
+<a href=#632 id=632 data-nosnippet>632</a>                }
+<a href=#633 id=633 data-nosnippet>633</a>            }
+<a href=#634 id=634 data-nosnippet>634</a>
+<a href=#635 id=635 data-nosnippet>635</a>            <span class="comment">// Process individual test results, printing logs and traces when necessary.
+<a href=#636 id=636 data-nosnippet>636</a>            </span><span class="kw">for </span><a href="../../lockfile.rs.html#270">(name, result) </a><span class="kw">in </span><a href="../../lockfile.rs.html#270">tests {
+<a href=#637 id=637 data-nosnippet>637</a>                </a><span class="kw">let </span><a href="../../lockfile.rs.html#270">show_traces =
+<a href=#638 id=638 data-nosnippet>638</a>                    !</a><span class="self">self</span><a href="../../lockfile.rs.html#270">.suppress_successful_traces || result.status == TestStatus::Failure;
+<a href=#639 id=639 data-nosnippet>639</a>                </a><span class="kw">if </span><a href="../../lockfile.rs.html#270">!silent {
+<a href=#640 id=640 data-nosnippet>640</a>                    </a><span class="macro">sh_println!</span>(<span class="string">"{}"</span><a href="../../lockfile.rs.html#270">, result.short_result(name))</a><span class="question-mark">?</span>;
+<a href=#641 id=641 data-nosnippet>641</a>
+<a href=#642 id=642 data-nosnippet>642</a>                    <span class="comment">// Display invariant metrics if invariant kind.
+<a href=#643 id=643 data-nosnippet>643</a>                    </span><span class="kw">if let </span><a href="../../lockfile.rs.html#270">TestKind::Invariant { metrics, .. } = </a><span class="kw-2">&amp;</span><a href="../../lockfile.rs.html#270">result.kind
+<a href=#644 id=644 data-nosnippet>644</a>                        &amp;&amp; !metrics.is_empty()
+<a href=#645 id=645 data-nosnippet>645</a>                    {
+<a href=#646 id=646 data-nosnippet>646</a>                        </a><span class="kw">let _ </span>= <span class="macro">sh_println!</span>(<span class="string">"\n{}\n"</span><a href="../../lockfile.rs.html#270">, format_invariant_metrics_table(metrics));
+<a href=#647 id=647 data-nosnippet>647</a>                    }
+<a href=#648 id=648 data-nosnippet>648</a>
+<a href=#649 id=649 data-nosnippet>649</a>                    </a><span class="comment">// We only display logs at level 2 and above
+<a href=#650 id=650 data-nosnippet>650</a>                    </span><span class="kw">if </span><a href="../../lockfile.rs.html#270">verbosity &gt;= </a><span class="number">2 </span><a href="../../lockfile.rs.html#270">&amp;&amp; show_traces {
+<a href=#651 id=651 data-nosnippet>651</a>                        </a><span class="comment">// We only decode logs from Hardhat and DS-style console events
+<a href=#652 id=652 data-nosnippet>652</a>                        </span><span class="kw">let </span><a href="../../lockfile.rs.html#270">console_logs = decode_console_logs(</a><span class="kw-2">&amp;</span><a href="../../lockfile.rs.html#270">result.logs);
+<a href=#653 id=653 data-nosnippet>653</a>                        </a><span class="kw">if </span><a href="../../lockfile.rs.html#270">!console_logs.is_empty() {
+<a href=#654 id=654 data-nosnippet>654</a>                            </a><span class="macro">sh_println!</span>(<span class="string">"Logs:"</span>)<span class="question-mark">?</span>;
+<a href=#655 id=655 data-nosnippet>655</a>                            <span class="kw">for </span><a href="../../lockfile.rs.html#270">log </a><span class="kw">in </span><a href="../../lockfile.rs.html#270">console_logs {
+<a href=#656 id=656 data-nosnippet>656</a>                                </a><span class="macro">sh_println!</span>(<span class="string">"  {log}"</span>)<span class="question-mark">?</span>;
+<a href=#657 id=657 data-nosnippet>657</a>                            }
+<a href=#658 id=658 data-nosnippet>658</a>                            <span class="macro">sh_println!</span>()<span class="question-mark">?</span>;
+<a href=#659 id=659 data-nosnippet>659</a>                        }
+<a href=#660 id=660 data-nosnippet>660</a>                    }
+<a href=#661 id=661 data-nosnippet>661</a>                }
+<a href=#662 id=662 data-nosnippet>662</a>
+<a href=#663 id=663 data-nosnippet>663</a>                <span class="comment">// We shouldn't break out of the outer loop directly here so that we finish
+<a href=#664 id=664 data-nosnippet>664</a>                // processing the remaining tests and print the suite summary.
+<a href=#665 id=665 data-nosnippet>665</a>                </span><a href="../../lockfile.rs.html#270">any_test_failed |= result.status == TestStatus::Failure;
+<a href=#666 id=666 data-nosnippet>666</a>
+<a href=#667 id=667 data-nosnippet>667</a>                </a><span class="comment">// Clear the addresses and labels from previous runs.
+<a href=#668 id=668 data-nosnippet>668</a>                </span><a href="../../lockfile.rs.html#270">decoder.clear_addresses();
+<a href=#669 id=669 data-nosnippet>669</a>                decoder
+<a href=#670 id=670 data-nosnippet>670</a>                    .labels
+<a href=#671 id=671 data-nosnippet>671</a>                    .extend(result.labeled_addresses.iter().map(|(k, v)| (</a><span class="kw-2">*</span><a href="../../lockfile.rs.html#270">k, v.clone())));
+<a href=#672 id=672 data-nosnippet>672</a>
+<a href=#673 id=673 data-nosnippet>673</a>                </a><span class="comment">// Identify addresses and decode traces.
+<a href=#674 id=674 data-nosnippet>674</a>                </span><span class="kw">let </span><span class="kw-2">mut </span><a href="../../lockfile.rs.html#270">decoded_traces = Vec::with_capacity(result.traces.len());
+<a href=#675 id=675 data-nosnippet>675</a>                </a><span class="kw">for </span><a href="../../lockfile.rs.html#270">(kind, arena) </a><span class="kw">in </span><span class="kw-2">&amp;mut </span><a href="../../lockfile.rs.html#270">result.traces.clone() {
+<a href=#676 id=676 data-nosnippet>676</a>                    </a><span class="kw">if </span><a href="../../lockfile.rs.html#270">identify_addresses {
+<a href=#677 id=677 data-nosnippet>677</a>                        decoder.identify(arena, </a><span class="kw-2">&amp;mut </span><a href="../../lockfile.rs.html#270">identifier);
+<a href=#678 id=678 data-nosnippet>678</a>                    }
+<a href=#679 id=679 data-nosnippet>679</a>
+<a href=#680 id=680 data-nosnippet>680</a>                    </a><span class="comment">// verbosity:
+<a href=#681 id=681 data-nosnippet>681</a>                    // - 0..3: nothing
+<a href=#682 id=682 data-nosnippet>682</a>                    // - 3: only display traces for failed tests
+<a href=#683 id=683 data-nosnippet>683</a>                    // - 4: also display the setup trace for failed tests
+<a href=#684 id=684 data-nosnippet>684</a>                    // - 5..: display all traces for all tests, including storage changes
+<a href=#685 id=685 data-nosnippet>685</a>                    </span><span class="kw">let </span><a href="../../lockfile.rs.html#270">should_include = </a><span class="kw">match </span><a href="../../lockfile.rs.html#270">kind {
+<a href=#686 id=686 data-nosnippet>686</a>                        TraceKind::Execution =&gt; {
+<a href=#687 id=687 data-nosnippet>687</a>                            (verbosity == </a><span class="number">3 </span><a href="../../lockfile.rs.html#270">&amp;&amp; result.status.is_failure()) || verbosity &gt;= </a><span class="number">4
+<a href=#688 id=688 data-nosnippet>688</a>                        </span><a href="../../lockfile.rs.html#270">}
+<a href=#689 id=689 data-nosnippet>689</a>                        TraceKind::Setup =&gt; {
+<a href=#690 id=690 data-nosnippet>690</a>                            (verbosity == </a><span class="number">4 </span><a href="../../lockfile.rs.html#270">&amp;&amp; result.status.is_failure()) || verbosity &gt;= </a><span class="number">5
+<a href=#691 id=691 data-nosnippet>691</a>                        </span><a href="../../lockfile.rs.html#270">}
+<a href=#692 id=692 data-nosnippet>692</a>                        TraceKind::Deployment =&gt; </a><span class="bool-val">false</span>,
+<a href=#693 id=693 data-nosnippet>693</a>                    };
+<a href=#694 id=694 data-nosnippet>694</a>
+<a href=#695 id=695 data-nosnippet>695</a>                    <span class="kw">if </span><a href="../../lockfile.rs.html#270">should_include {
+<a href=#696 id=696 data-nosnippet>696</a>                        decode_trace_arena(arena, </a><span class="kw-2">&amp;</span><a href="../../lockfile.rs.html#270">decoder).</a><span class="kw">await</span><a href="../../lockfile.rs.html#270">;
+<a href=#697 id=697 data-nosnippet>697</a>                        decoded_traces.push(render_trace_arena_inner(arena, </a><span class="bool-val">false</span><a href="../../lockfile.rs.html#270">, verbosity &gt; </a><span class="number">4</span>));
+<a href=#698 id=698 data-nosnippet>698</a>                    }
+<a href=#699 id=699 data-nosnippet>699</a>                }
+<a href=#700 id=700 data-nosnippet>700</a>
+<a href=#701 id=701 data-nosnippet>701</a>                <span class="kw">if </span><a href="../../lockfile.rs.html#270">!silent &amp;&amp; show_traces &amp;&amp; !decoded_traces.is_empty() {
+<a href=#702 id=702 data-nosnippet>702</a>                    </a><span class="macro">sh_println!</span>(<span class="string">"Traces:"</span>)<span class="question-mark">?</span>;
+<a href=#703 id=703 data-nosnippet>703</a>                    <span class="kw">for </span><a href="../../lockfile.rs.html#270">trace </a><span class="kw">in </span><span class="kw-2">&amp;</span><a href="../../lockfile.rs.html#270">decoded_traces {
+<a href=#704 id=704 data-nosnippet>704</a>                        </a><span class="macro">sh_println!</span>(<span class="string">"{trace}"</span>)<span class="question-mark">?</span>;
+<a href=#705 id=705 data-nosnippet>705</a>                    }
+<a href=#706 id=706 data-nosnippet>706</a>                }
+<a href=#707 id=707 data-nosnippet>707</a>
+<a href=#708 id=708 data-nosnippet>708</a>                <span class="kw">if let </span><span class="prelude-val">Some</span><a href="../../lockfile.rs.html#270">(gas_report) = </a><span class="kw-2">&amp;mut </span><a href="../../lockfile.rs.html#270">gas_report {
+<a href=#709 id=709 data-nosnippet>709</a>                    gas_report.analyze(result.traces.iter().map(|(</a><span class="kw">_</span><a href="../../lockfile.rs.html#270">, a)| </a><span class="kw-2">&amp;</span><a href="../../lockfile.rs.html#270">a.arena), </a><span class="kw-2">&amp;</span><a href="../../lockfile.rs.html#270">decoder).</a><span class="kw">await</span>;
+<a href=#710 id=710 data-nosnippet>710</a>
+<a href=#711 id=711 data-nosnippet>711</a>                    <span class="kw">for </span><a href="../../lockfile.rs.html#270">trace </a><span class="kw">in </span><span class="kw-2">&amp;</span><a href="../../lockfile.rs.html#270">result.gas_report_traces {
+<a href=#712 id=712 data-nosnippet>712</a>                        decoder.clear_addresses();
+<a href=#713 id=713 data-nosnippet>713</a>
+<a href=#714 id=714 data-nosnippet>714</a>                        </a><span class="comment">// Re-execute setup and deployment traces to collect identities created in
+<a href=#715 id=715 data-nosnippet>715</a>                        // setUp and constructor.
+<a href=#716 id=716 data-nosnippet>716</a>                        </span><span class="kw">for </span><a href="../../lockfile.rs.html#270">(kind, arena) </a><span class="kw">in </span><span class="kw-2">&amp;</span><a href="../../lockfile.rs.html#270">result.traces {
+<a href=#717 id=717 data-nosnippet>717</a>                            </a><span class="kw">if </span>!<span class="macro">matches!</span><a href="../../lockfile.rs.html#270">(kind, TraceKind::Execution) {
+<a href=#718 id=718 data-nosnippet>718</a>                                decoder.identify(arena, </a><span class="kw-2">&amp;mut </span><a href="../../lockfile.rs.html#270">identifier);
+<a href=#719 id=719 data-nosnippet>719</a>                            }
+<a href=#720 id=720 data-nosnippet>720</a>                        }
+<a href=#721 id=721 data-nosnippet>721</a>
+<a href=#722 id=722 data-nosnippet>722</a>                        </a><span class="kw">for </span><a href="../../lockfile.rs.html#270">arena </a><span class="kw">in </span><a href="../../lockfile.rs.html#270">trace {
+<a href=#723 id=723 data-nosnippet>723</a>                            decoder.identify(arena, </a><span class="kw-2">&amp;mut </span><a href="../../lockfile.rs.html#270">identifier);
+<a href=#724 id=724 data-nosnippet>724</a>                            gas_report.analyze([arena], </a><span class="kw-2">&amp;</span><a href="../../lockfile.rs.html#270">decoder).</a><span class="kw">await</span>;
+<a href=#725 id=725 data-nosnippet>725</a>                        }
+<a href=#726 id=726 data-nosnippet>726</a>                    }
+<a href=#727 id=727 data-nosnippet>727</a>                }
+<a href=#728 id=728 data-nosnippet>728</a>
+<a href=#729 id=729 data-nosnippet>729</a>                <span class="comment">// Collect and merge gas snapshots.
+<a href=#730 id=730 data-nosnippet>730</a>                </span><span class="kw">for </span><a href="../../lockfile.rs.html#270">(group, new_snapshots) </a><span class="kw">in </span><span class="kw-2">&amp;</span><a href="../../lockfile.rs.html#270">result.gas_snapshots {
+<a href=#731 id=731 data-nosnippet>731</a>                    gas_snapshots.entry(group.clone()).or_default().extend(new_snapshots.clone());
+<a href=#732 id=732 data-nosnippet>732</a>                }
+<a href=#733 id=733 data-nosnippet>733</a>            }
+<a href=#734 id=734 data-nosnippet>734</a>
+<a href=#735 id=735 data-nosnippet>735</a>            </a><span class="comment">// Write gas snapshots to disk if any were collected.
+<a href=#736 id=736 data-nosnippet>736</a>            </span><span class="kw">if </span><a href="../../lockfile.rs.html#270">!gas_snapshots.is_empty() {
+<a href=#737 id=737 data-nosnippet>737</a>                </a><span class="comment">// By default `gas_snapshot_check` is set to `false` in the config.
+<a href=#738 id=738 data-nosnippet>738</a>                //
+<a href=#739 id=739 data-nosnippet>739</a>                // The user can either:
+<a href=#740 id=740 data-nosnippet>740</a>                // - Set `FORGE_SNAPSHOT_CHECK=true` in the environment.
+<a href=#741 id=741 data-nosnippet>741</a>                // - Pass `--gas-snapshot-check=true` as a CLI argument.
+<a href=#742 id=742 data-nosnippet>742</a>                // - Set `gas_snapshot_check = true` in the config.
+<a href=#743 id=743 data-nosnippet>743</a>                //
+<a href=#744 id=744 data-nosnippet>744</a>                // If the user passes `--gas-snapshot-check=&lt;bool&gt;` then it will override the config
+<a href=#745 id=745 data-nosnippet>745</a>                // and the environment variable, disabling the check if `false` is passed.
+<a href=#746 id=746 data-nosnippet>746</a>                //
+<a href=#747 id=747 data-nosnippet>747</a>                // Exiting early with code 1 if differences are found.
+<a href=#748 id=748 data-nosnippet>748</a>                </span><span class="kw">if </span><span class="self">self</span><a href="../../lockfile.rs.html#270">.gas_snapshot_check.unwrap_or(config.gas_snapshot_check) {
+<a href=#749 id=749 data-nosnippet>749</a>                    </a><span class="kw">let </span><a href="../../lockfile.rs.html#270">differences_found = gas_snapshots.clone().into_iter().fold(
+<a href=#750 id=750 data-nosnippet>750</a>                        </a><span class="bool-val">false</span>,
+<a href=#751 id=751 data-nosnippet>751</a>                        |<span class="kw-2">mut </span><a href="../../lockfile.rs.html#270">found, (group, snapshots)| {
+<a href=#752 id=752 data-nosnippet>752</a>                            </a><span class="comment">// If the snapshot file doesn't exist, we can't compare so we skip.
+<a href=#753 id=753 data-nosnippet>753</a>                            </span><span class="kw">if </span>!<span class="kw-2">&amp;</span><a href="../../lockfile.rs.html#270">config.snapshots.join(</a><span class="macro">format!</span>(<span class="string">"{group}.json"</span><a href="../../lockfile.rs.html#270">)).exists() {
+<a href=#754 id=754 data-nosnippet>754</a>                                </a><span class="kw">return </span><span class="bool-val">false</span>;
+<a href=#755 id=755 data-nosnippet>755</a>                            }
+<a href=#756 id=756 data-nosnippet>756</a>
+<a href=#757 id=757 data-nosnippet>757</a>                            <span class="kw">let </span><a href="../../lockfile.rs.html#270">previous_snapshots: BTreeMap&lt;String, String&gt; =
+<a href=#758 id=758 data-nosnippet>758</a>                                fs::read_json_file(</a><span class="kw-2">&amp;</span><a href="../../lockfile.rs.html#270">config.snapshots.join(</a><span class="macro">format!</span>(<span class="string">"{group}.json"</span><a href="../../lockfile.rs.html#270">)))
+<a href=#759 id=759 data-nosnippet>759</a>                                    .expect(</a><span class="string">"Failed to read snapshots from disk"</span>);
+<a href=#760 id=760 data-nosnippet>760</a>
+<a href=#761 id=761 data-nosnippet>761</a>                            <span class="kw">let </span><a href="../../lockfile.rs.html#270">diff: BTreeMap&lt;</a><span class="kw">_</span>, <span class="kw">_</span><a href="../../lockfile.rs.html#270">&gt; = snapshots
+<a href=#762 id=762 data-nosnippet>762</a>                                .iter()
+<a href=#763 id=763 data-nosnippet>763</a>                                .filter_map(|(k, v)| {
+<a href=#764 id=764 data-nosnippet>764</a>                                    previous_snapshots.get(k).and_then(|previous_snapshot| {
+<a href=#765 id=765 data-nosnippet>765</a>                                        </a><span class="kw">if </span><a href="../../lockfile.rs.html#270">previous_snapshot != v {
+<a href=#766 id=766 data-nosnippet>766</a>                                            </a><span class="prelude-val">Some</span><a href="../../lockfile.rs.html#270">((
+<a href=#767 id=767 data-nosnippet>767</a>                                                k.clone(),
+<a href=#768 id=768 data-nosnippet>768</a>                                                (previous_snapshot.clone(), v.clone()),
+<a href=#769 id=769 data-nosnippet>769</a>                                            ))
+<a href=#770 id=770 data-nosnippet>770</a>                                        } </a><span class="kw">else </span>{
+<a href=#771 id=771 data-nosnippet>771</a>                                            <span class="prelude-val">None
+<a href=#772 id=772 data-nosnippet>772</a>                                        </span><a href="../../lockfile.rs.html#270">}
+<a href=#773 id=773 data-nosnippet>773</a>                                    })
+<a href=#774 id=774 data-nosnippet>774</a>                                })
+<a href=#775 id=775 data-nosnippet>775</a>                                .collect();
+<a href=#776 id=776 data-nosnippet>776</a>
+<a href=#777 id=777 data-nosnippet>777</a>                            </a><span class="kw">if </span><a href="../../lockfile.rs.html#270">!diff.is_empty() {
+<a href=#778 id=778 data-nosnippet>778</a>                                </a><span class="kw">let _ </span>= <span class="macro">sh_eprintln!</span>(
+<a href=#779 id=779 data-nosnippet>779</a>                                    <span class="string">"{}"</span>,
+<a href=#780 id=780 data-nosnippet>780</a>                                    <span class="macro">format!</span>(<span class="string">"\n[{group}] Failed to match snapshots:"</span><a href="../../lockfile.rs.html#270">).red().bold()
+<a href=#781 id=781 data-nosnippet>781</a>                                );
+<a href=#782 id=782 data-nosnippet>782</a>
+<a href=#783 id=783 data-nosnippet>783</a>                                </a><span class="kw">for </span><a href="../../lockfile.rs.html#270">(key, (previous_snapshot, snapshot)) </a><span class="kw">in </span><span class="kw-2">&amp;</span><a href="../../lockfile.rs.html#270">diff {
+<a href=#784 id=784 data-nosnippet>784</a>                                    </a><span class="kw">let _ </span>= <span class="macro">sh_eprintln!</span>(
+<a href=#785 id=785 data-nosnippet>785</a>                                        <span class="string">"{}"</span>,
+<a href=#786 id=786 data-nosnippet>786</a>                                        <span class="macro">format!</span>(<span class="string">"- [{key}] {previous_snapshot} → {snapshot}"</span><a href="../../lockfile.rs.html#270">).red()
+<a href=#787 id=787 data-nosnippet>787</a>                                    );
+<a href=#788 id=788 data-nosnippet>788</a>                                }
+<a href=#789 id=789 data-nosnippet>789</a>
+<a href=#790 id=790 data-nosnippet>790</a>                                found = </a><span class="bool-val">true</span><a href="../../lockfile.rs.html#270">;
+<a href=#791 id=791 data-nosnippet>791</a>                            }
+<a href=#792 id=792 data-nosnippet>792</a>
+<a href=#793 id=793 data-nosnippet>793</a>                            found
+<a href=#794 id=794 data-nosnippet>794</a>                        },
+<a href=#795 id=795 data-nosnippet>795</a>                    );
+<a href=#796 id=796 data-nosnippet>796</a>
+<a href=#797 id=797 data-nosnippet>797</a>                    </a><span class="kw">if </span><a href="../../lockfile.rs.html#270">differences_found {
+<a href=#798 id=798 data-nosnippet>798</a>                        </a><span class="macro">sh_eprintln!</span>()<span class="question-mark">?</span>;
+<a href=#799 id=799 data-nosnippet>799</a>                        <span class="macro">eyre::bail!</span>(<span class="string">"Snapshots differ from previous run"</span>);
+<a href=#800 id=800 data-nosnippet>800</a>                    }
+<a href=#801 id=801 data-nosnippet>801</a>                }
+<a href=#802 id=802 data-nosnippet>802</a>
+<a href=#803 id=803 data-nosnippet>803</a>                <span class="comment">// By default `gas_snapshot_emit` is set to `true` in the config.
+<a href=#804 id=804 data-nosnippet>804</a>                //
+<a href=#805 id=805 data-nosnippet>805</a>                // The user can either:
+<a href=#806 id=806 data-nosnippet>806</a>                // - Set `FORGE_SNAPSHOT_EMIT=false` in the environment.
+<a href=#807 id=807 data-nosnippet>807</a>                // - Pass `--gas-snapshot-emit=false` as a CLI argument.
+<a href=#808 id=808 data-nosnippet>808</a>                // - Set `gas_snapshot_emit = false` in the config.
+<a href=#809 id=809 data-nosnippet>809</a>                //
+<a href=#810 id=810 data-nosnippet>810</a>                // If the user passes `--gas-snapshot-emit=&lt;bool&gt;` then it will override the config
+<a href=#811 id=811 data-nosnippet>811</a>                // and the environment variable, enabling the check if `true` is passed.
+<a href=#812 id=812 data-nosnippet>812</a>                </span><span class="kw">if </span><span class="self">self</span><a href="../../lockfile.rs.html#270">.gas_snapshot_emit.unwrap_or(config.gas_snapshot_emit) {
+<a href=#813 id=813 data-nosnippet>813</a>                    </a><span class="comment">// Create `snapshots` directory if it doesn't exist.
+<a href=#814 id=814 data-nosnippet>814</a>                    </span><a href="../../lockfile.rs.html#270">fs::create_dir_all(</a><span class="kw-2">&amp;</span><a href="../../lockfile.rs.html#270">config.snapshots)</a><span class="question-mark">?</span>;
+<a href=#815 id=815 data-nosnippet>815</a>
+<a href=#816 id=816 data-nosnippet>816</a>                    <span class="comment">// Write gas snapshots to disk per group.
+<a href=#817 id=817 data-nosnippet>817</a>                    </span><a href="../../lockfile.rs.html#270">gas_snapshots.clone().into_iter().for_each(|(group, snapshots)| {
+<a href=#818 id=818 data-nosnippet>818</a>                        fs::write_pretty_json_file(
+<a href=#819 id=819 data-nosnippet>819</a>                            </a><span class="kw-2">&amp;</span><a href="../../lockfile.rs.html#270">config.snapshots.join(</a><span class="macro">format!</span>(<span class="string">"{group}.json"</span>)),
+<a href=#820 id=820 data-nosnippet>820</a>                            <span class="kw-2">&amp;</span><a href="../../lockfile.rs.html#270">snapshots,
+<a href=#821 id=821 data-nosnippet>821</a>                        )
+<a href=#822 id=822 data-nosnippet>822</a>                        .expect(</a><span class="string">"Failed to write gas snapshots to disk"</span>);
+<a href=#823 id=823 data-nosnippet>823</a>                    });
+<a href=#824 id=824 data-nosnippet>824</a>                }
+<a href=#825 id=825 data-nosnippet>825</a>            }
+<a href=#826 id=826 data-nosnippet>826</a>
+<a href=#827 id=827 data-nosnippet>827</a>            <span class="comment">// Print suite summary.
+<a href=#828 id=828 data-nosnippet>828</a>            </span><span class="kw">if </span><a href="../../lockfile.rs.html#270">!silent {
+<a href=#829 id=829 data-nosnippet>829</a>                </a><span class="macro">sh_println!</span>(<span class="string">"{}"</span><a href="../../lockfile.rs.html#270">, suite_result.summary())</a><span class="question-mark">?</span>;
+<a href=#830 id=830 data-nosnippet>830</a>            }
+<a href=#831 id=831 data-nosnippet>831</a>
+<a href=#832 id=832 data-nosnippet>832</a>            <span class="comment">// Add the suite result to the outcome.
+<a href=#833 id=833 data-nosnippet>833</a>            </span><a href="../../lockfile.rs.html#270">outcome.results.insert(contract_name, suite_result);
+<a href=#834 id=834 data-nosnippet>834</a>
+<a href=#835 id=835 data-nosnippet>835</a>            </a><span class="comment">// Stop processing the remaining suites if any test failed and `fail_fast` is set.
+<a href=#836 id=836 data-nosnippet>836</a>            </span><span class="kw">if </span><span class="self">self</span><a href="../../lockfile.rs.html#270">.fail_fast &amp;&amp; any_test_failed {
+<a href=#837 id=837 data-nosnippet>837</a>                </a><span class="kw">break</span><a href="../../lockfile.rs.html#270">;
+<a href=#838 id=838 data-nosnippet>838</a>            }
+<a href=#839 id=839 data-nosnippet>839</a>        }
+<a href=#840 id=840 data-nosnippet>840</a>        outcome.last_run_decoder = </a><span class="prelude-val">Some</span><a href="../../lockfile.rs.html#270">(decoder);
+<a href=#841 id=841 data-nosnippet>841</a>        </a><span class="kw">let </span><a href="../../lockfile.rs.html#270">duration = timer.elapsed();
+<a href=#842 id=842 data-nosnippet>842</a>
+<a href=#843 id=843 data-nosnippet>843</a>        </a><span class="macro">trace!</span><a href="../../lockfile.rs.html#270">(target: </a><span class="string">"forge::test"</span><a href="../../lockfile.rs.html#270">, len=outcome.results.len(), %any_test_failed, </a><span class="string">"done with results"</span>);
+<a href=#844 id=844 data-nosnippet>844</a>
+<a href=#845 id=845 data-nosnippet>845</a>        <span class="kw">if let </span><span class="prelude-val">Some</span><a href="../../lockfile.rs.html#270">(gas_report) = gas_report {
+<a href=#846 id=846 data-nosnippet>846</a>            </a><span class="kw">let </span><a href="../../lockfile.rs.html#270">finalized = gas_report.finalize();
+<a href=#847 id=847 data-nosnippet>847</a>            </a><span class="macro">sh_println!</span>(<span class="string">"{}"</span>, <span class="kw-2">&amp;</span><a href="../../lockfile.rs.html#270">finalized)</a><span class="question-mark">?</span><a href="../../lockfile.rs.html#270">;
+<a href=#848 id=848 data-nosnippet>848</a>            outcome.gas_report = </a><span class="prelude-val">Some</span><a href="../../lockfile.rs.html#270">(finalized);
+<a href=#849 id=849 data-nosnippet>849</a>        }
+<a href=#850 id=850 data-nosnippet>850</a>
+<a href=#851 id=851 data-nosnippet>851</a>        </a><span class="kw">if </span>!<span class="self">self</span><a href="../../lockfile.rs.html#270">.summary &amp;&amp; !shell::is_json() {
+<a href=#852 id=852 data-nosnippet>852</a>            </a><span class="macro">sh_println!</span>(<span class="string">"{}"</span><a href="../../lockfile.rs.html#270">, outcome.summary(duration))</a><span class="question-mark">?</span>;
+<a href=#853 id=853 data-nosnippet>853</a>        }
+<a href=#854 id=854 data-nosnippet>854</a>
+<a href=#855 id=855 data-nosnippet>855</a>        <span class="kw">if </span><span class="self">self</span><a href="../../lockfile.rs.html#270">.summary &amp;&amp; !outcome.results.is_empty() {
+<a href=#856 id=856 data-nosnippet>856</a>            </a><span class="kw">let </span><a href="../../lockfile.rs.html#270">summary_report = TestSummaryReport::new(</a><span class="self">self</span><a href="../../lockfile.rs.html#270">.detailed, outcome.clone());
+<a href=#857 id=857 data-nosnippet>857</a>            </a><span class="macro">sh_println!</span>(<span class="string">"{}"</span>, <span class="kw-2">&amp;</span><a href="../../lockfile.rs.html#270">summary_report)</a><span class="question-mark">?</span>;
+<a href=#858 id=858 data-nosnippet>858</a>        }
+<a href=#859 id=859 data-nosnippet>859</a>
+<a href=#860 id=860 data-nosnippet>860</a>        <span class="comment">// Reattach the task.
+<a href=#861 id=861 data-nosnippet>861</a>        </span><span class="kw">if let </span><span class="prelude-val">Err</span><a href="../../lockfile.rs.html#270">(e) = handle.</a><span class="kw">await </span>{
+<a href=#862 id=862 data-nosnippet>862</a>            <span class="kw">match </span><a href="../../lockfile.rs.html#270">e.try_into_panic() {
+<a href=#863 id=863 data-nosnippet>863</a>                </a><span class="prelude-val">Ok</span><a href="../../lockfile.rs.html#270">(payload) =&gt; std::panic::resume_unwind(payload),
+<a href=#864 id=864 data-nosnippet>864</a>                </a><span class="prelude-val">Err</span><a href="../../lockfile.rs.html#270">(e) =&gt; </a><span class="kw">return </span><span class="prelude-val">Err</span><a href="../../lockfile.rs.html#270">(e.into()),
+<a href=#865 id=865 data-nosnippet>865</a>            }
+<a href=#866 id=866 data-nosnippet>866</a>        }
+<a href=#867 id=867 data-nosnippet>867</a>
+<a href=#868 id=868 data-nosnippet>868</a>        </a><span class="comment">// Persist test run failures to enable replaying.
+<a href=#869 id=869 data-nosnippet>869</a>        </span><a href="../../lockfile.rs.html#270">persist_run_failures(</a><span class="kw-2">&amp;</span><a href="../../lockfile.rs.html#270">config, </a><span class="kw-2">&amp;</span><a href="../../lockfile.rs.html#270">outcome);
+<a href=#870 id=870 data-nosnippet>870</a>
+<a href=#871 id=871 data-nosnippet>871</a>        </a><span class="prelude-val">Ok</span><a href="../../lockfile.rs.html#270">(outcome)
+<a href=#872 id=872 data-nosnippet>872</a>    }
+<a href=#873 id=873 data-nosnippet>873</a>
+<a href=#874 id=874 data-nosnippet>874</a>    </a><span class="doccomment">/// Returns the flattened [`FilterArgs`] arguments merged with [`Config`].
+<a href=#875 id=875 data-nosnippet>875</a>    /// Loads and applies filter from file if only last test run failures performed.
+<a href=#876 id=876 data-nosnippet>876</a>    </span><span class="kw">pub fn </span><a href="../../lockfile.rs.html#270">filter(</a><span class="kw-2">&amp;</span><span class="self">self</span><a href="../../lockfile.rs.html#270">, config: </a><span class="kw-2">&amp;</span><a href="../../lockfile.rs.html#270"><a href="../../../../foundry_config/struct.Config.html">Config</a>) -&gt; </a><a class="prelude-ty" href="https://docs.rs/eyre/0.6.12/eyre/type.Result.html">Result</a><a href="../../lockfile.rs.html#270">&lt;<a href="filter.rs.html#172-175">ProjectPathsAwareFilter</a>&gt; {
+<a href=#877 id=877 data-nosnippet>877</a>        </a><span class="kw">let </span><span class="kw-2">mut </span><a href="../../lockfile.rs.html#270">filter = </a><a class="self" href="#876">self</a><a href="../../lockfile.rs.html#270">.filter.<a href="https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html#tymethod.clone">clone</a>();
+<a href=#878 id=878 data-nosnippet>878</a>        </a><span class="kw">if </span><a class="self" href="#876">self</a><a href="../../lockfile.rs.html#270">.rerun {
+<a href=#879 id=879 data-nosnippet>879</a>            <a href="#877">filter</a>.test_pattern = <a href="#966-971">last_run_failures</a>(<a href="#876">config</a>);
+<a href=#880 id=880 data-nosnippet>880</a>        }
+<a href=#881 id=881 data-nosnippet>881</a>        </a><span class="kw">if </span><a href="../../lockfile.rs.html#270"><a href="#877">filter</a>.path_pattern.<a href="https://doc.rust-lang.org/nightly/core/option/enum.Option.html#method.is_some">is_some</a>() {
+<a href=#882 id=882 data-nosnippet>882</a>            </a><span class="kw">if </span><a class="self" href="#876">self</a><a href="../../lockfile.rs.html#270">.path.<a href="https://doc.rust-lang.org/nightly/core/option/enum.Option.html#method.is_some">is_some</a>() {
+<a href=#883 id=883 data-nosnippet>883</a>                </a><a class="macro" href="https://docs.rs/eyre/0.6.12/eyre/macro.bail.html">bail!</a>(<span class="string">"Can not supply both --match-path and |path|"</span>);
+<a href=#884 id=884 data-nosnippet>884</a>            }
+<a href=#885 id=885 data-nosnippet>885</a>        } <span class="kw">else </span><a href="../../lockfile.rs.html#270">{
+<a href=#886 id=886 data-nosnippet>886</a>            <a href="#877">filter</a>.path_pattern = </a><a class="self" href="#876">self</a><a href="../../lockfile.rs.html#270">.path.<a href="https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html#tymethod.clone">clone</a>();
+<a href=#887 id=887 data-nosnippet>887</a>        }
+<a href=#888 id=888 data-nosnippet>888</a>        </a><a class="prelude-val" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html#variant.Ok">Ok</a><a href="../../lockfile.rs.html#270">(<a href="#877">filter</a>.<a href="filter.rs.html#59-82">merge_with_config</a>(<a href="#876">config</a>))
+<a href=#889 id=889 data-nosnippet>889</a>    }
+<a href=#890 id=890 data-nosnippet>890</a>
+<a href=#891 id=891 data-nosnippet>891</a>    </a><span class="doccomment">/// Returns whether `BuildArgs` was configured with `--watch`
+<a href=#892 id=892 data-nosnippet>892</a>    </span><span class="kw">pub fn </span><a href="../../lockfile.rs.html#270">is_watch(</a><span class="kw-2">&amp;</span><span class="self">self</span><a href="../../lockfile.rs.html#270">) -&gt; <a href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a> {
+<a href=#893 id=893 data-nosnippet>893</a>        </a><a class="self" href="#892">self</a><a href="../../lockfile.rs.html#270">.watch.watch.<a href="https://doc.rust-lang.org/nightly/core/option/enum.Option.html#method.is_some">is_some</a>()
+<a href=#894 id=894 data-nosnippet>894</a>    }
+<a href=#895 id=895 data-nosnippet>895</a>
+<a href=#896 id=896 data-nosnippet>896</a>    </a><span class="doccomment">/// Returns the [`watchexec::Config`] necessary to bootstrap a new watch loop.
+<a href=#897 id=897 data-nosnippet>897</a>    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span><a href="../../lockfile.rs.html#270">watchexec_config(</a><span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <a class="prelude-ty" href="https://docs.rs/eyre/0.6.12/eyre/type.Result.html">Result</a><a href="../../lockfile.rs.html#270">&lt;watchexec::Config&gt; {
+<a href=#898 id=898 data-nosnippet>898</a>        </a><a class="self" href="#897">self</a><a href="../../lockfile.rs.html#270">.watch.<a href="../watch.rs.html#77-82">watchexec_config</a>(|| {
+<a href=#899 id=899 data-nosnippet>899</a>            </a><span class="kw">let </span><a href="../../lockfile.rs.html#270">config = </a><a class="self" href="#897">self</a><a href="../../lockfile.rs.html#270">.load_config()</a><span class="question-mark">?</span>;
+<a href=#900 id=900 data-nosnippet>900</a>            <span class="kw">let </span><a href="../../lockfile.rs.html#270">foundry_toml: <a href="https://doc.rust-lang.org/nightly/std/path/struct.PathBuf.html">PathBuf</a> = <a href="#899">config</a>.root.<a href="https://doc.rust-lang.org/nightly/std/path/struct.Path.html#method.join">join</a>(<a href="../../../../foundry_config/struct.Config.html">Config</a>::<a href="../../../../foundry_config/struct.Config.html#associatedconstant.FILE_NAME">FILE_NAME</a>);
+<a href=#901 id=901 data-nosnippet>901</a>            </a><a class="prelude-val" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html#variant.Ok">Ok</a><a href="../../lockfile.rs.html#270">([<a href="#899">config</a>.src, <a href="#899">config</a>.test, <a href="#899">config</a>.script, <a href="#900">foundry_toml</a>])
+<a href=#902 id=902 data-nosnippet>902</a>        })
+<a href=#903 id=903 data-nosnippet>903</a>    }
+<a href=#904 id=904 data-nosnippet>904</a>}
+<a href=#905 id=905 data-nosnippet>905</a>
+<a href=#906 id=906 data-nosnippet>906</a></a><span class="kw">impl </span><a href="../../lockfile.rs.html#270">Provider </a><span class="kw">for </span><a href="../../lockfile.rs.html#270"><a href="#69-202">TestArgs</a> {
+<a href=#907 id=907 data-nosnippet>907</a>    </a><span class="kw">fn </span><a href="../../lockfile.rs.html#270">metadata(</a><span class="kw-2">&amp;</span><span class="self">self</span><a href="../../lockfile.rs.html#270">) -&gt; Metadata {
+<a href=#908 id=908 data-nosnippet>908</a>        Metadata::named(</a><span class="string">"Core Build Args Provider"</span>)
+<a href=#909 id=909 data-nosnippet>909</a>    }
+<a href=#910 id=910 data-nosnippet>910</a>
+<a href=#911 id=911 data-nosnippet>911</a>    <span class="kw">fn </span><a href="../../lockfile.rs.html#270">data(</a><span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <a class="prelude-ty" href="https://docs.rs/eyre/0.6.12/eyre/type.Result.html">Result</a><a href="../../lockfile.rs.html#270">&lt;Map&lt;Profile, Dict&gt;, figment::Error&gt; {
+<a href=#912 id=912 data-nosnippet>912</a>        </a><span class="kw">let </span><span class="kw-2">mut </span><a href="../../lockfile.rs.html#270">dict = Dict::<a href="https://doc.rust-lang.org/nightly/core/default/trait.Default.html#tymethod.default">default</a>();
+<a href=#913 id=913 data-nosnippet>913</a>
+<a href=#914 id=914 data-nosnippet>914</a>        </a><span class="kw">let </span><span class="kw-2">mut </span><a href="../../lockfile.rs.html#270">fuzz_dict = Dict::<a href="https://doc.rust-lang.org/nightly/core/default/trait.Default.html#tymethod.default">default</a>();
+<a href=#915 id=915 data-nosnippet>915</a>        </a><span class="kw">if let </span><a class="prelude-val" href="https://doc.rust-lang.org/nightly/core/option/enum.Option.html#variant.Some">Some</a><a href="../../lockfile.rs.html#270">(fuzz_seed) = </a><a class="self" href="#911">self</a><a href="../../lockfile.rs.html#270">.fuzz_seed {
+<a href=#916 id=916 data-nosnippet>916</a>            <a href="#914">fuzz_dict</a>.<a href="https://doc.rust-lang.org/nightly/alloc/collections/btree/map/struct.BTreeMap.html#method.insert">insert</a>(</a><span class="string">"seed"</span><a href="../../lockfile.rs.html#270">.<a href="../../../../forge/revm/primitives/hardfork/trait.ToString.html">to_string</a>(), <a href="#915">fuzz_seed</a>.<a href="../../../../forge/revm/primitives/hardfork/trait.ToString.html">to_string</a>().<a href="https://doc.rust-lang.org/nightly/core/convert/trait.Into.html#tymethod.into">into</a>());
+<a href=#917 id=917 data-nosnippet>917</a>        }
+<a href=#918 id=918 data-nosnippet>918</a>        </a><span class="kw">if let </span><a class="prelude-val" href="https://doc.rust-lang.org/nightly/core/option/enum.Option.html#variant.Some">Some</a><a href="../../lockfile.rs.html#270">(fuzz_runs) = </a><a class="self" href="#911">self</a><a href="../../lockfile.rs.html#270">.fuzz_runs {
+<a href=#919 id=919 data-nosnippet>919</a>            <a href="#914">fuzz_dict</a>.<a href="https://doc.rust-lang.org/nightly/alloc/collections/btree/map/struct.BTreeMap.html#method.insert">insert</a>(</a><span class="string">"runs"</span><a href="../../lockfile.rs.html#270">.<a href="../../../../forge/revm/primitives/hardfork/trait.ToString.html">to_string</a>(), <a href="#918">fuzz_runs</a>.<a href="https://doc.rust-lang.org/nightly/core/convert/trait.Into.html#tymethod.into">into</a>());
+<a href=#920 id=920 data-nosnippet>920</a>        }
+<a href=#921 id=921 data-nosnippet>921</a>        </a><span class="kw">if let </span><a class="prelude-val" href="https://doc.rust-lang.org/nightly/core/option/enum.Option.html#variant.Some">Some</a><a href="../../lockfile.rs.html#270">(fuzz_timeout) = </a><a class="self" href="#911">self</a><a href="../../lockfile.rs.html#270">.fuzz_timeout {
+<a href=#922 id=922 data-nosnippet>922</a>            <a href="#914">fuzz_dict</a>.<a href="https://doc.rust-lang.org/nightly/alloc/collections/btree/map/struct.BTreeMap.html#method.insert">insert</a>(</a><span class="string">"timeout"</span><a href="../../lockfile.rs.html#270">.<a href="../../../../forge/revm/primitives/hardfork/trait.ToString.html">to_string</a>(), <a href="#921">fuzz_timeout</a>.<a href="https://doc.rust-lang.org/nightly/core/convert/trait.Into.html#tymethod.into">into</a>());
+<a href=#923 id=923 data-nosnippet>923</a>        }
+<a href=#924 id=924 data-nosnippet>924</a>        </a><span class="kw">if let </span><a class="prelude-val" href="https://doc.rust-lang.org/nightly/core/option/enum.Option.html#variant.Some">Some</a><a href="../../lockfile.rs.html#270">(fuzz_input_file) = </a><a class="self" href="#911">self</a><a href="../../lockfile.rs.html#270">.fuzz_input_file.<a href="https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html#tymethod.clone">clone</a>() {
+<a href=#925 id=925 data-nosnippet>925</a>            <a href="#914">fuzz_dict</a>.<a href="https://doc.rust-lang.org/nightly/alloc/collections/btree/map/struct.BTreeMap.html#method.insert">insert</a>(</a><span class="string">"failure_persist_file"</span><a href="../../lockfile.rs.html#270">.<a href="../../../../forge/revm/primitives/hardfork/trait.ToString.html">to_string</a>(), <a href="#924">fuzz_input_file</a>.<a href="https://doc.rust-lang.org/nightly/core/convert/trait.Into.html#tymethod.into">into</a>());
+<a href=#926 id=926 data-nosnippet>926</a>        }
+<a href=#927 id=927 data-nosnippet>927</a>        <a href="#912">dict</a>.<a href="https://doc.rust-lang.org/nightly/alloc/collections/btree/map/struct.BTreeMap.html#method.insert">insert</a>(</a><span class="string">"fuzz"</span><a href="../../lockfile.rs.html#270">.<a href="../../../../forge/revm/primitives/hardfork/trait.ToString.html">to_string</a>(), <a href="#914">fuzz_dict</a>.<a href="https://doc.rust-lang.org/nightly/core/convert/trait.Into.html#tymethod.into">into</a>());
+<a href=#928 id=928 data-nosnippet>928</a>
+<a href=#929 id=929 data-nosnippet>929</a>        </a><span class="kw">if let </span><a class="prelude-val" href="https://doc.rust-lang.org/nightly/core/option/enum.Option.html#variant.Some">Some</a><a href="../../lockfile.rs.html#270">(etherscan_api_key) =
+<a href=#930 id=930 data-nosnippet>930</a>            </a><a class="self" href="#911">self</a><a href="../../lockfile.rs.html#270">.etherscan_api_key.<a href="https://doc.rust-lang.org/nightly/core/option/enum.Option.html#method.as_ref">as_ref</a>().<a href="https://doc.rust-lang.org/nightly/core/option/enum.Option.html#method.filter">filter</a>(|s| !<a href="#930">s</a>.<a href="https://doc.rust-lang.org/nightly/core/foreigntype.str.html#method.trim">trim</a>().<a href="https://doc.rust-lang.org/nightly/core/foreigntype.str.html#method.is_empty">is_empty</a>())
+<a href=#931 id=931 data-nosnippet>931</a>        {
+<a href=#932 id=932 data-nosnippet>932</a>            <a href="#912">dict</a>.<a href="https://doc.rust-lang.org/nightly/alloc/collections/btree/map/struct.BTreeMap.html#method.insert">insert</a>(</a><span class="string">"etherscan_api_key"</span><a href="../../lockfile.rs.html#270">.<a href="../../../../forge/revm/primitives/hardfork/trait.ToString.html">to_string</a>(), <a href="#929">etherscan_api_key</a>.<a href="../../../../forge/revm/primitives/hardfork/trait.ToString.html">to_string</a>().<a href="https://doc.rust-lang.org/nightly/core/convert/trait.Into.html#tymethod.into">into</a>());
+<a href=#933 id=933 data-nosnippet>933</a>        }
+<a href=#934 id=934 data-nosnippet>934</a>
+<a href=#935 id=935 data-nosnippet>935</a>        </a><span class="kw">if let </span><a class="prelude-val" href="https://doc.rust-lang.org/nightly/core/option/enum.Option.html#variant.Some">Some</a><a href="../../lockfile.rs.html#270">(api_version) = </a><span class="kw-2">&amp;</span><a class="self" href="#911">self</a><a href="../../lockfile.rs.html#270">.etherscan_api_version {
+<a href=#936 id=936 data-nosnippet>936</a>            <a href="#912">dict</a>.<a href="https://doc.rust-lang.org/nightly/alloc/collections/btree/map/struct.BTreeMap.html#method.insert">insert</a>(</a><span class="string">"etherscan_api_version"</span><a href="../../lockfile.rs.html#270">.<a href="../../../../forge/revm/primitives/hardfork/trait.ToString.html">to_string</a>(), <a href="#935">api_version</a>.<a href="../../../../forge/revm/primitives/hardfork/trait.ToString.html">to_string</a>().<a href="https://doc.rust-lang.org/nightly/core/convert/trait.Into.html#tymethod.into">into</a>());
+<a href=#937 id=937 data-nosnippet>937</a>        }
+<a href=#938 id=938 data-nosnippet>938</a>
+<a href=#939 id=939 data-nosnippet>939</a>        </a><span class="kw">if </span><a class="self" href="#911">self</a><a href="../../lockfile.rs.html#270">.show_progress {
+<a href=#940 id=940 data-nosnippet>940</a>            <a href="#912">dict</a>.<a href="https://doc.rust-lang.org/nightly/alloc/collections/btree/map/struct.BTreeMap.html#method.insert">insert</a>(</a><span class="string">"show_progress"</span><a href="../../lockfile.rs.html#270">.<a href="../../../../forge/revm/primitives/hardfork/trait.ToString.html">to_string</a>(), </a><span class="bool-val">true</span><a href="../../lockfile.rs.html#270">.<a href="https://doc.rust-lang.org/nightly/core/convert/trait.Into.html#tymethod.into">into</a>());
+<a href=#941 id=941 data-nosnippet>941</a>        }
+<a href=#942 id=942 data-nosnippet>942</a>
+<a href=#943 id=943 data-nosnippet>943</a>        </a><a class="prelude-val" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html#variant.Ok">Ok</a><a href="../../lockfile.rs.html#270">(Map::<a href="https://doc.rust-lang.org/nightly/core/convert/trait.From.html#tymethod.from">from</a>([(<a href="../../../../foundry_config/struct.Config.html">Config</a>::<a href="../../../../foundry_config/struct.Config.html#method.selected_profile">selected_profile</a>(), <a href="#912">dict</a>)]))
+<a href=#944 id=944 data-nosnippet>944</a>    }
+<a href=#945 id=945 data-nosnippet>945</a>}
+<a href=#946 id=946 data-nosnippet>946</a>
+<a href=#947 id=947 data-nosnippet>947</a></a><span class="doccomment">/// Lists all matching tests
+<a href=#948 id=948 data-nosnippet>948</a></span><span class="kw">fn </span><a href="../../lockfile.rs.html#270"><a href="../../../../forge/cmd/test/fn.list.html">list</a>(runner: <a href="../../multi_runner.rs.html#49-70">MultiContractRunner</a>, filter: </a><span class="kw-2">&amp;</span><a href="../../lockfile.rs.html#270"><a href="filter.rs.html#172-175">ProjectPathsAwareFilter</a>) -&gt; </a><a class="prelude-ty" href="https://docs.rs/eyre/0.6.12/eyre/type.Result.html">Result</a><a href="../../lockfile.rs.html#270">&lt;<a href="../../result.rs.html#30-45">TestOutcome</a>&gt; {
+<a href=#949 id=949 data-nosnippet>949</a>    </a><span class="kw">let </span><a href="../../lockfile.rs.html#270">results = <a href="#948">runner</a>.<a href="../../multi_runner.rs.html#118-135">list</a>(<a href="#948">filter</a>);
+<a href=#950 id=950 data-nosnippet>950</a>
+<a href=#951 id=951 data-nosnippet>951</a>    </a><span class="kw">if </span><a href="../../lockfile.rs.html#270">shell::<a href="../../../../foundry_common/io/shell/fn.is_json.html">is_json</a>() {
+<a href=#952 id=952 data-nosnippet>952</a>        </a><a class="macro" href="../../../../foundry_common/macro.sh_println.html">sh_println!</a>(<span class="string">"{}"</span><a href="../../lockfile.rs.html#270">, serde_json::to_string(</a><span class="kw-2">&amp;</span><a href="../../lockfile.rs.html#270">results)</a><span class="question-mark">?</span>)<span class="question-mark">?</span>;
+<a href=#953 id=953 data-nosnippet>953</a>    } <span class="kw">else </span>{
+<a href=#954 id=954 data-nosnippet>954</a>        <span class="kw">for </span><a href="../../lockfile.rs.html#270">(file, contracts) </a><span class="kw">in </span><span class="kw-2">&amp;</span><a href="../../lockfile.rs.html#270">results {
+<a href=#955 id=955 data-nosnippet>955</a>            </a><span class="macro">sh_println!</span>(<span class="string">"{file}"</span>)<span class="question-mark">?</span>;
+<a href=#956 id=956 data-nosnippet>956</a>            <span class="kw">for </span><a href="../../lockfile.rs.html#270">(contract, tests) </a><span class="kw">in </span><a href="../../lockfile.rs.html#270">contracts {
+<a href=#957 id=957 data-nosnippet>957</a>                </a><span class="macro">sh_println!</span>(<span class="string">"  {contract}"</span>)<span class="question-mark">?</span>;
+<a href=#958 id=958 data-nosnippet>958</a>                <span class="macro">sh_println!</span>(<span class="string">"    {}\n"</span><a href="../../lockfile.rs.html#270">, tests.join(</a><span class="string">"\n    "</span>))<span class="question-mark">?</span>;
+<a href=#959 id=959 data-nosnippet>959</a>            }
+<a href=#960 id=960 data-nosnippet>960</a>        }
+<a href=#961 id=961 data-nosnippet>961</a>    }
+<a href=#962 id=962 data-nosnippet>962</a>    <a class="prelude-val" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html#variant.Ok">Ok</a><a href="../../lockfile.rs.html#270">(<a href="../../result.rs.html#30-45">TestOutcome</a>::<a href="../../result.rs.html#54-56">empty</a>(</a><span class="bool-val">false</span>))
+<a href=#963 id=963 data-nosnippet>963</a>}
+<a href=#964 id=964 data-nosnippet>964</a>
+<a href=#965 id=965 data-nosnippet>965</a><span class="doccomment">/// Load persisted filter (with last test run failures) from file.
+<a href=#966 id=966 data-nosnippet>966</a></span><span class="kw">fn </span><a href="../../lockfile.rs.html#270"><a href="../../../../forge/cmd/test/fn.last_run_failures.html">last_run_failures</a>(config: </a><span class="kw-2">&amp;</span><a href="../../lockfile.rs.html#270"><a href="../../../../foundry_config/struct.Config.html">Config</a>) -&gt; </a><a class="prelude-ty" href="https://doc.rust-lang.org/nightly/core/option/enum.Option.html">Option</a><a href="../../lockfile.rs.html#270">&lt;regex::Regex&gt; {
+<a href=#967 id=967 data-nosnippet>967</a>    </a><span class="kw">match </span><a href="../../lockfile.rs.html#270">fs::<a href="../../../../foundry_common/fs/fn.read_to_string.html">read_to_string</a>(</a><span class="kw-2">&amp;</span><a href="../../lockfile.rs.html#270"><a href="#966">config</a>.test_failures_file) {
+<a href=#968 id=968 data-nosnippet>968</a>        </a><a class="prelude-val" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html#variant.Ok">Ok</a><a href="../../lockfile.rs.html#270">(filter) =&gt; </a><a class="prelude-val" href="https://doc.rust-lang.org/nightly/core/option/enum.Option.html#variant.Some">Some</a><a href="../../lockfile.rs.html#270">(Regex::new(</a><span class="kw-2">&amp;</span><a href="../../lockfile.rs.html#270"><a href="#968">filter</a>).<a href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html#method.unwrap">unwrap</a>()),
+<a href=#969 id=969 data-nosnippet>969</a>        </a><a class="prelude-val" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html#variant.Err">Err</a>(<span class="kw">_</span>) =&gt; <a class="prelude-val" href="https://doc.rust-lang.org/nightly/core/option/enum.Option.html#variant.None">None</a>,
+<a href=#970 id=970 data-nosnippet>970</a>    }
+<a href=#971 id=971 data-nosnippet>971</a>}
+<a href=#972 id=972 data-nosnippet>972</a>
+<a href=#973 id=973 data-nosnippet>973</a><span class="doccomment">/// Persist filter with last test run failures (only if there's any failure).
+<a href=#974 id=974 data-nosnippet>974</a></span><span class="kw">fn </span><a href="../../lockfile.rs.html#270"><a href="../../../../forge/cmd/test/fn.persist_run_failures.html">persist_run_failures</a>(config: </a><span class="kw-2">&amp;</span><a href="../../lockfile.rs.html#270"><a href="../../../../foundry_config/struct.Config.html">Config</a>, outcome: </a><span class="kw-2">&amp;</span><a href="../../lockfile.rs.html#270"><a href="../../result.rs.html#30-45">TestOutcome</a>) {
+<a href=#975 id=975 data-nosnippet>975</a>    </a><span class="kw">if </span><a href="../../lockfile.rs.html#270"><a href="#974">outcome</a>.<a href="../../result.rs.html#121-123">failed</a>() &gt; </a><span class="number">0 </span><a href="../../lockfile.rs.html#270">&amp;&amp; fs::<a href="../../../../foundry_common/fs/fn.create_file.html">create_file</a>(</a><span class="kw-2">&amp;</span><a href="../../lockfile.rs.html#270"><a href="#974">config</a>.test_failures_file).<a href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html#method.is_ok">is_ok</a>() {
+<a href=#976 id=976 data-nosnippet>976</a>        </a><span class="kw">let </span><span class="kw-2">mut </span><a href="../../lockfile.rs.html#270">filter = <a href="../../../../forge/revm/primitives/hardfork/struct.String.html">String</a>::<a href="https://doc.rust-lang.org/nightly/alloc/string/struct.String.html#method.new">new</a>();
+<a href=#977 id=977 data-nosnippet>977</a>        </a><span class="kw">let </span><span class="kw-2">mut </span><a href="../../lockfile.rs.html#270">failures = <a href="#974">outcome</a>.<a href="../../result.rs.html#69-71">failures</a>().<a href="https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html#tymethod.peekable">peekable</a>();
+<a href=#978 id=978 data-nosnippet>978</a>        </a><span class="kw">while let </span><span class="prelude-val">Some</span><a href="../../lockfile.rs.html#270">((test_name, </a><span class="kw">_</span><a href="../../lockfile.rs.html#270">)) = failures.next() {
+<a href=#979 id=979 data-nosnippet>979</a>            </a><span class="kw">if </span><a href="../../lockfile.rs.html#270">test_name.is_any_test()
+<a href=#980 id=980 data-nosnippet>980</a>                &amp;&amp; </a><span class="kw">let </span><span class="prelude-val">Some</span><a href="../../lockfile.rs.html#270">(test_match) = test_name.split(</a><span class="string">"("</span><a href="../../lockfile.rs.html#270">).next()
+<a href=#981 id=981 data-nosnippet>981</a>            {
+<a href=#982 id=982 data-nosnippet>982</a>                filter.push_str(test_match);
+<a href=#983 id=983 data-nosnippet>983</a>                </a><span class="kw">if </span><a href="../../lockfile.rs.html#270">failures.peek().is_some() {
+<a href=#984 id=984 data-nosnippet>984</a>                    filter.push(</a><span class="string">'|'</span>);
+<a href=#985 id=985 data-nosnippet>985</a>                }
+<a href=#986 id=986 data-nosnippet>986</a>            }
+<a href=#987 id=987 data-nosnippet>987</a>        }
+<a href=#988 id=988 data-nosnippet>988</a>        <span class="kw">let _ </span><a href="../../lockfile.rs.html#270">= fs::<a href="../../../../foundry_common/fs/fn.write.html">write</a>(</a><span class="kw-2">&amp;</span><a href="../../lockfile.rs.html#270"><a href="#974">config</a>.test_failures_file, <a href="#976">filter</a>);
+<a href=#989 id=989 data-nosnippet>989</a>    }
+<a href=#990 id=990 data-nosnippet>990</a>}
+<a href=#991 id=991 data-nosnippet>991</a>
+<a href=#992 id=992 data-nosnippet>992</a></a><span class="doccomment">/// Generate test report in JUnit XML report format.
+<a href=#993 id=993 data-nosnippet>993</a></span><span class="kw">fn </span><a href="../../lockfile.rs.html#270"><a href="../../../../forge/cmd/test/fn.junit_xml_report.html">junit_xml_report</a>(results: </a><span class="kw-2">&amp;</span><a href="../../lockfile.rs.html#270"><a href="https://doc.rust-lang.org/nightly/alloc/collections/btree/map/struct.BTreeMap.html">BTreeMap</a>&lt;<a href="../../../../forge/revm/primitives/hardfork/struct.String.html">String</a>, <a href="../../result.rs.html#206-214">SuiteResult</a>&gt;, verbosity: <a href="https://doc.rust-lang.org/nightly/std/primitive.u8.html">u8</a>) -&gt; Report {
+<a href=#994 id=994 data-nosnippet>994</a>    </a><span class="kw">let </span><span class="kw-2">mut </span><a href="../../lockfile.rs.html#270">total_duration = <a href="https://doc.rust-lang.org/nightly/core/time/struct.Duration.html">Duration</a>::<a href="https://doc.rust-lang.org/nightly/core/default/trait.Default.html#tymethod.default">default</a>();
+<a href=#995 id=995 data-nosnippet>995</a>    </a><span class="kw">let </span><span class="kw-2">mut </span><a href="../../lockfile.rs.html#270">junit_report = Report::new(</a><span class="string">"Test run"</span><a href="../../lockfile.rs.html#270">);
+<a href=#996 id=996 data-nosnippet>996</a>    <a href="#995">junit_report</a>.set_timestamp(<a href="https://docs.rs/chrono/latest/chrono/offset/utc/struct.Utc.html">Utc</a>::<a href="https://docs.rs/chrono/latest/chrono/offset/utc/struct.Utc.html#method.now">now</a>());
+<a href=#997 id=997 data-nosnippet>997</a>    </a><span class="kw">for </span><a href="../../lockfile.rs.html#270">(suite_name, suite_result) </a><span class="kw">in </span><a href="../../lockfile.rs.html#270">results {
+<a href=#998 id=998 data-nosnippet>998</a>        </a><span class="kw">let </span><span class="kw-2">mut </span><a href="../../lockfile.rs.html#270">test_suite = TestSuite::new(suite_name);
+<a href=#999 id=999 data-nosnippet>999</a>        total_duration += suite_result.duration;
+<a href=#1000 id=1000 data-nosnippet>1000</a>        test_suite.set_time(suite_result.duration);
+<a href=#1001 id=1001 data-nosnippet>1001</a>        test_suite.set_system_out(suite_result.summary());
+<a href=#1002 id=1002 data-nosnippet>1002</a>        </a><span class="kw">for </span><a href="../../lockfile.rs.html#270">(test_name, test_result) </a><span class="kw">in </span><span class="kw-2">&amp;</span><a href="../../lockfile.rs.html#270">suite_result.test_results {
+<a href=#1003 id=1003 data-nosnippet>1003</a>            </a><span class="kw">let </span><span class="kw-2">mut </span><a href="../../lockfile.rs.html#270">test_status = </a><span class="kw">match </span><a href="../../lockfile.rs.html#270">test_result.status {
+<a href=#1004 id=1004 data-nosnippet>1004</a>                TestStatus::Success =&gt; TestCaseStatus::success(),
+<a href=#1005 id=1005 data-nosnippet>1005</a>                TestStatus::Failure =&gt; TestCaseStatus::non_success(NonSuccessKind::Failure),
+<a href=#1006 id=1006 data-nosnippet>1006</a>                TestStatus::Skipped =&gt; TestCaseStatus::skipped(),
+<a href=#1007 id=1007 data-nosnippet>1007</a>            };
+<a href=#1008 id=1008 data-nosnippet>1008</a>            </a><span class="kw">if let </span><span class="prelude-val">Some</span><a href="../../lockfile.rs.html#270">(reason) = </a><span class="kw-2">&amp;</span><a href="../../lockfile.rs.html#270">test_result.reason {
+<a href=#1009 id=1009 data-nosnippet>1009</a>                test_status.set_message(reason);
+<a href=#1010 id=1010 data-nosnippet>1010</a>            }
+<a href=#1011 id=1011 data-nosnippet>1011</a>
+<a href=#1012 id=1012 data-nosnippet>1012</a>            </a><span class="kw">let </span><span class="kw-2">mut </span><a href="../../lockfile.rs.html#270">test_case = TestCase::new(test_name, test_status);
+<a href=#1013 id=1013 data-nosnippet>1013</a>            test_case.set_time(test_result.duration);
+<a href=#1014 id=1014 data-nosnippet>1014</a>
+<a href=#1015 id=1015 data-nosnippet>1015</a>            </a><span class="kw">let </span><span class="kw-2">mut </span><a href="../../lockfile.rs.html#270">sys_out = String::new();
+<a href=#1016 id=1016 data-nosnippet>1016</a>            </a><span class="kw">let </span><a href="../../lockfile.rs.html#270">result_report = test_result.kind.report();
+<a href=#1017 id=1017 data-nosnippet>1017</a>            </a><span class="macro">write!</span><a href="../../lockfile.rs.html#270">(sys_out, </a><span class="string">"{test_result} {test_name} {result_report}"</span><a href="../../lockfile.rs.html#270">).unwrap();
+<a href=#1018 id=1018 data-nosnippet>1018</a>            </a><span class="kw">if </span><a href="../../lockfile.rs.html#270">verbosity &gt;= </a><span class="number">2 </span><a href="../../lockfile.rs.html#270">&amp;&amp; !test_result.logs.is_empty() {
+<a href=#1019 id=1019 data-nosnippet>1019</a>                </a><span class="macro">write!</span><a href="../../lockfile.rs.html#270">(sys_out, </a><span class="string">"\\nLogs:\\n"</span><a href="../../lockfile.rs.html#270">).unwrap();
+<a href=#1020 id=1020 data-nosnippet>1020</a>                </a><span class="kw">let </span><a href="../../lockfile.rs.html#270">console_logs = decode_console_logs(</a><span class="kw-2">&amp;</span><a href="../../lockfile.rs.html#270">test_result.logs);
+<a href=#1021 id=1021 data-nosnippet>1021</a>                </a><span class="kw">for </span><a href="../../lockfile.rs.html#270">log </a><span class="kw">in </span><a href="../../lockfile.rs.html#270">console_logs {
+<a href=#1022 id=1022 data-nosnippet>1022</a>                    </a><span class="macro">write!</span><a href="../../lockfile.rs.html#270">(sys_out, </a><span class="string">"  {log}\\n"</span><a href="../../lockfile.rs.html#270">).unwrap();
+<a href=#1023 id=1023 data-nosnippet>1023</a>                }
+<a href=#1024 id=1024 data-nosnippet>1024</a>            }
+<a href=#1025 id=1025 data-nosnippet>1025</a>
+<a href=#1026 id=1026 data-nosnippet>1026</a>            test_case.set_system_out(sys_out);
+<a href=#1027 id=1027 data-nosnippet>1027</a>            test_suite.add_test_case(test_case);
+<a href=#1028 id=1028 data-nosnippet>1028</a>        }
+<a href=#1029 id=1029 data-nosnippet>1029</a>        junit_report.add_test_suite(test_suite);
+<a href=#1030 id=1030 data-nosnippet>1030</a>    }
+<a href=#1031 id=1031 data-nosnippet>1031</a>    <a href="#995">junit_report</a>.set_time(<a href="#994">total_duration</a>);
+<a href=#1032 id=1032 data-nosnippet>1032</a>    <a href="#995">junit_report</a>
+<a href=#1033 id=1033 data-nosnippet>1033</a>}
+<a href=#1034 id=1034 data-nosnippet>1034</a>
+<a href=#1035 id=1035 data-nosnippet>1035</a></a><span class="attr">#[cfg(test)]
+<a href=#1036 id=1036 data-nosnippet>1036</a></span><span class="kw">mod </span><a href="../../lockfile.rs.html#270">tests {
+<a href=#1037 id=1037 data-nosnippet>1037</a>    </a><span class="kw">use super</span>::<span class="kw-2">*</span>;
+<a href=#1038 id=1038 data-nosnippet>1038</a>    <span class="kw">use </span><a href="../../lockfile.rs.html#270">foundry_config::Chain;
+<a href=#1039 id=1039 data-nosnippet>1039</a>
+<a href=#1040 id=1040 data-nosnippet>1040</a>    </a><span class="attr">#[test]
+<a href=#1041 id=1041 data-nosnippet>1041</a>    </span><span class="kw">fn </span><a href="../../lockfile.rs.html#270">watch_parse() {
+<a href=#1042 id=1042 data-nosnippet>1042</a>        </a><span class="kw">let </span><a href="../../lockfile.rs.html#270">args: TestArgs = TestArgs::parse_from([</a><span class="string">"foundry-cli"</span>, <span class="string">"-vw"</span>]);
+<a href=#1043 id=1043 data-nosnippet>1043</a>        <span class="macro">assert!</span><a href="../../lockfile.rs.html#270">(args.watch.watch.is_some());
+<a href=#1044 id=1044 data-nosnippet>1044</a>    }
+<a href=#1045 id=1045 data-nosnippet>1045</a>
+<a href=#1046 id=1046 data-nosnippet>1046</a>    </a><span class="attr">#[test]
+<a href=#1047 id=1047 data-nosnippet>1047</a>    </span><span class="kw">fn </span><a href="../../lockfile.rs.html#270">fuzz_seed() {
+<a href=#1048 id=1048 data-nosnippet>1048</a>        </a><span class="kw">let </span><a href="../../lockfile.rs.html#270">args: TestArgs = TestArgs::parse_from([</a><span class="string">"foundry-cli"</span>, <span class="string">"--fuzz-seed"</span>, <span class="string">"0x10"</span>]);
+<a href=#1049 id=1049 data-nosnippet>1049</a>        <span class="macro">assert!</span><a href="../../lockfile.rs.html#270">(args.fuzz_seed.is_some());
+<a href=#1050 id=1050 data-nosnippet>1050</a>    }
+<a href=#1051 id=1051 data-nosnippet>1051</a>
+<a href=#1052 id=1052 data-nosnippet>1052</a>    </a><span class="comment">// &lt;https://github.com/foundry-rs/foundry/issues/5913&gt;
+<a href=#1053 id=1053 data-nosnippet>1053</a>    </span><span class="attr">#[test]
+<a href=#1054 id=1054 data-nosnippet>1054</a>    </span><span class="kw">fn </span><a href="../../lockfile.rs.html#270">fuzz_seed_exists() {
+<a href=#1055 id=1055 data-nosnippet>1055</a>        </a><span class="kw">let </span><a href="../../lockfile.rs.html#270">args: TestArgs =
+<a href=#1056 id=1056 data-nosnippet>1056</a>            TestArgs::parse_from([</a><span class="string">"foundry-cli"</span>, <span class="string">"-vvv"</span>, <span class="string">"--gas-report"</span>, <span class="string">"--fuzz-seed"</span>, <span class="string">"0x10"</span>]);
+<a href=#1057 id=1057 data-nosnippet>1057</a>        <span class="macro">assert!</span><a href="../../lockfile.rs.html#270">(args.fuzz_seed.is_some());
+<a href=#1058 id=1058 data-nosnippet>1058</a>    }
+<a href=#1059 id=1059 data-nosnippet>1059</a>
+<a href=#1060 id=1060 data-nosnippet>1060</a>    </a><span class="attr">#[test]
+<a href=#1061 id=1061 data-nosnippet>1061</a>    </span><span class="kw">fn </span><a href="../../lockfile.rs.html#270">extract_chain() {
+<a href=#1062 id=1062 data-nosnippet>1062</a>        </a><span class="kw">let </span><a href="../../lockfile.rs.html#270">test = |arg: </a><span class="kw-2">&amp;</span><a href="../../lockfile.rs.html#270">str, expected: Chain| {
+<a href=#1063 id=1063 data-nosnippet>1063</a>            </a><span class="kw">let </span><a href="../../lockfile.rs.html#270">args = TestArgs::parse_from([</a><span class="string">"foundry-cli"</span><a href="../../lockfile.rs.html#270">, arg]);
+<a href=#1064 id=1064 data-nosnippet>1064</a>            </a><span class="macro">assert_eq!</span><a href="../../lockfile.rs.html#270">(args.evm.env.chain, </a><span class="prelude-val">Some</span><a href="../../lockfile.rs.html#270">(expected));
+<a href=#1065 id=1065 data-nosnippet>1065</a>            </a><span class="kw">let </span><a href="../../lockfile.rs.html#270">(config, evm_opts) = args.load_config_and_evm_opts().unwrap();
+<a href=#1066 id=1066 data-nosnippet>1066</a>            </a><span class="macro">assert_eq!</span><a href="../../lockfile.rs.html#270">(config.chain, </a><span class="prelude-val">Some</span><a href="../../lockfile.rs.html#270">(expected));
+<a href=#1067 id=1067 data-nosnippet>1067</a>            </a><span class="macro">assert_eq!</span><a href="../../lockfile.rs.html#270">(evm_opts.env.chain_id, </a><span class="prelude-val">Some</span><a href="../../lockfile.rs.html#270">(expected.id()));
+<a href=#1068 id=1068 data-nosnippet>1068</a>        };
+<a href=#1069 id=1069 data-nosnippet>1069</a>        test(</a><span class="string">"--chain-id=1"</span><a href="../../lockfile.rs.html#270">, Chain::mainnet());
+<a href=#1070 id=1070 data-nosnippet>1070</a>        test(</a><span class="string">"--chain-id=42"</span><a href="../../lockfile.rs.html#270">, Chain::from_id(</a><span class="number">42</span>));
+<a href=#1071 id=1071 data-nosnippet>1071</a>    }
+<a href=#1072 id=1072 data-nosnippet>1072</a>}</code></pre></div></section></main></body></html>

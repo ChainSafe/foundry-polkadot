@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["AccountType","ByteCodeType"],"mod":["well_known_keys"],"struct":["CodeInfo","ContractInfo","ReviveAccountInfo"],"type":["SystemAccountInfo"]};

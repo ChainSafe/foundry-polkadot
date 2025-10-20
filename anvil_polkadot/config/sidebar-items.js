@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["BANNER","CHAIN_ID","DEFAULT_GAS_LIMIT","DEFAULT_IPC_ENDPOINT","DEFAULT_MNEMONIC","INITIAL_BASE_FEE","INITIAL_GAS_PRICE","NODE_PORT","VERSION_MESSAGE"],"struct":["AccountGenerator","AnvilNodeConfig","SubstrateNodeConfig"]};

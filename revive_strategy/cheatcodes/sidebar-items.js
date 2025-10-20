@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["PvmStartupMigration"],"fn":["get_context_ref_mut","select_evm","select_pvm","set_balance","set_block_number","set_nonce","set_timestamp"],"struct":["PvmCheatcodeInspectorStrategyContext","PvmCheatcodeInspectorStrategyRunner"],"trait":["PvmCheatcodeInspectorStrategyBuilder"]};

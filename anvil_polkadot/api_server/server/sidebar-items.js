@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["CLIENT_VERSION"],"fn":["create_revive_rpc_client","new_contract_info"],"struct":["ApiServer","Wallet"]};

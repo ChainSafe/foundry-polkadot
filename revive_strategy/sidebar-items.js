@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["CHECKPOINT","TEST_EXTERNALITIES"],"enum":["PvmStartupMigration"],"fn":["execute_with_externalities","return_to_checkpoint","save_checkpoint","trace","with_externalities"],"mod":["backend","cheatcodes","executor","tracing"],"struct":["Backend"],"trait":["ReviveExecutorStrategyBuilder"]};
