@@ -23,17 +23,15 @@ use tokio_retry::{Retry, strategy::FixedInterval};
 pub trait RPCClient: Send + Sync + std::fmt::Debug + Clone {
     fn system_chain(&self) -> Result<String, jsonrpsee::core::ClientError>;
 
-    fn system_properties(
-        &self,
-    ) -> Result<sc_chain_spec::Properties, jsonrpsee::core::ClientError>;
+    fn system_properties(&self) -> Result<sc_chain_spec::Properties, jsonrpsee::core::ClientError>;
 
     fn block<Block, Hash: Clone>(
         &self,
         hash: Option<Hash>,
     ) -> Result<Option<SignedBlock<Block>>, jsonrpsee::core::ClientError>
     where
-		Block: BlockT + DeserializeOwned,
-		Hash: 'static + Send + Sync + sp_runtime::Serialize + DeserializeOwned,;
+        Block: BlockT + DeserializeOwned,
+        Hash: 'static + Send + Sync + sp_runtime::Serialize + DeserializeOwned;
 
     fn block_hash<Block: BlockT + DeserializeOwned>(
         &self,
@@ -163,24 +161,22 @@ impl RPCClient for RPC {
         hash: Option<Hash>,
     ) -> Result<Option<SignedBlock<Block>>, jsonrpsee::core::ClientError>
     where
-		Block: BlockT + DeserializeOwned,
-		Hash: 'static + Send + Sync + sp_runtime::Serialize + DeserializeOwned,
-	{
+        Block: BlockT + DeserializeOwned,
+        Hash: 'static + Send + Sync + sp_runtime::Serialize + DeserializeOwned,
+    {
         let request = &|| {
-			substrate_rpc_client::ChainApi::<
+            substrate_rpc_client::ChainApi::<
 				BlockNumber,
 				Hash,
 				Block::Header,
 				SignedBlock<Block>,
 			>::block(&self.http_client, hash.clone())
-		};
+        };
 
-		self.block_on(request)
+        self.block_on(request)
     }
 
-    fn block_hash<
-        Block: BlockT + DeserializeOwned,
-    >(
+    fn block_hash<Block: BlockT + DeserializeOwned>(
         &self,
         block_number: Option<<Block::Header as HeaderT>::Number>,
     ) -> Result<Option<Block::Hash>, jsonrpsee::core::ClientError> {
@@ -284,20 +280,19 @@ impl RPCClient for RPC {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use jsonrpsee::{
+        RpcModule,
+        http_client::HttpClientBuilder,
+        server::{ServerBuilder, ServerHandle},
+        types::error::ErrorObjectOwned,
+    };
     use polkadot_sdk::sp_runtime::{
         OpaqueExtrinsic,
         generic::{Block as GenericBlock, Header as GenericHeader},
         traits::BlakeTwo256,
     };
-    use jsonrpsee::http_client::HttpClientBuilder;
-    use jsonrpsee::{
-        RpcModule,
-        server::{ServerBuilder, ServerHandle},
-        types::error::ErrorObjectOwned,
-    };
     use serde_json::json;
-    use std::net::SocketAddr;
-    use std::{sync::atomic::AtomicUsize, time::Instant};
+    use std::{net::SocketAddr, sync::atomic::AtomicUsize, time::Instant};
 
     // ---------------------------
     // Unit tests for `block_on`.
@@ -459,10 +454,12 @@ mod tests {
         // Keep `_server` in scope so the server isn't dropped early.
         let (rpc, _server) = rpc_against_mock().await;
 
-        let chain = <super::RPC as super::RPCClient<BlockType>>::system_chain(&rpc).expect("system_chain ok");
+        let chain = <super::RPC as super::RPCClient<BlockType>>::system_chain(&rpc)
+            .expect("system_chain ok");
         assert_eq!(chain, "Local Testnet");
 
-        let props = <super::RPC as super::RPCClient<BlockType>>::system_properties(&rpc).expect("system_properties ok");
+        let props = <super::RPC as super::RPCClient<BlockType>>::system_properties(&rpc)
+            .expect("system_properties ok");
         assert_eq!(props.get("tokenSymbol").and_then(|v| v.as_str()), Some("UNIT"));
         assert_eq!(props.get("tokenDecimals").and_then(|v| v.as_u64()), Some(12));
     }
@@ -471,17 +468,36 @@ mod tests {
     async fn integration_chain_and_state_endpoints_ok() {
         let (rpc, _server) = rpc_against_mock().await;
 
-        let hash = <super::RPC as super::RPCClient<BlockType>>::block_hash(&rpc, None).expect("ok").expect("some hash");
+        let hash = <super::RPC as super::RPCClient<BlockType>>::block_hash(&rpc, None)
+            .expect("ok")
+            .expect("some hash");
         assert_eq!(hash, polkadot_sdk::sp_core::H256::from_low_u64_be(1));
 
-        let val = <super::RPC as super::RPCClient<BlockType>>::storage(&rpc, StorageKey(vec![0x00, 0xde, 0xad]), None).expect("ok").expect("some data");
+        let val = <super::RPC as super::RPCClient<BlockType>>::storage(
+            &rpc,
+            StorageKey(vec![0x00, 0xde, 0xad]),
+            None,
+        )
+        .expect("ok")
+        .expect("some data");
         assert_eq!(val.0, vec![0xde, 0xad, 0xbe, 0xef]);
 
-        let h = <super::RPC as super::RPCClient<BlockType>>::storage_hash(&rpc, StorageKey(vec![0x00, 0xde, 0xad]), None).expect("ok").expect("some hash");
+        let h = <super::RPC as super::RPCClient<BlockType>>::storage_hash(
+            &rpc,
+            StorageKey(vec![0x00, 0xde, 0xad]),
+            None,
+        )
+        .expect("ok")
+        .expect("some hash");
         assert_eq!(h, polkadot_sdk::sp_core::H256::from_slice(&[0xaa; 32]));
 
-        let keys: Vec<sp_state_machine::StorageKey> = <super::RPC as super::RPCClient<BlockType>>::storage_keys_paged(&rpc, None, 10, None, None).expect("ok");
-        let expected: Vec<sp_state_machine::StorageKey> = vec![vec![0x11, 0x22], vec![0xaa, 0xbb, 0xcc]];
+        let keys: Vec<sp_state_machine::StorageKey> =
+            <super::RPC as super::RPCClient<BlockType>>::storage_keys_paged(
+                &rpc, None, 10, None, None,
+            )
+            .expect("ok");
+        let expected: Vec<sp_state_machine::StorageKey> =
+            vec![vec![0x11, 0x22], vec![0xaa, 0xbb, 0xcc]];
         assert_eq!(keys, expected);
     }
 }

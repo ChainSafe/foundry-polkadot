@@ -8,37 +8,43 @@ use crate::{
 use anvil::eth::backend::time::TimeManager;
 use parking_lot::Mutex;
 use polkadot_sdk::{
-    sc_consensus_manual_seal::{ManualSealParams, run_manual_seal, consensus::aura::AuraConsensusDataProvider},
-    parachains_common::{SLOT_DURATION, opaque::Block, Hash},
-    sc_basic_authorship, sc_consensus, sc_executor,
+    cumulus_client_parachain_inherent::MockValidationDataInherentDataProvider,
+    cumulus_primitives_aura::AuraUnincludedSegmentApi,
+    parachains_common::{Hash, SLOT_DURATION, opaque::Block},
+    polkadot_primitives::{self, Id, PersistedValidationData, UpgradeGoAhead},
+    sc_basic_authorship, sc_chain_spec, sc_consensus,
+    sc_consensus_aura::{self, AuraApi},
+    sc_consensus_manual_seal::{
+        ManualSealParams, consensus::aura::AuraConsensusDataProvider, run_manual_seal,
+    },
+    sc_executor,
     sc_service::{
         self, Configuration, RpcHandlers, SpawnTaskHandle, TaskManager,
         error::Error as ServiceError,
     },
-    sp_core::H256,
-    sc_transaction_pool::{self, TransactionPoolWrapper}, sp_io, sp_timestamp,
-    sp_wasm_interface::ExtendedHostFunctions,
-    sp_keystore::KeystorePtr,
-    sc_consensus_aura::{self, AuraApi},
-    cumulus_client_parachain_inherent::MockValidationDataInherentDataProvider, 
+    sc_transaction_pool::{self, TransactionPoolWrapper},
+    sp_api::{ApiExt, ProvideRuntimeApi},
     sp_arithmetic::traits::UniqueSaturatedInto,
+    sp_core::H256,
+    sp_io,
+    sp_keystore::KeystorePtr,
+    sp_timestamp,
+    sp_wasm_interface::ExtendedHostFunctions,
     substrate_frame_rpc_system::SystemApiServer,
-     sc_chain_spec,
-     polkadot_primitives::{self, Id, PersistedValidationData, UpgradeGoAhead},
-   sp_api::{ApiExt, ProvideRuntimeApi},
-   cumulus_primitives_aura::AuraUnincludedSegmentApi,
 };
 
 use std::sync::Arc;
-use tokio_stream::wrappers::ReceiverStream;
 use tokio::runtime::Builder as TokioRtBuilder;
+use tokio_stream::wrappers::ReceiverStream;
 
-use serde_json::{json, Map, Value};
+use serde_json::{Map, Value, json};
 
-use jsonrpsee::http_client::{HttpClient, HttpClientBuilder, HeaderMap, HeaderValue};
-use jsonrpsee::core::client::ClientT as JsonClientT;
-use jsonrpsee::rpc_params;
 use indicatif::{ProgressBar, ProgressStyle};
+use jsonrpsee::{
+    core::client::ClientT as JsonClientT,
+    http_client::{HeaderMap, HeaderValue, HttpClient, HttpClientBuilder},
+    rpc_params,
+};
 
 pub use backend::{BackendError, BackendWithOverlay, StorageOverrides};
 pub use client::Client;
@@ -66,26 +72,31 @@ pub struct Service {
     pub genesis_block_number: u64,
 }
 
-async fn resolve_fork_hash_http(client: &HttpClient, fork_block_hash: Option<H256>) -> eyre::Result<String> {
-    if let Some(h) = fork_block_hash { return Ok(h.to_string()); }
+async fn resolve_fork_hash_http(
+    client: &HttpClient,
+    fork_block_hash: Option<H256>,
+) -> eyre::Result<String> {
+    if let Some(h) = fork_block_hash {
+        return Ok(h.to_string());
+    }
     let res: String = client.request("chain_getBlockHash", rpc_params![]).await?;
     Ok(res)
 }
 
-async fn fetch_sync_spec_http(client: &HttpClient, at_hex_opt: Option<String>) -> eyre::Result<Vec<u8>> {
+async fn fetch_sync_spec_http(
+    client: &HttpClient,
+    at_hex_opt: Option<String>,
+) -> eyre::Result<Vec<u8>> {
     let pb = ProgressBar::new_spinner();
     pb.set_style(
-        ProgressStyle::with_template("{spinner:.green} {msg}")
-            .unwrap()
-            .tick_chars("/|\\- "),
+        ProgressStyle::with_template("{spinner:.green} {msg}").unwrap().tick_chars("/|\\- "),
     );
     pb.enable_steady_tick(std::time::Duration::from_millis(120));
     pb.set_message("Downloading sync state spec...");
 
     let raw = true;
-    let spec_json: serde_json::Value = client
-        .request("sync_state_genSyncSpec", rpc_params![raw, at_hex_opt])
-        .await?;
+    let spec_json: serde_json::Value =
+        client.request("sync_state_genSyncSpec", rpc_params![raw, at_hex_opt]).await?;
 
     pb.finish_with_message("Sync state spec downloaded ✔");
 
@@ -95,9 +106,11 @@ async fn fetch_sync_spec_http(client: &HttpClient, at_hex_opt: Option<String>) -
 async fn fetch_all_keys_paged(client: &HttpClient, at_hex: &str) -> eyre::Result<Vec<String>> {
     let pb = ProgressBar::new_spinner();
     pb.set_style(
-        ProgressStyle::with_template("{spinner:.green} Fetching key pages... {pos} pages collected")
-            .unwrap()
-            .tick_chars("/|\\- "),
+        ProgressStyle::with_template(
+            "{spinner:.green} Fetching key pages... {pos} pages collected",
+        )
+        .unwrap()
+        .tick_chars("/|\\- "),
     );
     pb.enable_steady_tick(std::time::Duration::from_millis(120));
 
@@ -106,12 +119,11 @@ async fn fetch_all_keys_paged(client: &HttpClient, at_hex: &str) -> eyre::Result
     let mut page_count: u64 = 0;
     loop {
         let page: Vec<String> = client
-            .request(
-                "state_getKeysPaged",
-                rpc_params!["0x", 1000u32, start_key.clone(), at_hex],
-            )
+            .request("state_getKeysPaged", rpc_params!["0x", 1000u32, start_key.clone(), at_hex])
             .await?;
-        if page.is_empty() { break; }
+        if page.is_empty() {
+            break;
+        }
         start_key = page.last().cloned();
         keys.extend(page.into_iter());
         page_count += 1;
@@ -122,7 +134,10 @@ async fn fetch_all_keys_paged(client: &HttpClient, at_hex: &str) -> eyre::Result
     Ok(keys)
 }
 
-async fn fetch_top_state_map_http(client: &HttpClient, at_hex: &str) -> eyre::Result<Map<String, Value>> {
+async fn fetch_top_state_map_http(
+    client: &HttpClient,
+    at_hex: &str,
+) -> eyre::Result<Map<String, Value>> {
     let keys = fetch_all_keys_paged(client, at_hex).await?;
 
     let pb = ProgressBar::new(keys.len() as u64);
@@ -135,7 +150,8 @@ async fn fetch_top_state_map_http(client: &HttpClient, at_hex: &str) -> eyre::Re
 
     let mut top_map: Map<String, Value> = Map::new();
     for k in keys.iter() {
-        let v: Option<String> = client.request("state_getStorage", rpc_params![k.clone(), at_hex]).await?;
+        let v: Option<String> =
+            client.request("state_getStorage", rpc_params![k.clone(), at_hex]).await?;
         if let Some(val_hex) = v {
             top_map.insert(k.clone(), Value::String(val_hex));
         }
@@ -173,21 +189,20 @@ fn build_forked_chainspec_from_raw_top(
 }
 
 fn create_manual_seal_inherent_data_providers(
-		client: Arc<Client>,
-		para_id: Id,
-		slot_duration: sc_consensus_aura::SlotDuration,
-	) -> impl Fn(
-		Hash,
-		(),
-	) ->
-		futures::future::Ready<
-		Result<
-			(sp_timestamp::InherentDataProvider, MockValidationDataInherentDataProvider<()>),
-			Box<dyn std::error::Error + Send + Sync>,
-		>,
-	> + Send
-	       + Sync{
-		move |block: Hash, ()| {
+    client: Arc<Client>,
+    para_id: Id,
+    slot_duration: sc_consensus_aura::SlotDuration,
+) -> impl Fn(
+    Hash,
+    (),
+) -> futures::future::Ready<
+    Result<
+        (sp_timestamp::InherentDataProvider, MockValidationDataInherentDataProvider<()>),
+        Box<dyn std::error::Error + Send + Sync>,
+    >,
+> + Send
++ Sync {
+    move |block: Hash, ()| {
         let current_para_head = client
             .header(block)
             .expect("Header lookup should succeed")
@@ -207,27 +222,22 @@ fn create_manual_seal_inherent_data_providers(
         // Note: Taken from https://github.com/paritytech/polkadot-sdk/issues/7341, but unsure if needed or not
         let requires_relay_progress = client
             .runtime_api()
-            .has_api_with::<dyn AuraUnincludedSegmentApi<Block>, _>(
-                block,
-                |version| version > 1,
-            )
+            .has_api_with::<dyn AuraUnincludedSegmentApi<Block>, _>(block, |version| version > 1)
             .ok()
             .unwrap_or_default();
 
         let current_para_block_head =
-				Some(polkadot_primitives::HeadData(current_para_head.hash().as_bytes().to_vec()));
+            Some(polkadot_primitives::HeadData(current_para_head.hash().as_bytes().to_vec()));
 
         let current_block_number =
-        UniqueSaturatedInto::<u32>::unique_saturated_into(current_para_head.number) + 1;
+            UniqueSaturatedInto::<u32>::unique_saturated_into(current_para_head.number) + 1;
 
         let mocked_parachain = MockValidationDataInherentDataProvider::<()> {
             current_para_block: current_block_number,
-            para_id: para_id,
+            para_id,
             current_para_block_head,
             relay_offset: 0,
-            relay_blocks_per_para_block: requires_relay_progress
-                .then(|| 1)
-                .unwrap_or_default(),
+            relay_blocks_per_para_block: requires_relay_progress.then(|| 1).unwrap_or_default(),
             para_blocks_per_relay_epoch: 1,
             // upgrade_go_ahead: should_send_go_ahead.then(|| {
             //     //log::info!("Detected pending validation code, sending go-ahead signal.");
@@ -240,10 +250,9 @@ fn create_manual_seal_inherent_data_providers(
             (slot_duration.as_millis() * current_block_number as u64).into(),
         );
 
-
         futures::future::ready(Ok((timestamp_provider, mocked_parachain)))
-		}
-	}
+    }
+}
 
 /// Builds a new service for a full client.
 pub fn new(
@@ -254,32 +263,34 @@ pub fn new(
         let http_url = fork_url.clone();
         let fork_block_hash = anvil_config.fork_block_hash.clone();
 
-        let spec_or_top = std::thread::spawn(move || -> eyre::Result<Result<Vec<u8>, Map<String, Value>>> {
-            let rt = TokioRtBuilder::new_current_thread()
-                .enable_all()
-                .build()
-                .map_err(|e| eyre::eyre!("tokio rt build error: {e}"))?;
-            rt.block_on(async move {
-                let mut headers = HeaderMap::new();
-                headers.insert("Accept-Encoding", HeaderValue::from_static("gzip, deflate, br"));
-                let http = HttpClientBuilder::default()
-                    .set_headers(headers)
-                    .build(http_url)
-                    .map_err(|e| eyre::eyre!("http client build error: {e}"))?;
-                let at_hex = resolve_fork_hash_http(&http, fork_block_hash).await?;
-                let try_sync = fetch_sync_spec_http(&http, Some(at_hex.clone())).await;
-                match try_sync {
-                    Ok(spec_bytes) => Ok(Ok(spec_bytes)),
-                    Err(_) => {
-                        let top = fetch_top_state_map_http(&http, &at_hex).await?;
-                        Ok(Err(top))
+        let spec_or_top =
+            std::thread::spawn(move || -> eyre::Result<Result<Vec<u8>, Map<String, Value>>> {
+                let rt = TokioRtBuilder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .map_err(|e| eyre::eyre!("tokio rt build error: {e}"))?;
+                rt.block_on(async move {
+                    let mut headers = HeaderMap::new();
+                    headers
+                        .insert("Accept-Encoding", HeaderValue::from_static("gzip, deflate, br"));
+                    let http = HttpClientBuilder::default()
+                        .set_headers(headers)
+                        .build(http_url)
+                        .map_err(|e| eyre::eyre!("http client build error: {e}"))?;
+                    let at_hex = resolve_fork_hash_http(&http, fork_block_hash).await?;
+                    let try_sync = fetch_sync_spec_http(&http, Some(at_hex.clone())).await;
+                    match try_sync {
+                        Ok(spec_bytes) => Ok(Ok(spec_bytes)),
+                        Err(_) => {
+                            let top = fetch_top_state_map_http(&http, &at_hex).await?;
+                            Ok(Err(top))
+                        }
                     }
-                }
+                })
             })
-        })
-        .join()
-        .map_err(|_| ServiceError::Other("tokio thread panicked".into()))?
-        .map_err(|e| ServiceError::Other(format!("fork fetch failed: {e}")))?;
+            .join()
+            .map_err(|_| ServiceError::Other("tokio thread panicked".into()))?
+            .map_err(|e| ServiceError::Other(format!("fork fetch failed: {e}")))?;
 
         match spec_or_top {
             Ok(spec_bytes) => {
@@ -365,19 +376,16 @@ pub fn new(
         None,
     );
 
-   let slot_duration= sc_consensus_aura::SlotDuration::from_millis(SLOT_DURATION);
+    let slot_duration = sc_consensus_aura::SlotDuration::from_millis(SLOT_DURATION);
 
-    // Polkadot-sdk doesnt seem to use the latest changes here, so this function isnt available yet. Can use `new()` instead but our client 
-    // doesnt implement all the needed traits
-	// let aura_digest_provider = AuraConsensusDataProvider::new_with_slot_duration(slot_duration);
+    // Polkadot-sdk doesnt seem to use the latest changes here, so this function isnt available yet.
+    // Can use `new()` instead but our client doesnt implement all the needed traits
+    // let aura_digest_provider = AuraConsensusDataProvider::new_with_slot_duration(slot_duration);
 
     let para_id = Id::new(anvil_config.get_chain_id().try_into().unwrap());
 
-    let create_inherent_data_providers = create_manual_seal_inherent_data_providers(
-			client.clone(),
-			para_id,
-			slot_duration,
-		);
+    let create_inherent_data_providers =
+        create_manual_seal_inherent_data_providers(client.clone(), para_id, slot_duration);
 
     let params = ManualSealParams {
         block_import: client.clone(),

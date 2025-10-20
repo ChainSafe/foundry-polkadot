@@ -8,9 +8,9 @@ use anvil_server::ServerConfig;
 use clap::Parser;
 use foundry_common::shell;
 use foundry_config::Chain;
+use polkadot_sdk::sp_core::H256;
 use rand_08::{SeedableRng, rngs::StdRng};
 use std::{net::IpAddr, path::PathBuf, time::Duration};
-use polkadot_sdk::sp_core::H256;
 
 #[derive(Clone, Debug, Parser)]
 pub struct NodeArgs {
@@ -255,11 +255,7 @@ pub struct AnvilEvmArgs {
 #[command(next_help_heading = "Fork options")]
 pub struct ForkArgs {
     /// Fetch state over a remote endpoint instead of starting from an empty state.
-    #[arg(
-        long = "fork-url",
-        short = 'f',
-        value_name = "URL",
-    )]
+    #[arg(long = "fork-url", short = 'f', value_name = "URL")]
     pub fork_url: Option<String>,
 
     /// Fetch state from a specific block hash over a remote endpoint.
