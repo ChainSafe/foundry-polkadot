@@ -8,6 +8,7 @@ use anvil_server::ServerConfig;
 use clap::Parser;
 use foundry_common::shell;
 use foundry_config::Chain;
+use polkadot_sdk::sp_core::H256;
 use rand_08::{SeedableRng, rngs::StdRng};
 use std::{net::IpAddr, path::PathBuf, time::Duration};
 
@@ -250,6 +251,18 @@ pub struct AnvilEvmArgs {
     pub memory_limit: Option<u64>,
 }
 
+#[derive(Clone, Debug, Parser)]
+#[command(next_help_heading = "Fork options")]
+pub struct ForkArgs {
+    /// Fetch state over a remote endpoint instead of starting from an empty state.
+    #[arg(long = "fork-url", short = 'f', value_name = "URL")]
+    pub fork_url: Option<String>,
+
+    /// Fetch state from a specific block hash over a remote endpoint.
+    #[arg(long, value_name = "BLOCK")]
+    pub fork_block_hash: Option<H256>,
+}
+
 /// Clap's value parser for genesis. Loads a genesis.json file.
 fn read_genesis_file(path: &str) -> Result<Genesis, String> {
     foundry_common::fs::read_json_file(path.as_ref()).map_err(|err| err.to_string())
@@ -261,23 +274,6 @@ fn duration_from_secs_f64(s: &str) -> Result<Duration, String> {
         return Err("Duration must be greater than 0".to_string());
     }
     Duration::try_from_secs_f64(s).map_err(|e| e.to_string())
-}
-
-
-#[derive(Clone, Debug, Parser)]
-#[command(next_help_heading = "Fork options")]
-pub struct ForkArgs {
-    /// Fetch state over a remote endpoint instead of starting from an empty state.
-    #[arg(
-        long = "fork-url",
-        short = 'f',
-        value_name = "URL",
-    )]
-    pub fork_url: Option<String>,
-
-    /// Fetch state from a specific block hash over a remote endpoint.
-    #[arg(long, value_name = "BLOCK")]
-    pub fork_block_hash: Option<String>,
 }
 
 #[cfg(test)]

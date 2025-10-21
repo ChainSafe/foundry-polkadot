@@ -110,7 +110,7 @@ alloy-chains.workspace = true
 alloy-genesis.workspace = true
 alloy-trie.workspace = true
 op-alloy-consensus = { workspace = true, features = ["serde"] }
-hex = "0.4"
+url = { version = "2.4.0" }
 
 # axum related
 axum.workspace = true
@@ -155,6 +155,13 @@ jsonrpsee = "0.24.9"
 sqlx = "0.8.6"
 indicatif.workspace = true
 #sc-consensus-manual-seal = "0.54.0"
+
+log = { version = "0.4.21", default-features = false }
+polkadot-core-primitives = "18.0.0"
+cumulus-primitives-core = "0.21.0"
+tokio-retry = { version = "0.3.0" }
+hex = { version = "0.4.3", default-features = false }
+hex-literal = { version = "0.4.1", default-features = false }
 
 [dev-dependencies]
 alloy-provider = { workspace = true, features = ["txpool-api"] }

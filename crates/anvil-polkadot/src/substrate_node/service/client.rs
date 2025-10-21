@@ -17,7 +17,6 @@ use polkadot_sdk::{
 use std::{collections::HashMap, sync::Arc};
 use substrate_runtime::RuntimeApi;
 
-
 pub type Client = sc_service::client::Client<Backend, Executor, Block, RuntimeApi>;
 
 pub fn new_client(

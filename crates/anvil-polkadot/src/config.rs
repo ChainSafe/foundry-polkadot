@@ -15,6 +15,7 @@ use polkadot_sdk::{
         RPC_DEFAULT_MAX_SUBS_PER_CONN, RPC_DEFAULT_MESSAGE_CAPACITY_PER_CONN,
     },
     sc_service,
+    sp_core::H256,
 };
 use rand_08::thread_rng;
 use serde_json::{Value, json};
@@ -301,7 +302,7 @@ pub struct AnvilNodeConfig {
     /// Fetch state over a remote endpoint instead of starting from an empty state.
     pub fork_url: Option<String>,
     /// Fetch state from a specific block hash over a remote endpoint.
-    pub fork_block_hash: Option<String>,
+    pub fork_block_hash: Option<H256>,
 }
 
 impl AnvilNodeConfig {
@@ -789,7 +790,7 @@ impl AnvilNodeConfig {
 
     /// Sets the fork block
     #[must_use]
-    pub fn with_fork_block_hash(mut self, fork_block_hash: Option<String>) -> Self {
+    pub fn with_fork_block_hash(mut self, fork_block_hash: Option<H256>) -> Self {
         self.fork_block_hash = fork_block_hash;
         self
     }
