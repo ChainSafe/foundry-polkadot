@@ -150,6 +150,7 @@ fn build_forked_chainspec_from_raw_top(
     top_map: Map<String, Value>,
 ) -> sc_service::error::Result<Box<dyn sc_chain_spec::ChainSpec>> {
     let children_default = serde_json::Map::<String, Value>::new();
+    
     let spec_json = json!({
         "name": "Anvil Polkadot (Forked)",
         "id": "anvil-polkadot-forked",
@@ -176,6 +177,7 @@ fn create_manual_seal_inherent_data_providers(
 		client: Arc<Client>,
 		para_id: Id,
 		slot_duration: sc_consensus_aura::SlotDuration,
+        anvil_config: AnvilNodeConfig,
 	) -> impl Fn(
 		Hash,
 		(),
@@ -193,7 +195,7 @@ fn create_manual_seal_inherent_data_providers(
             .expect("Header lookup should succeed")
             .expect("Header passed in as parent should be present in backend.");
 
-        // NOTE: Our runtime API doesnt seem to have collect_collation_info available
+        // // NOTE: Our runtime API doesnt seem to have collect_collation_info available
         // let should_send_go_ahead = client
         //     .runtime_api()
         //     .collect_collation_info(block, &current_para_head)
@@ -204,7 +206,7 @@ fn create_manual_seal_inherent_data_providers(
         // in https://github.com/paritytech/polkadot-sdk/pull/6825. In general, the logic
         // here assumes that we are using the aura-ext consensushook in the parachain
         // runtime.
-        // Note: Taken from https://github.com/paritytech/polkadot-sdk/issues/7341, but unsure if needed or not
+        // Note: Taken from https://github.com/paritytech/polkadot-sdk/issues/7341, but unsure fi needed or not
         let requires_relay_progress = client
             .runtime_api()
             .has_api_with::<dyn AuraUnincludedSegmentApi<Block>, _>(
@@ -219,20 +221,29 @@ fn create_manual_seal_inherent_data_providers(
 
         let current_block_number =
         UniqueSaturatedInto::<u32>::unique_saturated_into(current_para_head.number) + 1;
+        print!("current block num {}", current_para_head.number);
+
+        // Unsure here but triggers new error than before
+        let time = anvil_config.get_genesis_timestamp();
+                // .get_genesis_timestamp()
+                // .checked_mul(1000)
+                // .ok_or(ServiceError::Application("Genesis timestamp overflow".into())).unwrap();
 
         let mocked_parachain = MockValidationDataInherentDataProvider::<()> {
-            current_para_block: current_block_number,
+            current_para_block: current_para_head.number,
             para_id: para_id,
             current_para_block_head,
-            relay_offset: 0,
+            relay_offset: time as u32,
             relay_blocks_per_para_block: requires_relay_progress
                 .then(|| 1)
                 .unwrap_or_default(),
-            para_blocks_per_relay_epoch: 1,
+           // relay_blocks_per_para_block: 1,
+			para_blocks_per_relay_epoch: 10,
             // upgrade_go_ahead: should_send_go_ahead.then(|| {
             //     //log::info!("Detected pending validation code, sending go-ahead signal.");
             //     UpgradeGoAhead::GoAhead
             // }),
+          //  upgrade_go_ahead: Some(UpgradeGoAhead::Abort),
             ..Default::default()
         };
 
@@ -253,7 +264,6 @@ pub fn new(
     if let Some(ref fork_url) = anvil_config.fork_url {
         let http_url = fork_url.clone();
         let fork_block_hash = anvil_config.fork_block_hash.clone();
-
         let spec_or_top = std::thread::spawn(move || -> eyre::Result<Result<Vec<u8>, Map<String, Value>>> {
             let rt = TokioRtBuilder::new_current_thread()
                 .enable_all()
@@ -266,7 +276,7 @@ pub fn new(
                     .set_headers(headers)
                     .build(http_url)
                     .map_err(|e| eyre::eyre!("http client build error: {e}"))?;
-                let at_hex = resolve_fork_hash_http(&http, fork_block_hash).await?;
+                let at_hex = resolve_fork_hash_http(&http, fork_block_hash).await?;  
                 let try_sync = fetch_sync_spec_http(&http, Some(at_hex.clone())).await;
                 match try_sync {
                     Ok(spec_bytes) => Ok(Ok(spec_bytes)),
@@ -377,6 +387,7 @@ pub fn new(
 			client.clone(),
 			para_id,
 			slot_duration,
+            anvil_config.clone(),
 		);
 
     let params = ManualSealParams {
