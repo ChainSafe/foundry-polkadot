@@ -72,6 +72,8 @@ polkadot-sdk = { git = "https://github.com/paritytech/polkadot-sdk.git", branch 
 	"sp-arithmetic",
 	"cumulus-client-service",
 	"cumulus-primitives-aura",
+	"cumulus-primitives-core",
+	"sp-inherents",
 	#"sp-consensus-aura",
 
 ] }
