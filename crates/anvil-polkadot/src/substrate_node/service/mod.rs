@@ -4,15 +4,17 @@ use crate::{
         mining_engine::{MiningEngine, MiningMode, run_mining_engine},
         rpc::spawn_rpc_server,
         service::consensus::SameSlotConsensusDataProvider,
+        service::storage::well_known_keys,
     },
 };
+use codec::Encode;
 use std::marker::PhantomData;
 use anvil::eth::backend::time::TimeManager;
 use parking_lot::Mutex;
 use polkadot_sdk::{
-    sc_consensus_manual_seal::{self, ManualSealParams, run_manual_seal, consensus::aura::AuraConsensusDataProvider},
+    sc_consensus_manual_seal::{ManualSealParams, run_manual_seal,consensus::aura::AuraConsensusDataProvider, ConsensusDataProvider, Error},
     parachains_common::{SLOT_DURATION, opaque::Block, Hash},
-    sc_basic_authorship, sc_consensus, sc_executor,
+    sc_basic_authorship, sc_consensus::{self, BlockImportParams}, sc_executor,
     sc_service::{
         self, Configuration, RpcHandlers, SpawnTaskHandle, TaskManager,
         error::Error as ServiceError,
@@ -20,15 +22,27 @@ use polkadot_sdk::{
     sc_transaction_pool::{self, TransactionPoolWrapper}, sp_io, sp_timestamp,
     sp_wasm_interface::ExtendedHostFunctions,
     sp_keystore::KeystorePtr,
-    sc_consensus_aura::{self, AuraApi},
+    sc_consensus_aura,
+    sp_consensus_aura::{
+        digests::CompatibleDigestItem,
+        sr25519::{AuthorityId, AuthoritySignature},
+        AuraApi,
+    },
     cumulus_client_parachain_inherent::MockValidationDataInherentDataProvider, 
     sp_arithmetic::traits::UniqueSaturatedInto,
     substrate_frame_rpc_system::SystemApiServer,
      sc_chain_spec,
-     polkadot_primitives::{self, Id, PersistedValidationData, UpgradeGoAhead},
+     polkadot_primitives::{self, Id, Slot, PersistedValidationData, UpgradeGoAhead},
    sp_api::{ApiExt, ProvideRuntimeApi},
-   cumulus_primitives_aura::AuraUnincludedSegmentApi,
+   cumulus_primitives_aura::{AuraUnincludedSegmentApi},
+   cumulus_primitives_core::{relay_chain},
+   sp_inherents::{self, InherentData},
+   sc_client_api::{AuxStore, UsageProvider},
+   sp_runtime::{traits::Block as BlockT, Digest, DigestItem},
+   sp_timestamp::TimestampInherentData,
 };
+
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use std::sync::Arc;
 use tokio_stream::wrappers::ReceiverStream;
@@ -175,6 +189,118 @@ fn build_forked_chainspec_from_raw_top(
     Ok(Box::new(new_spec))
 }
 
+const RELAY_CHAIN_SLOT_DURATION_MILLIS: u64 = 6_000;
+
+static TIMESTAMP: AtomicU64 = AtomicU64::new(0);
+
+/// Provide a mock duration starting at 0 in millisecond for timestamp inherent.
+/// Each call will increment timestamp by slot_duration making Aura think time has passed.
+struct MockTimestampInherentDataProvider;
+
+impl MockTimestampInherentDataProvider {
+	fn advance_timestamp(slot_duration: u64) {
+		if TIMESTAMP.load(Ordering::SeqCst) == 0 {
+			// Initialize timestamp inherent provider
+			TIMESTAMP.store(
+				sp_timestamp::Timestamp::current().as_millis(),
+				Ordering::SeqCst,
+			);
+		} else {
+			TIMESTAMP.fetch_add(slot_duration, Ordering::SeqCst);
+		}
+	}
+}
+
+#[async_trait::async_trait]
+impl sp_inherents::InherentDataProvider for MockTimestampInherentDataProvider {
+	async fn provide_inherent_data(
+		&self,
+		inherent_data: &mut InherentData,
+	) -> Result<(), sp_inherents::Error> {
+		inherent_data.put_data(
+			sp_timestamp::INHERENT_IDENTIFIER,
+			&TIMESTAMP.load(Ordering::SeqCst),
+		)
+	}
+
+	async fn try_handle_error(
+		&self,
+		_identifier: &sp_inherents::InherentIdentifier,
+		_error: &[u8],
+	) -> Option<Result<(), sp_inherents::Error>> {
+		// The pallet never reports error.
+		None
+	}
+}
+
+/// Consensus data provider for Aura. This allows to use manual-seal driven nodes to author valid
+/// AURA blocks. It will inspect incoming [`InherentData`] and look for included timestamps. Based
+/// on these timestamps, the [`AuraConsensusDataProvider`] will emit fitting digest items.
+pub struct AuraConsensusDataProvider<B, P> {
+	// slot duration
+	slot_duration: sc_consensus_aura::SlotDuration,
+	// phantom data for required generics
+	_phantom: PhantomData<(B, P)>,
+}
+
+impl<B, P> AuraConsensusDataProvider<B, P>
+where
+	B: BlockT,
+{
+	/// Creates a new instance of the [`AuraConsensusDataProvider`], requires that `client`
+	/// implements [`sp_consensus_aura::AuraApi`]
+	pub fn new<C>(client: Arc<C>) -> Self
+	where
+		C: AuxStore + ProvideRuntimeApi<B> + UsageProvider<B>,
+		C::Api: AuraApi<B, AuthorityId>,
+	{
+		let slot_duration = sc_consensus_aura::slot_duration(&*client)
+			.expect("slot_duration is always present; qed.");
+
+		Self { slot_duration, _phantom: PhantomData }
+	}
+
+	/// Creates a new instance of the [`AuraConsensusDataProvider`]
+	pub fn new_with_slot_duration(slot_duration: sc_consensus_aura::SlotDuration) -> Self {
+		Self { slot_duration, _phantom: PhantomData }
+	}
+}
+
+impl<B, P> ConsensusDataProvider<B> for AuraConsensusDataProvider<B, P>
+where
+	B: BlockT,
+	P: Send + Sync,
+{
+	type Proof = P;
+
+	fn create_digest(
+		&self,
+		_parent: &B::Header,
+		inherents: &InherentData,
+	) -> Result<Digest, Error> {
+		let timestamp =
+			inherents.timestamp_inherent_data()?.expect("Timestamp is always present; qed");
+
+		// we always calculate the new slot number based on the current time-stamp and the slot
+		// duration.
+		let digest_item = <DigestItem as CompatibleDigestItem<AuthoritySignature>>::aura_pre_digest(
+			Slot::from_timestamp(timestamp, self.slot_duration),
+		);
+
+		Ok(Digest { logs: vec![digest_item] })
+	}
+
+	fn append_block_import(
+		&self,
+		_parent: &B::Header,
+		_params: &mut BlockImportParams<B>,
+		_inherents: &InherentData,
+		_proof: Self::Proof,
+	) -> Result<(), Error> {
+		Ok(())
+	}
+}
+
 fn create_manual_seal_inherent_data_providers(
 		client: Arc<Client>,
 		para_id: Id,
@@ -186,16 +312,23 @@ fn create_manual_seal_inherent_data_providers(
 	) ->
 		futures::future::Ready<
 		Result<
-			(sp_timestamp::InherentDataProvider, MockValidationDataInherentDataProvider<()>),
+			(MockTimestampInherentDataProvider, MockValidationDataInherentDataProvider<()>),
 			Box<dyn std::error::Error + Send + Sync>,
 		>,
 	> + Send
 	       + Sync{
 		move |block: Hash, ()| {
+
+        MockTimestampInherentDataProvider::advance_timestamp(
+            RELAY_CHAIN_SLOT_DURATION_MILLIS,
+        );
+
+
         let current_para_head = client
             .header(block)
             .expect("Header lookup should succeed")
             .expect("Header passed in as parent should be present in backend.");
+
 
         // // NOTE: Our runtime API doesnt seem to have collect_collation_info available
         // let should_send_go_ahead = client
@@ -225,38 +358,144 @@ fn create_manual_seal_inherent_data_providers(
         UniqueSaturatedInto::<u32>::unique_saturated_into(current_para_head.number) + 1;
         print!("current block num {}", current_para_head.number);
 
-        // Unsure here but triggers new error than before
-        let time = anvil_config.get_genesis_timestamp();
-                // .get_genesis_timestamp()
-                // .checked_mul(1000)
-                // .ok_or(ServiceError::Application("Genesis timestamp overflow".into())).unwrap();
+        // // Unsure here but triggers new error than before
+     //   let time = anvil_config.get_genesis_timestamp();
 
         let mocked_parachain = MockValidationDataInherentDataProvider::<()> {
             current_para_block: current_para_head.number,
             para_id: para_id,
             current_para_block_head,
-            relay_offset: time as u32,
+         //  relay_offset: time as u32,
             relay_blocks_per_para_block: requires_relay_progress
                 .then(|| 1)
                 .unwrap_or_default(),
-           // relay_blocks_per_para_block: 1,
+          // relay_blocks_per_para_block: 1,
 			para_blocks_per_relay_epoch: 10,
             // upgrade_go_ahead: should_send_go_ahead.then(|| {
             //     //log::info!("Detected pending validation code, sending go-ahead signal.");
             //     UpgradeGoAhead::GoAhead
             // }),
-          //  upgrade_go_ahead: Some(UpgradeGoAhead::Abort),
             ..Default::default()
         };
 
-        let timestamp_provider = sp_timestamp::InherentDataProvider::new(
-            (slot_duration.as_millis() * current_block_number as u64).into(),
-        );
+        // let timestamp_provider = sp_timestamp::InherentDataProvider::new(
+        //     (slot_duration.as_millis() * current_block_number as u64).into(),
+        // );
 
 
-        futures::future::ready(Ok((timestamp_provider, mocked_parachain)))
+        futures::future::ready(Ok((MockTimestampInherentDataProvider, mocked_parachain)))
 		}
 	}
+
+// fn create_manual_seal_inherent_data_providers(
+// 		client: Arc<Client>,
+// 		para_id: Id,
+// 		slot_duration: sc_consensus_aura::SlotDuration,
+//         anvil_config: AnvilNodeConfig,
+// 	) -> impl Fn(
+// 		Hash,
+// 		(),
+// 	) ->
+// 		futures::future::Ready<
+// 		Result<
+// 			(MockTimestampInherentDataProvider, MockValidationDataInherentDataProvider<()>),
+// 			Box<dyn std::error::Error + Send + Sync>,
+// 		>,
+// 	> + Send
+// 	       + Sync{
+// 		move |block: Hash, ()| {
+
+// let additional_relay_offset = Arc::new(std::sync::atomic::AtomicU32::new(0));
+
+//         MockTimestampInherentDataProvider::advance_timestamp(
+//                         RELAY_CHAIN_SLOT_DURATION_MILLIS,
+//                     );
+
+//         // Get the mocked timestamp
+//         let timestamp = TIMESTAMP.load(Ordering::SeqCst);
+//         // Calculate mocked slot number
+//         let slot = timestamp.saturating_div(RELAY_CHAIN_SLOT_DURATION_MILLIS);
+
+
+//         let current_para_head = client
+//             .header(block)
+//             .expect("Header lookup should succeed")
+//             .expect("Header passed in as parent should be present in backend.");
+
+//         //  let additional_key_values = vec![
+//         //     // (
+//         //     //     well_known_keys::TIMESTAMP.to_vec(),
+//         //     //     timestamp.encode(),
+//         //     // ),
+//         //     // // Override current slot number
+//         //     // // (
+//         //     // //     relay_chain::well_known_keys::CURRENT_SLOT.to_vec(),
+//         //     // //     Slot::from(slot).encode(),
+//         //     // // ),
+//         //     //   (
+//         //     //     well_known_keys::BLOCK_NUMBER_KEY.to_vec(),
+//         //     //     current_para_head.number.encode(),
+//         //     // ),
+//         // ];
+
+//         // // NOTE: Our runtime API doesnt seem to have collect_collation_info available
+//         // let should_send_go_ahead = client
+//         //     .runtime_api()
+//         //     .collect_collation_info(block, &current_para_head)
+//         //     .map(|info| info.new_validation_code.is_some())
+//         //     .unwrap_or_default();
+
+//         // The API version is relevant here because the constraints in the runtime changed
+//         // in https://github.com/paritytech/polkadot-sdk/pull/6825. In general, the logic
+//         // here assumes that we are using the aura-ext consensushook in the parachain
+//         // runtime.
+//         // Note: Taken from https://github.com/paritytech/polkadot-sdk/issues/7341, but unsure fi needed or not
+//         let requires_relay_progress = client
+//             .runtime_api()
+//             .has_api_with::<dyn AuraUnincludedSegmentApi<Block>, _>(
+//                 block,
+//                 |version| version > 1,
+//             )
+//             .ok()
+//             .unwrap_or_default();
+
+//         let current_para_block_head =
+// 				Some(polkadot_primitives::HeadData(current_para_head.hash().as_bytes().to_vec()));
+
+//         let current_block_number =
+//         UniqueSaturatedInto::<u32>::unique_saturated_into(current_para_head.number) + 1;
+//         print!("current block num {}", current_para_head.number);
+
+//         // // Unsure here but triggers new error than before
+//         let time = anvil_config.get_genesis_timestamp();
+
+//         let mocked_parachain = MockValidationDataInherentDataProvider::<()> {
+//             current_para_block: current_para_head.number,
+//             para_id: para_id,
+//             current_para_block_head,
+//            relay_offset: time as u32,
+//             //relay_offset: additional_relay_offset.load(Ordering::SeqCst),
+//             relay_blocks_per_para_block: requires_relay_progress
+//                 .then(|| 1)
+//                 .unwrap_or_default(),
+//           // relay_blocks_per_para_block: 1,
+// 			para_blocks_per_relay_epoch: 10,
+//             // upgrade_go_ahead: should_send_go_ahead.then(|| {
+//             //     //log::info!("Detected pending validation code, sending go-ahead signal.");
+//             //     UpgradeGoAhead::GoAhead
+//             // }),
+//              // additional_key_values: Some(additional_key_values),
+//             ..Default::default()
+//         };
+
+//         // let timestamp_provider = sp_timestamp::InherentDataProvider::new(
+//         //     (slot_duration.as_millis() * current_block_number as u64).into(),
+//         // );
+
+
+//         futures::future::ready(Ok((MockTimestampInherentDataProvider, mocked_parachain)))
+// 		}
+// 	}
 
 /// Builds a new service for a full client.
 pub fn new(
@@ -338,13 +577,14 @@ pub fn new(
     let mining_mode =
         MiningMode::new(anvil_config.block_time, anvil_config.mixed_mining, anvil_config.no_mining);
     let time_manager = Arc::new(TimeManager::new_with_milliseconds(
-        sp_timestamp::Timestamp::from(
-            anvil_config
-                .get_genesis_timestamp()
-                .checked_mul(1000)
-                .ok_or(ServiceError::Application("Genesis timestamp overflow".into()))?,
-        )
-        .into(),
+        sp_timestamp::Timestamp::current().as_millis(),
+        // sp_timestamp::Timestamp::from(
+        //     anvil_config
+        //         .get_genesis_timestamp()
+        //         .checked_mul(1000)
+        //         .ok_or(ServiceError::Application("Genesis timestamp overflow".into()))?,
+        // )
+        // .into(),
     ));
 
     let mining_engine = Arc::new(MiningEngine::new(
@@ -382,7 +622,7 @@ pub fn new(
 
     // Polkadot-sdk doesnt seem to use the latest changes here, so this function isnt available yet. Can use `new()` instead but our client 
     // doesnt implement all the needed traits
-	// let aura_digest_provider = AuraConsensusDataProvider::new_with_slot_duration(slot_duration);
+	let aura_digest_provider = AuraConsensusDataProvider::new_with_slot_duration(slot_duration);
 
     let para_id = Id::new(anvil_config.get_chain_id().try_into().unwrap());
 
@@ -400,7 +640,11 @@ pub fn new(
         pool: transaction_pool.clone(),
         select_chain: SelectChain::new(backend.clone()),
         commands_stream: Box::pin(commands_stream),
+<<<<<<< HEAD
         consensus_data_provider: Some(Box::new(SameSlotConsensusDataProvider::new())),
+=======
+        consensus_data_provider: Some(Box::new(aura_digest_provider)),
+>>>>>>> 36a5b580e (wip/mock digests)
         create_inherent_data_providers,
     };
     let authorship_future = run_manual_seal(params);

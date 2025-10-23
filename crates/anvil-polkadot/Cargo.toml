@@ -75,6 +75,10 @@ polkadot-sdk = { git = "https://github.com/paritytech/polkadot-sdk.git", branch 
 	"cumulus-client-service",
 	"cumulus-primitives-aura",
 
+	"cumulus-primitives-core",
+	"sp-inherents",
+	#"sp-consensus-aura",
+
 ] }
 
 #sc-consensus-manual-seal = { git = "https://github.com/paritytech/polkadot-sdk.git", package = "sc-consensus-manual-seal"}
