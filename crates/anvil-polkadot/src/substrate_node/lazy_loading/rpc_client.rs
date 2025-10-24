@@ -20,53 +20,44 @@ use std::{
 };
 use tokio_retry::{Retry, strategy::FixedInterval};
 
-pub trait RPCClient: Send + Sync + std::fmt::Debug + Clone {
+pub trait RPCClient<Block: BlockT + DeserializeOwned>: Send + Sync + std::fmt::Debug {
     fn system_chain(&self) -> Result<String, jsonrpsee::core::ClientError>;
 
     fn system_properties(&self) -> Result<sc_chain_spec::Properties, jsonrpsee::core::ClientError>;
 
-    fn block<Block, Hash: Clone>(
+    fn block(
         &self,
-        hash: Option<Hash>,
-    ) -> Result<Option<SignedBlock<Block>>, jsonrpsee::core::ClientError>
-    where
-        Block: BlockT + DeserializeOwned,
-        Hash: 'static + Send + Sync + sp_runtime::Serialize + DeserializeOwned;
+        hash: Option<Block::Hash>,
+    ) -> Result<Option<SignedBlock<Block>>, jsonrpsee::core::ClientError>;
 
-    fn block_hash<Block: BlockT + DeserializeOwned>(
+    fn block_hash(
         &self,
         block_number: Option<<Block::Header as HeaderT>::Number>,
     ) -> Result<Option<Block::Hash>, jsonrpsee::core::ClientError>;
 
-    fn header<Block: BlockT + DeserializeOwned>(
+    fn header(
         &self,
         hash: Option<Block::Hash>,
     ) -> Result<Option<Block::Header>, jsonrpsee::core::ClientError>;
 
-    fn storage<
-        Hash: 'static + Clone + Sync + Send + DeserializeOwned + sp_runtime::Serialize + core::fmt::Debug,
-    >(
+    fn storage(
         &self,
         key: StorageKey,
-        at: Option<Hash>,
+        at: Option<Block::Hash>,
     ) -> Result<Option<StorageData>, jsonrpsee::core::ClientError>;
 
-    fn storage_hash<
-        Hash: 'static + Clone + Sync + Send + DeserializeOwned + sp_runtime::Serialize + core::fmt::Debug,
-    >(
+    fn storage_hash(
         &self,
         key: StorageKey,
-        at: Option<Hash>,
-    ) -> Result<Option<Hash>, jsonrpsee::core::ClientError>;
+        at: Option<Block::Hash>,
+    ) -> Result<Option<Block::Hash>, jsonrpsee::core::ClientError>;
 
-    fn storage_keys_paged<
-        Hash: 'static + Clone + Sync + Send + DeserializeOwned + sp_runtime::Serialize,
-    >(
+    fn storage_keys_paged(
         &self,
         key: Option<StorageKey>,
         count: u32,
         start_key: Option<StorageKey>,
-        at: Option<Hash>,
+        at: Option<Block::Hash>,
     ) -> Result<Vec<sp_state_machine::StorageKey>, ClientError>;
 }
 
@@ -137,7 +128,7 @@ impl RPC {
     }
 }
 
-impl RPCClient for RPC {
+impl<Block: BlockT + DeserializeOwned> RPCClient<Block> for RPC {
     fn system_chain(&self) -> Result<String, jsonrpsee::core::ClientError> {
         let request = &|| {
             substrate_rpc_client::SystemApi::<H256, BlockNumber>::system_chain(&self.http_client)
@@ -156,27 +147,23 @@ impl RPCClient for RPC {
         self.block_on(request)
     }
 
-    fn block<Block, Hash: Clone>(
+    fn block(
         &self,
-        hash: Option<Hash>,
-    ) -> Result<Option<SignedBlock<Block>>, jsonrpsee::core::ClientError>
-    where
-        Block: BlockT + DeserializeOwned,
-        Hash: 'static + Send + Sync + sp_runtime::Serialize + DeserializeOwned,
-    {
+        hash: Option<Block::Hash>,
+    ) -> Result<Option<SignedBlock<Block>>, jsonrpsee::core::ClientError> {
         let request = &|| {
             substrate_rpc_client::ChainApi::<
-				BlockNumber,
-				Hash,
-				Block::Header,
-				SignedBlock<Block>,
-			>::block(&self.http_client, hash.clone())
+                BlockNumber,
+                Block::Hash,
+                Block::Header,
+                SignedBlock<Block>,
+            >::block(&self.http_client, hash.clone())
         };
 
         self.block_on(request)
     }
 
-    fn block_hash<Block: BlockT + DeserializeOwned>(
+    fn block_hash(
         &self,
         block_number: Option<<Block::Header as HeaderT>::Number>,
     ) -> Result<Option<Block::Hash>, jsonrpsee::core::ClientError> {
@@ -198,7 +185,7 @@ impl RPCClient for RPC {
         })
     }
 
-    fn header<Block: BlockT + DeserializeOwned>(
+    fn header(
         &self,
         hash: Option<Block::Hash>,
     ) -> Result<Option<Block::Header>, jsonrpsee::core::ClientError> {
@@ -214,15 +201,13 @@ impl RPCClient for RPC {
         self.block_on(request)
     }
 
-    fn storage<
-        Hash: 'static + Clone + Sync + Send + DeserializeOwned + sp_runtime::Serialize + core::fmt::Debug,
-    >(
+    fn storage(
         &self,
         key: StorageKey,
-        at: Option<Hash>,
+        at: Option<Block::Hash>,
     ) -> Result<Option<StorageData>, jsonrpsee::core::ClientError> {
         let request = &|| {
-            substrate_rpc_client::StateApi::<Hash>::storage(
+            substrate_rpc_client::StateApi::<Block::Hash>::storage(
                 &self.http_client,
                 key.clone(),
                 at.clone(),
@@ -232,15 +217,13 @@ impl RPCClient for RPC {
         self.block_on(request)
     }
 
-    fn storage_hash<
-        Hash: 'static + Clone + Sync + Send + DeserializeOwned + sp_runtime::Serialize + core::fmt::Debug,
-    >(
+    fn storage_hash(
         &self,
         key: StorageKey,
-        at: Option<Hash>,
-    ) -> Result<Option<Hash>, jsonrpsee::core::ClientError> {
+        at: Option<Block::Hash>,
+    ) -> Result<Option<Block::Hash>, jsonrpsee::core::ClientError> {
         let request = &|| {
-            substrate_rpc_client::StateApi::<Hash>::storage_hash(
+            substrate_rpc_client::StateApi::<Block::Hash>::storage_hash(
                 &self.http_client,
                 key.clone(),
                 at.clone(),
@@ -250,17 +233,15 @@ impl RPCClient for RPC {
         self.block_on(request)
     }
 
-    fn storage_keys_paged<
-        Hash: 'static + Clone + Sync + Send + DeserializeOwned + sp_runtime::Serialize,
-    >(
+    fn storage_keys_paged(
         &self,
         key: Option<StorageKey>,
         count: u32,
         start_key: Option<StorageKey>,
-        at: Option<Hash>,
+        at: Option<Block::Hash>,
     ) -> Result<Vec<sp_state_machine::StorageKey>, ClientError> {
         let request = &|| {
-            substrate_rpc_client::StateApi::<Hash>::storage_keys_paged(
+            substrate_rpc_client::StateApi::<Block::Hash>::storage_keys_paged(
                 &self.http_client,
                 key.clone(),
                 count.clone(),

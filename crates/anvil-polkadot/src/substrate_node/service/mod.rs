@@ -1,6 +1,9 @@
 use crate::{
     AnvilNodeConfig,
     substrate_node::{
+        lazy_loading::{
+            backend::Backend as LazyLoadingBackend, rpc_client::RPC as LazyLoadingRPCClient,
+        },
         mining_engine::{MiningEngine, MiningMode, run_mining_engine},
         rpc::spawn_rpc_server,
     },
@@ -55,7 +58,7 @@ mod client;
 mod executor;
 pub mod storage;
 
-pub type Backend = sc_service::TFullBackend<Block>;
+pub type Backend = LazyLoadingBackend<Block>;
 
 pub type TransactionPoolHandle = sc_transaction_pool::TransactionPoolHandle<Block, Client>;
 
@@ -308,11 +311,12 @@ pub fn new(
     }
 
     let storage_overrides = Arc::new(Mutex::new(StorageOverrides::default()));
+    let executor = sc_service::new_wasm_executor(&config.executor);
 
     let (client, backend, keystore, mut task_manager) = client::new_client(
         anvil_config.get_genesis_number(),
-        &config,
-        sc_service::new_wasm_executor(&config.executor),
+        &mut config,
+        executor,
         storage_overrides.clone(),
     )?;
 

@@ -1,5 +1,6 @@
 use crate::substrate_node::{
     genesis::DevelopmentGenesisBlockBuilder,
+    lazy_loading::{LazyLoadingConfig, backend::new_backend as new_lazy_loading_backend},
     service::{
         Backend,
         backend::StorageOverrides,
@@ -8,7 +9,8 @@ use crate::substrate_node::{
 };
 use parking_lot::Mutex;
 use polkadot_sdk::{
-    parachains_common::opaque::Block,
+    polkadot_primitives::v9::HeaderT,
+    parachains_common::opaque::{Block, Header},
     sc_chain_spec::get_extension,
     sc_client_api::{BadBlocks, ForkBlocks, execution_extensions::ExecutionExtensions},
     sc_service::{self, KeystoreContainer, LocalCallExecutor, TaskManager, new_db_backend},
@@ -21,11 +23,37 @@ pub type Client = sc_service::client::Client<Backend, Executor, Block, RuntimeAp
 
 pub fn new_client(
     genesis_block_number: u64,
-    config: &sc_service::Configuration,
+    config: &mut sc_service::Configuration,
     executor: WasmExecutor,
     storage_overrides: Arc<Mutex<StorageOverrides>>,
 ) -> Result<(Arc<Client>, Arc<Backend>, KeystorePtr, TaskManager), sc_service::error::Error> {
-    let backend = new_db_backend(config.db_config())?;
+    // When no fork is configured, use genesis as checkpoint
+    // This checkpoint will be the starting point for all blocks
+    let checkpoint = Header::new(
+        genesis_block_number,
+        Default::default(),
+        Default::default(),
+        Default::default(),
+        Default::default(),
+    );
+    
+    let backend = new_lazy_loading_backend(None, checkpoint)?;
+
+    // TODO: fix this
+    /* let chain_name = backend
+        .rpc_client
+        .system_chain()
+        .map_err(|e| sp_blockchain::Error::Backend(format!("failed to fetch system_chain: {e}")))?;
+
+    let chain_properties = backend.rpc_client.system_properties().map_err(|e| {
+        sp_blockchain::Error::Backend(format!("failed to fetch system_properties: {e}"))
+    })?;
+
+    let spec_builder =
+        super::spec_builder().with_name(chain_name.as_str()).with_properties(chain_properties);
+
+    config.chain_spec = Box::new(spec_builder.build());
+    */
 
     let genesis_block_builder = DevelopmentGenesisBlockBuilder::new(
         genesis_block_number,
