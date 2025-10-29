@@ -1153,7 +1153,7 @@ impl<Block: BlockT + DeserializeOwned> Backend<Block> {
     }
 
     #[inline]
-    fn rpc(&self) -> Option<&dyn RPCClient<Block>> {
+    pub fn rpc(&self) -> Option<&dyn RPCClient<Block>> {
         self.rpc_client.as_deref()
     }
 }
@@ -1546,7 +1546,7 @@ mod tests {
             }
         }
 
-        impl<Block: BlockT + DeserializeOwned> RPCClient for RPC<Block> {
+        impl<Block: BlockT + DeserializeOwned> RPCClient<Block> for RPC<Block> {
             fn storage(
                 &self,
                 key: StorageKey,
@@ -1652,7 +1652,6 @@ mod tests {
 
     type N = u32;
     type TestBlockT = TestBlock<N>;
-    type TestRPCT = RPC<TestBlockT>;
 
     fn make_header(number: N, parent: <TestBlock as BlockT>::Hash) -> TestHeader<N> {
         TestHeader::new(
@@ -1682,7 +1681,7 @@ mod tests {
         let rpc = std::sync::Arc::new(RPC::new());
         // fork checkpoint at #100
         let cp = checkpoint(100);
-        let backend = Backend::<TestBlockT, TestRPCT>::new(rpc.clone(), cp.clone());
+        let backend = Backend::<TestBlockT>::new(Some(rpc.clone()), cp.clone());
 
         // state_at(Default::default()) => before_fork=true
         let state = backend.state_at(Default::default(), TrieCacheContext::Trusted).unwrap();
@@ -1706,7 +1705,7 @@ mod tests {
     fn after_fork_first_fetch_caches_subsequent_hits_local() {
         let rpc = std::sync::Arc::new(RPC::new());
         let cp = checkpoint(10);
-        let backend = Backend::<TestBlockT, TestRPCT>::new(rpc.clone(), cp.clone());
+        let backend = Backend::<TestBlockT>::new(Some(rpc.clone()), cp.clone());
 
         // Build a block #11 > checkpoint (#10), with parent #10
         let parent = cp.hash();
@@ -1741,7 +1740,7 @@ mod tests {
     fn removed_keys_prevents_remote_fetch() {
         let rpc = std::sync::Arc::new(RPC::new());
         let cp = checkpoint(5);
-        let backend = Backend::<TestBlockT, TestRPCT>::new(rpc.clone(), cp.clone());
+        let backend = Backend::<TestBlockT>::new(Some(rpc.clone()), cp.clone());
 
         // make block #6
         let b6 = make_block(6, cp.hash(), vec![]);
@@ -1767,7 +1766,7 @@ mod tests {
     fn raw_iter_merges_local_then_remote() {
         let rpc = std::sync::Arc::new(RPC::new());
         let cp = checkpoint(7);
-        let backend = Backend::<TestBlockT, TestRPCT>::new(rpc.clone(), cp.clone());
+        let backend = Backend::<TestBlockT>::new(Some(rpc.clone()), cp.clone());
 
         // block #8
         let b8 = make_block(8, cp.hash(), vec![]);
@@ -1809,7 +1808,7 @@ mod tests {
     fn blockchain_header_and_number_are_cached() {
         let rpc = std::sync::Arc::new(RPC::new());
         let cp = checkpoint(3);
-        let backend = Backend::<TestBlockT, TestRPCT>::new(rpc.clone(), cp.clone());
+        let backend = Backend::<TestBlockT>::new(Some(rpc.clone()), cp.clone());
         let chain = backend.blockchain();
 
         // prepare one block w/ extrinsics

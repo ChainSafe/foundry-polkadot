@@ -303,6 +303,10 @@ pub struct AnvilNodeConfig {
     pub fork_url: Option<String>,
     /// Fetch state from a specific block hash over a remote endpoint.
     pub fork_block_hash: Option<H256>,
+    /// Delay between RPC requests in milliseconds when forking.
+    pub fork_delay: u32,
+    /// Maximum number of retries per RPC request when forking.
+    pub fork_retries: u32,
 }
 
 impl AnvilNodeConfig {
@@ -513,6 +517,8 @@ impl Default for AnvilNodeConfig {
             silent: false,
             fork_url: None,
             fork_block_hash: None,
+            fork_delay: 0,
+            fork_retries: 3,
         }
     }
 }
@@ -792,6 +798,20 @@ impl AnvilNodeConfig {
     #[must_use]
     pub fn with_fork_block_hash(mut self, fork_block_hash: Option<H256>) -> Self {
         self.fork_block_hash = fork_block_hash;
+        self
+    }
+
+    /// Sets the fork delay between RPC requests
+    #[must_use]
+    pub fn with_fork_delay(mut self, fork_delay: u32) -> Self {
+        self.fork_delay = fork_delay;
+        self
+    }
+
+    /// Sets the fork max retries per RPC request
+    #[must_use]
+    pub fn with_fork_retries(mut self, fork_retries: u32) -> Self {
+        self.fork_retries = fork_retries;
         self
     }
 

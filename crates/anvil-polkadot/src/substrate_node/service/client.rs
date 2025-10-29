@@ -1,10 +1,13 @@
-use crate::substrate_node::{
-    genesis::DevelopmentGenesisBlockBuilder,
-    lazy_loading::{LazyLoadingConfig, backend::new_backend as new_lazy_loading_backend},
-    service::{
-        Backend,
-        backend::StorageOverrides,
-        executor::{Executor, WasmExecutor},
+use crate::{
+    AnvilNodeConfig,
+    substrate_node::{
+        genesis::DevelopmentGenesisBlockBuilder,
+        lazy_loading::{LazyLoadingConfig, backend::new_backend as new_lazy_loading_backend},
+        service::{
+            Backend,
+            backend::StorageOverrides,
+            executor::{Executor, WasmExecutor},
+        },
     },
 };
 use parking_lot::Mutex;
@@ -22,22 +25,37 @@ use substrate_runtime::RuntimeApi;
 pub type Client = sc_service::client::Client<Backend, Executor, Block, RuntimeApi>;
 
 pub fn new_client(
+    anvil_config: &AnvilNodeConfig,
     genesis_block_number: u64,
     config: &mut sc_service::Configuration,
     executor: WasmExecutor,
     storage_overrides: Arc<Mutex<StorageOverrides>>,
 ) -> Result<(Arc<Client>, Arc<Backend>, KeystorePtr, TaskManager), sc_service::error::Error> {
+    // Convert AnvilNodeConfig fork parameters to LazyLoadingConfig
+    let lazy_loading_config = if let Some(ref fork_url) = anvil_config.fork_url {
+        Some(LazyLoadingConfig {
+            state_rpc: fork_url.clone(),
+            from_block: anvil_config.fork_block_hash,
+            state_overrides_path: None,
+            runtime_override: None,
+            delay_between_requests: anvil_config.fork_delay,
+            max_retries_per_request: anvil_config.fork_retries,
+        })
+    } else {
+        None
+    };
+
     // When no fork is configured, use genesis as checkpoint
     // This checkpoint will be the starting point for all blocks
     let checkpoint = Header::new(
-        genesis_block_number,
+        genesis_block_number.try_into().unwrap_or(0),
         Default::default(),
         Default::default(),
         Default::default(),
         Default::default(),
     );
     
-    let backend = new_lazy_loading_backend(None, checkpoint)?;
+    let backend = new_lazy_loading_backend(lazy_loading_config.as_ref(), checkpoint)?;
 
     // TODO: fix this
     /* let chain_name = backend

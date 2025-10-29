@@ -140,7 +140,9 @@ impl NodeArgs {
             .with_disable_default_create2_deployer(self.evm.disable_default_create2_deployer)
             .with_memory_limit(self.evm.memory_limit)
             .with_fork_url(self.fork.fork_url)
-            .with_fork_block_hash(self.fork.fork_block_hash);
+            .with_fork_block_hash(self.fork.fork_block_hash)
+            .with_fork_delay(self.fork.fork_delay)
+            .with_fork_retries(self.fork.fork_retries);
 
         let substrate_node_config = SubstrateNodeConfig::new(&anvil_config);
 
@@ -261,6 +263,14 @@ pub struct ForkArgs {
     /// Fetch state from a specific block hash over a remote endpoint.
     #[arg(long, value_name = "BLOCK")]
     pub fork_block_hash: Option<H256>,
+
+    /// Delay between RPC requests in milliseconds to avoid rate limiting.
+    #[arg(long, default_value = "0", value_name = "MS")]
+    pub fork_delay: u32,
+
+    /// Maximum number of retries per RPC request.
+    #[arg(long, default_value = "3", value_name = "NUM")]
+    pub fork_retries: u32,
 }
 
 /// Clap's value parser for genesis. Loads a genesis.json file.

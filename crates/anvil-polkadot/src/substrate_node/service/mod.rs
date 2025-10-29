@@ -314,6 +314,7 @@ pub fn new(
     let executor = sc_service::new_wasm_executor(&config.executor);
 
     let (client, backend, keystore, mut task_manager) = client::new_client(
+        anvil_config,
         anvil_config.get_genesis_number(),
         &mut config,
         executor,
