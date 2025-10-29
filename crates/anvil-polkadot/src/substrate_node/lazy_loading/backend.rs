@@ -134,9 +134,27 @@ impl<Block: BlockT + DeserializeOwned> Blockchain<Block> {
         match id {
             BlockId::Hash(h) => Some(h),
             BlockId::Number(n) => {
+                log::info!(
+                    target: super::LAZY_LOADING_LOG_TARGET,
+                    "Looking up block hash for number={}", n
+                );
+                
                 let block_hash = self.storage.read().hashes.get(&n).cloned();
+                
+                log::info!(
+                    target: super::LAZY_LOADING_LOG_TARGET,
+                    "Lookup result: number={}, found={}, total_hashes={}",
+                    n,
+                    block_hash.is_some(),
+                    self.storage.read().hashes.len()
+                );
+                
                 match block_hash {
                     None => {
+                        log::info!(
+                            target: super::LAZY_LOADING_LOG_TARGET,
+                            "Block hash not found locally, trying RPC for number={}", n
+                        );
                         let block_hash =
                             self.rpc().and_then(|rpc| rpc.block_hash(Some(n)).ok().flatten());
                         if let Some(h) = block_hash {
@@ -160,16 +178,40 @@ impl<Block: BlockT + DeserializeOwned> Blockchain<Block> {
         new_state: NewBlockState,
     ) -> sp_blockchain::Result<()> {
         let number = *header.number();
+        
+        log::info!(
+            target: super::LAZY_LOADING_LOG_TARGET,
+            "Inserting block: number={}, hash={:?}, new_state={:?}",
+            number,
+            hash,
+            new_state
+        );
+        
         if new_state.is_best() {
             self.apply_head(&header)?;
         }
 
         let mut storage = self.storage.write();
+        
+        // Always insert the block into blocks and hashes storage
+        storage.blocks.insert(hash, StoredBlock::new(header.clone(), body, justifications));
+        storage.hashes.insert(number, hash);
+        
+        log::info!(
+            target: super::LAZY_LOADING_LOG_TARGET,
+            "Block inserted successfully: number={}, hash={:?}. Total blocks={}, Total hashes={}",
+            number,
+            hash,
+            storage.blocks.len(),
+            storage.hashes.len()
+        );
+        
         if number.is_zero() {
             storage.genesis_hash = hash;
+            storage.finalized_hash = hash;
+            storage.finalized_number = number;
         } else {
             storage.leaves.import(hash, number, *header.parent_hash());
-            storage.blocks.insert(hash, StoredBlock::new(header, body, justifications));
 
             if let NewBlockState::Final = new_state {
                 storage.finalized_hash = hash;
@@ -342,13 +384,21 @@ impl<Block: BlockT + DeserializeOwned> HeaderBackend<Block> for Blockchain<Block
 
     fn info(&self) -> blockchain::Info<Block> {
         let storage = self.storage.read();
+        // Return None for finalized_state when blockchain is empty (no blocks inserted yet)
+        // This allows Client::new to properly insert the genesis block
+        let finalized_state = if storage.blocks.is_empty() {
+            None
+        } else {
+            Some((storage.finalized_hash, storage.finalized_number))
+        };
+        
         blockchain::Info {
             best_hash: storage.best_hash,
             best_number: storage.best_number,
             genesis_hash: storage.genesis_hash,
             finalized_hash: storage.finalized_hash,
             finalized_number: storage.finalized_number,
-            finalized_state: Some((storage.finalized_hash, storage.finalized_number)),
+            finalized_state,
             number_leaves: storage.leaves.count(),
             block_gap: None,
         }
