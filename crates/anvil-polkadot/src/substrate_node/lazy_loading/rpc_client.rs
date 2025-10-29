@@ -17,6 +17,7 @@ use std::{
         atomic::{AtomicU64, Ordering},
     },
     time::Duration,
+    marker::PhantomData,
 };
 use tokio_retry::{Retry, strategy::FixedInterval};
 
@@ -62,14 +63,15 @@ pub trait RPCClient<Block: BlockT + DeserializeOwned>: Send + Sync + std::fmt::D
 }
 
 #[derive(Debug, Clone)]
-pub struct RPC {
+pub struct RPC<Block: BlockT + DeserializeOwned> {
     http_client: HttpClient,
     delay_between_requests_ms: u32,
     max_retries_per_request: u32,
     counter: Arc<AtomicU64>,
+    block_type: PhantomData<Block>,
 }
 
-impl RPC {
+impl<Block: BlockT + DeserializeOwned> RPC<Block> {
     pub fn new(
         http_client: HttpClient,
         delay_between_requests_ms: u32,
@@ -80,6 +82,7 @@ impl RPC {
             delay_between_requests_ms,
             max_retries_per_request,
             counter: Default::default(),
+            block_type: PhantomData,
         }
     }
 
@@ -128,7 +131,7 @@ impl RPC {
     }
 }
 
-impl<Block: BlockT + DeserializeOwned> RPCClient<Block> for RPC {
+impl<Block: BlockT + DeserializeOwned> RPCClient<Block> for RPC<Block> {
     fn system_chain(&self) -> Result<String, jsonrpsee::core::ClientError> {
         let request = &|| {
             substrate_rpc_client::SystemApi::<H256, BlockNumber>::system_chain(&self.http_client)
@@ -279,7 +282,7 @@ mod tests {
     // Unit tests for `block_on`.
     // ---------------------------
 
-    fn rpc_for_tests(delay_ms: u32, retries: u32) -> RPC {
+    fn rpc_for_tests(delay_ms: u32, retries: u32) -> RPC<BlockType> {
         let client =
             HttpClientBuilder::default().build("http://127.0.0.1:8080").expect("build http client");
         RPC::new(client, delay_ms, retries)
@@ -421,11 +424,11 @@ mod tests {
     }
 
     // Return RPC plus the ServerHandle so tests keep the server alive.
-    async fn rpc_against_mock() -> (RPC, ServerHandle) {
+    async fn rpc_against_mock() -> (RPC<BlockType>, ServerHandle) {
         let (addr, handle) = start_mock_server_ok().await;
         let url = format!("http://{}", addr);
         let client = HttpClientBuilder::default().build(&url).unwrap();
-        (RPC::new(client, 0, 1), handle)
+        (RPC::<BlockType>::new(client, 0, 1), handle)
     }
 
     type BlockType = GenericBlock<GenericHeader<u32, BlakeTwo256>, OpaqueExtrinsic>;
@@ -435,11 +438,11 @@ mod tests {
         // Keep `_server` in scope so the server isn't dropped early.
         let (rpc, _server) = rpc_against_mock().await;
 
-        let chain = <super::RPC as super::RPCClient<BlockType>>::system_chain(&rpc)
+        let chain = <super::RPC<BlockType> as super::RPCClient<BlockType>>::system_chain(&rpc)
             .expect("system_chain ok");
         assert_eq!(chain, "Local Testnet");
 
-        let props = <super::RPC as super::RPCClient<BlockType>>::system_properties(&rpc)
+        let props = <super::RPC<BlockType> as super::RPCClient<BlockType>>::system_properties(&rpc)
             .expect("system_properties ok");
         assert_eq!(props.get("tokenSymbol").and_then(|v| v.as_str()), Some("UNIT"));
         assert_eq!(props.get("tokenDecimals").and_then(|v| v.as_u64()), Some(12));
@@ -449,12 +452,12 @@ mod tests {
     async fn integration_chain_and_state_endpoints_ok() {
         let (rpc, _server) = rpc_against_mock().await;
 
-        let hash = <super::RPC as super::RPCClient<BlockType>>::block_hash(&rpc, None)
+        let hash = <super::RPC<BlockType> as super::RPCClient<BlockType>>::block_hash(&rpc, None)
             .expect("ok")
             .expect("some hash");
         assert_eq!(hash, polkadot_sdk::sp_core::H256::from_low_u64_be(1));
 
-        let val = <super::RPC as super::RPCClient<BlockType>>::storage(
+        let val = <super::RPC<BlockType> as super::RPCClient<BlockType>>::storage(
             &rpc,
             StorageKey(vec![0x00, 0xde, 0xad]),
             None,
@@ -463,7 +466,7 @@ mod tests {
         .expect("some data");
         assert_eq!(val.0, vec![0xde, 0xad, 0xbe, 0xef]);
 
-        let h = <super::RPC as super::RPCClient<BlockType>>::storage_hash(
+        let h = <super::RPC<BlockType> as super::RPCClient<BlockType>>::storage_hash(
             &rpc,
             StorageKey(vec![0x00, 0xde, 0xad]),
             None,
@@ -473,7 +476,7 @@ mod tests {
         assert_eq!(h, polkadot_sdk::sp_core::H256::from_slice(&[0xaa; 32]));
 
         let keys: Vec<sp_state_machine::StorageKey> =
-            <super::RPC as super::RPCClient<BlockType>>::storage_keys_paged(
+            <super::RPC<BlockType> as super::RPCClient<BlockType>>::storage_keys_paged(
                 &rpc, None, 10, None, None,
             )
             .expect("ok");

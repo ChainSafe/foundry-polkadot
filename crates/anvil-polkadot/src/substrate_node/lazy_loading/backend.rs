@@ -1,5 +1,4 @@
 use super::{
-    LazyLoadingConfig,
     rpc_client::{RPC, RPCClient},
 };
 use polkadot_sdk::{
@@ -1396,49 +1395,14 @@ pub fn check_genesis_storage(storage: &Storage) -> sp_blockchain::Result<()> {
 }
 
 pub fn new_backend<Block>(
-    lazy_loading_config: Option<&LazyLoadingConfig>,
+    rpc_client: Option<Arc<dyn RPCClient<Block>>>,
     checkpoint: Block::Header,
 ) -> Result<Arc<Backend<Block>>, Error>
 where
     Block: BlockT + DeserializeOwned,
     Block::Hash: From<H256>,
 {
-    let (rpc_client, checkpoint): (
-        Option<Arc<dyn RPCClient<Block>>>,
-        <Block as BlockT>::Header,
-    ) = if let Some(lazy) = lazy_loading_config {
-        let http_client = jsonrpsee::http_client::HttpClientBuilder::default()
-            .max_request_size(u32::MAX)
-            .max_response_size(u32::MAX)
-            .request_timeout(Duration::from_secs(10))
-            .build(lazy.state_rpc.clone())
-            .map_err(|e| {
-                sp_blockchain::Error::Backend(format!("failed to build http client: {e}"))
-            })?;
-
-        let rpc_concrete = RPC::new(
-            http_client,
-            lazy.delay_between_requests,
-            lazy.max_retries_per_request,
-        );
-
-        let block_hash: Option<Block::Hash> = lazy.from_block.map(Into::into);
-        let checkpoint: SignedBlock<Block> = rpc_concrete
-            .block(block_hash)
-            .map_err(|e| {
-                sp_blockchain::Error::Backend(format!("failed to fetch checkpoint block: {e}"))
-            })?
-            .ok_or_else(|| sp_blockchain::Error::Backend("fork checkpoint not found".into()))?;
-
-        let rpc_arc: Arc<dyn RPCClient<Block>> = Arc::new(rpc_concrete) as Arc<dyn RPCClient<Block>>;
-
-        (Some(rpc_arc), checkpoint.block.header().clone())
-    } else {
-        (None, checkpoint)
-    };
-
-    let backend = Arc::new(Backend::new(rpc_client.clone(), checkpoint));
-
+    let backend = Arc::new(Backend::new(rpc_client, checkpoint));
     Ok(backend)
 }
 
