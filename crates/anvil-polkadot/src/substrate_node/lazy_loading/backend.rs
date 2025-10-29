@@ -110,6 +110,11 @@ pub struct Blockchain<Block: BlockT + DeserializeOwned> {
 impl<Block: BlockT + DeserializeOwned> Blockchain<Block> {
     /// Create new in-memory blockchain storage.
     fn new(rpc_client: Option<Arc<dyn RPCClient<Block>>>) -> Blockchain<Block> {
+        log::info!(
+            target: super::LAZY_LOADING_LOG_TARGET,
+            "🏗️  Creating new Blockchain storage (empty)"
+        );
+        
         let storage = Arc::new(parking_lot::RwLock::new(BlockchainStorage {
             blocks: HashMap::new(),
             hashes: HashMap::new(),
@@ -206,17 +211,20 @@ impl<Block: BlockT + DeserializeOwned> Blockchain<Block> {
             storage.hashes.len()
         );
         
-        if number.is_zero() {
+        // Set genesis_hash only for the first block inserted
+        if storage.blocks.len() == 1 {
             storage.genesis_hash = hash;
+        }
+        
+        // Update leaves for non-genesis blocks
+        if storage.blocks.len() > 1 {
+            storage.leaves.import(hash, number, *header.parent_hash());
+        }
+        
+        // Finalize block only if explicitly requested via new_state
+        if let NewBlockState::Final = new_state {
             storage.finalized_hash = hash;
             storage.finalized_number = number;
-        } else {
-            storage.leaves.import(hash, number, *header.parent_hash());
-
-            if let NewBlockState::Final = new_state {
-                storage.finalized_hash = hash;
-                storage.finalized_number = number;
-            }
         }
 
         Ok(())
@@ -384,13 +392,26 @@ impl<Block: BlockT + DeserializeOwned> HeaderBackend<Block> for Blockchain<Block
 
     fn info(&self) -> blockchain::Info<Block> {
         let storage = self.storage.read();
-        // Return None for finalized_state when blockchain is empty (no blocks inserted yet)
-        // This allows Client::new to properly insert the genesis block
-        let finalized_state = if storage.blocks.is_empty() {
+        // Return None for finalized_state when blockchain is empty or only has genesis block
+        // This allows Client::new to properly initialize and complete genesis setup
+        // finalized_state should only be Some() when there are blocks beyond genesis
+        let finalized_state = if storage.blocks.len() <= 1 {
             None
         } else {
             Some((storage.finalized_hash, storage.finalized_number))
         };
+        
+        log::info!(
+            target: super::LAZY_LOADING_LOG_TARGET,
+            "📊 Blockchain::info() - blocks={}, best_hash={:?}, best_number={}, genesis_hash={:?}, finalized_hash={:?}, finalized_number={}, finalized_state={:?}",
+            storage.blocks.len(),
+            storage.best_hash,
+            storage.best_number,
+            storage.genesis_hash,
+            storage.finalized_hash,
+            storage.finalized_number,
+            finalized_state
+        );
         
         blockchain::Info {
             best_hash: storage.best_hash,

@@ -78,6 +78,11 @@ pub fn spawn_rpc_server(
         })
         .collect();
 
+    // Log the Substrate RPC server addresses
+    for addr in rpc_server_handle.listen_addrs() {
+        log::info!("🌐 Substrate RPC server listening on: {}", addr);
+    }
+
     let in_memory_rpc = {
         let mut module = gen_rpc_module()?;
         module.extensions_mut().insert(DenyUnsafe::No);
