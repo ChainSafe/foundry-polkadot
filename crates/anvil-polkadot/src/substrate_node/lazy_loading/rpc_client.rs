@@ -19,7 +19,7 @@ use std::{
     time::Duration,
     marker::PhantomData,
 };
-use tokio_retry::{Retry, strategy::FixedInterval};
+use tokio::runtime::Handle;
 
 pub trait RPCClient<Block: BlockT + DeserializeOwned>: Send + Sync + std::fmt::Debug {
     fn system_chain(&self) -> Result<String, jsonrpsee::core::ClientError>;
@@ -68,6 +68,7 @@ pub struct RPC<Block: BlockT + DeserializeOwned> {
     delay_between_requests_ms: u32,
     max_retries_per_request: u32,
     counter: Arc<AtomicU64>,
+    tokio_handle: Handle,
     block_type: PhantomData<Block>,
 }
 
@@ -76,113 +77,109 @@ impl<Block: BlockT + DeserializeOwned> RPC<Block> {
         http_client: HttpClient,
         delay_between_requests_ms: u32,
         max_retries_per_request: u32,
+        tokio_handle: Handle,
     ) -> Self {
         Self {
             http_client,
             delay_between_requests_ms,
             max_retries_per_request,
             counter: Default::default(),
+            tokio_handle,
             block_type: PhantomData,
         }
     }
 
-    fn block_on<F, T, E>(&self, f: &dyn Fn() -> F) -> Result<T, E>
+    fn block_on<F, T, E>(&self, future: F) -> Result<T, E>
     where
-        F: Future<Output = Result<T, E>>,
+        F: Future<Output = Result<T, E>> + Send + 'static,
+        T: Send + 'static,
+        E: Send + 'static,
     {
-        use tokio::runtime::Handle;
-
         let id = self.counter.fetch_add(1, Ordering::SeqCst);
         let start = std::time::Instant::now();
+        let delay_between_requests = Duration::from_millis(self.delay_between_requests_ms.into());
+        let handle = self.tokio_handle.clone();
 
-        tokio::task::block_in_place(move || {
-            Handle::current().block_on(async move {
-				let delay_between_requests =
-					Duration::from_millis(self.delay_between_requests_ms.into());
+        // Execute in a blocking thread to avoid "Cannot start a runtime from within a runtime"
+        std::thread::spawn(move || {
+            handle.block_on(async move {
+                let start_req = std::time::Instant::now();
+                log::debug!(
+                    target: super::LAZY_LOADING_LOG_TARGET,
+                    "Sending request: {}",
+                    id
+                );
 
-				let start_req = std::time::Instant::now();
-				log::debug!(
-					target: super::LAZY_LOADING_LOG_TARGET,
-					"Sending request: {}",
-					id
-				);
+                // Explicit request delay, to avoid getting 429 errors
+                let _ = tokio::time::sleep(delay_between_requests).await;
 
-				// Explicit request delay, to avoid getting 429 errors
-				let _ = tokio::time::sleep(delay_between_requests).await;
+                // Execute the request
+                let result = future.await;
 
-				// Retry request in case of failure
-				// The maximum number of retries is specified by `self.max_retries_per_request`
-				let retry_strategy = FixedInterval::new(delay_between_requests)
-					.take(self.max_retries_per_request.saturating_sub(1) as usize);
-				let result = Retry::spawn(retry_strategy, f).await;
+                log::debug!(
+                    target: super::LAZY_LOADING_LOG_TARGET,
+                    "Completed request (id: {}, successful: {}, elapsed_time: {:?}, query_time: {:?})",
+                    id,
+                    result.is_ok(),
+                    start.elapsed(),
+                    start_req.elapsed()
+                );
 
-				log::debug!(
-					target: super::LAZY_LOADING_LOG_TARGET,
-					"Completed request (id: {}, successful: {}, elapsed_time: {:?}, query_time: {:?})",
-					id,
-					result.is_ok(),
-					start.elapsed(),
-					start_req.elapsed()
-				);
-
-				result
-			})
+                result
+            })
         })
+        .join()
+        .expect("RPC thread panicked")
     }
 }
 
 impl<Block: BlockT + DeserializeOwned> RPCClient<Block> for RPC<Block> {
     fn system_chain(&self) -> Result<String, jsonrpsee::core::ClientError> {
-        let request = &|| {
-            substrate_rpc_client::SystemApi::<H256, BlockNumber>::system_chain(&self.http_client)
-        };
-
-        self.block_on(request)
+        let client = self.http_client.clone();
+        self.block_on(async move {
+            substrate_rpc_client::SystemApi::<H256, BlockNumber>::system_chain(&client).await
+        })
     }
 
     fn system_properties(&self) -> Result<sc_chain_spec::Properties, jsonrpsee::core::ClientError> {
-        let request = &|| {
-            substrate_rpc_client::SystemApi::<H256, BlockNumber>::system_properties(
-                &self.http_client,
-            )
-        };
-
-        self.block_on(request)
+        let client = self.http_client.clone();
+        self.block_on(async move {
+            substrate_rpc_client::SystemApi::<H256, BlockNumber>::system_properties(&client).await
+        })
     }
 
     fn block(
         &self,
         hash: Option<Block::Hash>,
     ) -> Result<Option<SignedBlock<Block>>, jsonrpsee::core::ClientError> {
-        let request = &|| {
+        let client = self.http_client.clone();
+        self.block_on(async move {
             substrate_rpc_client::ChainApi::<
                 BlockNumber,
                 Block::Hash,
                 Block::Header,
                 SignedBlock<Block>,
-            >::block(&self.http_client, hash.clone())
-        };
-
-        self.block_on(request)
+            >::block(&client, hash).await
+        })
     }
 
     fn block_hash(
         &self,
         block_number: Option<<Block::Header as HeaderT>::Number>,
     ) -> Result<Option<Block::Hash>, jsonrpsee::core::ClientError> {
-        let request = &|| {
+        let client = self.http_client.clone();
+        self.block_on(async move {
             substrate_rpc_client::ChainApi::<
                 <Block::Header as HeaderT>::Number,
                 Block::Hash,
                 Block::Header,
                 SignedBlock<Block>,
             >::block_hash(
-                &self.http_client,
+                &client,
                 block_number.map(|n| ListOrValue::Value(NumberOrHex::Hex(n.into()))),
-            )
-        };
-
-        self.block_on(request).map(|ok| match ok {
+            ).await
+        })
+        .map(|ok| match ok {
             ListOrValue::List(v) => v.get(0).map_or(None, |some| *some),
             ListOrValue::Value(v) => v,
         })
@@ -192,16 +189,15 @@ impl<Block: BlockT + DeserializeOwned> RPCClient<Block> for RPC<Block> {
         &self,
         hash: Option<Block::Hash>,
     ) -> Result<Option<Block::Header>, jsonrpsee::core::ClientError> {
-        let request = &|| {
+        let client = self.http_client.clone();
+        self.block_on(async move {
             substrate_rpc_client::ChainApi::<
                 BlockNumber,
                 Block::Hash,
                 Block::Header,
                 SignedBlock<Block>,
-            >::header(&self.http_client, hash)
-        };
-
-        self.block_on(request)
+            >::header(&client, hash).await
+        })
     }
 
     fn storage(
@@ -209,15 +205,10 @@ impl<Block: BlockT + DeserializeOwned> RPCClient<Block> for RPC<Block> {
         key: StorageKey,
         at: Option<Block::Hash>,
     ) -> Result<Option<StorageData>, jsonrpsee::core::ClientError> {
-        let request = &|| {
-            substrate_rpc_client::StateApi::<Block::Hash>::storage(
-                &self.http_client,
-                key.clone(),
-                at.clone(),
-            )
-        };
-
-        self.block_on(request)
+        let client = self.http_client.clone();
+        self.block_on(async move {
+            substrate_rpc_client::StateApi::<Block::Hash>::storage(&client, key, at).await
+        })
     }
 
     fn storage_hash(
@@ -225,15 +216,10 @@ impl<Block: BlockT + DeserializeOwned> RPCClient<Block> for RPC<Block> {
         key: StorageKey,
         at: Option<Block::Hash>,
     ) -> Result<Option<Block::Hash>, jsonrpsee::core::ClientError> {
-        let request = &|| {
-            substrate_rpc_client::StateApi::<Block::Hash>::storage_hash(
-                &self.http_client,
-                key.clone(),
-                at.clone(),
-            )
-        };
-
-        self.block_on(request)
+        let client = self.http_client.clone();
+        self.block_on(async move {
+            substrate_rpc_client::StateApi::<Block::Hash>::storage_hash(&client, key, at).await
+        })
     }
 
     fn storage_keys_paged(
@@ -243,16 +229,16 @@ impl<Block: BlockT + DeserializeOwned> RPCClient<Block> for RPC<Block> {
         start_key: Option<StorageKey>,
         at: Option<Block::Hash>,
     ) -> Result<Vec<sp_state_machine::StorageKey>, ClientError> {
-        let request = &|| {
+        let client = self.http_client.clone();
+        let result = self.block_on(async move {
             substrate_rpc_client::StateApi::<Block::Hash>::storage_keys_paged(
-                &self.http_client,
-                key.clone(),
-                count.clone(),
-                start_key.clone(),
-                at.clone(),
-            )
-        };
-        let result = self.block_on(request);
+                &client,
+                key,
+                count,
+                start_key,
+                at,
+            ).await
+        });
 
         match result {
             Ok(result) => Ok(result.iter().map(|item| item.0.clone()).collect()),
@@ -285,63 +271,27 @@ mod tests {
     fn rpc_for_tests(delay_ms: u32, retries: u32) -> RPC<BlockType> {
         let client =
             HttpClientBuilder::default().build("http://127.0.0.1:8080").expect("build http client");
-        RPC::new(client, delay_ms, retries)
+        let handle = Handle::current();
+        RPC::new(client, delay_ms, retries, handle)
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn block_on_success_no_retry() {
+    async fn block_on_success() {
         let rpc = rpc_for_tests(0, 1);
-        let attempts = AtomicUsize::new(0);
 
-        let res: Result<i32, &'static str> = rpc.block_on(&|| {
-            attempts.fetch_add(1, Ordering::SeqCst);
-            async { Ok(42) }
-        });
+        let res: Result<i32, &'static str> = rpc.block_on(async { Ok(42) });
 
         assert_eq!(res.unwrap(), 42, "should propagate Ok value");
-        assert_eq!(attempts.load(Ordering::SeqCst), 1, "should run exactly one attempt");
     }
 
-    /// Verifies that `block_on` retries on error and eventually returns Ok.
+    /// Verifies that `block_on` propagates errors.
     #[tokio::test(flavor = "multi_thread")]
-    async fn block_on_retries_then_succeeds() {
-        // Fail the first 2 attempts, succeed on the 3rd.
-        let rpc = rpc_for_tests(/* delay_ms */ 0, /* retries */ 5);
-        let attempts = AtomicUsize::new(0);
+    async fn block_on_propagates_errors() {
+        let rpc = rpc_for_tests(0, 1);
 
-        let res: Result<&'static str, &'static str> = rpc.block_on(&|| {
-            let n = attempts.fetch_add(1, Ordering::SeqCst);
-            async move { if n < 2 { Err("transient error") } else { Ok("ok-now") } }
-        });
+        let err = rpc.block_on(async { Err::<(), &str>("failed") }).unwrap_err();
 
-        assert_eq!(res.unwrap(), "ok-now");
-        assert_eq!(
-            attempts.load(Ordering::SeqCst),
-            3,
-            "should have retried exactly until the first success"
-        );
-    }
-
-    /// Verifies that `block_on` exhausts retries and returns the last error.
-    #[tokio::test(flavor = "multi_thread")]
-    async fn block_on_exhausts_retries_and_fails() {
-        let retries = 3u32;
-        let rpc = rpc_for_tests(0, retries);
-        let attempts = AtomicUsize::new(0);
-
-        let err = rpc
-            .block_on(&|| {
-                attempts.fetch_add(1, Ordering::SeqCst);
-                async { Err::<(), &str>("always failing") }
-            })
-            .unwrap_err();
-
-        assert_eq!(err, "always failing");
-        assert_eq!(
-            attempts.load(Ordering::SeqCst),
-            retries as usize,
-            "should attempt exactly `max_retries_per_request` times"
-        );
+        assert_eq!(err, "failed");
     }
 
     /// Verifies that the initial fixed delay (to avoid 429s) is honored before the first attempt.
@@ -349,16 +299,11 @@ mod tests {
     async fn block_on_respects_initial_delay() {
         let delay_ms = 60u32;
         let rpc = rpc_for_tests(delay_ms, /* retries */ 1);
-        let attempts = AtomicUsize::new(0);
 
         let start = Instant::now();
-        let _ = rpc.block_on(&|| {
-            attempts.fetch_add(1, Ordering::SeqCst);
-            async { Ok::<(), ()>(()) }
-        });
+        let _ = rpc.block_on(async { Ok::<(), ()>(()) });
         let elapsed = start.elapsed();
 
-        assert_eq!(attempts.load(Ordering::SeqCst), 1, "should still run exactly one attempt");
         assert!(
             elapsed >= Duration::from_millis(delay_ms as u64),
             "elapsed {:?} should be >= configured initial delay {:?}ms",
@@ -428,7 +373,8 @@ mod tests {
         let (addr, handle) = start_mock_server_ok().await;
         let url = format!("http://{}", addr);
         let client = HttpClientBuilder::default().build(&url).unwrap();
-        (RPC::<BlockType>::new(client, 0, 1), handle)
+        let tokio_handle = Handle::current();
+        (RPC::<BlockType>::new(client, 0, 1, tokio_handle), handle)
     }
 
     type BlockType = GenericBlock<GenericHeader<u32, BlakeTwo256>, OpaqueExtrinsic>;

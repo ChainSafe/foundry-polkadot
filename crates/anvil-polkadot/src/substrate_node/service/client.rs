@@ -55,6 +55,7 @@ pub fn new_client(
             http_client,
             anvil_config.fork_delay,
             anvil_config.fork_retries,
+            config.tokio_handle.clone(),
         );
 
         // Create new chainspec for the forked chain
