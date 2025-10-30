@@ -15,11 +15,11 @@ use std::{
     sync::{
         Arc,
         atomic::{AtomicU64, Ordering},
+        OnceLock,
     },
     time::Duration,
     marker::PhantomData,
 };
-use tokio::runtime::Handle;
 
 pub trait RPCClient<Block: BlockT + DeserializeOwned>: Send + Sync + std::fmt::Debug {
     fn system_chain(&self) -> Result<String, jsonrpsee::core::ClientError>;
@@ -68,8 +68,26 @@ pub struct RPC<Block: BlockT + DeserializeOwned> {
     delay_between_requests_ms: u32,
     max_retries_per_request: u32,
     counter: Arc<AtomicU64>,
-    tokio_handle: Handle,
     block_type: PhantomData<Block>,
+}
+
+// Global dedicated runtime for RPC calls, created lazily
+static RPC_RUNTIME: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
+
+fn get_rpc_runtime() -> &'static tokio::runtime::Runtime {
+    RPC_RUNTIME.get_or_init(|| {
+        // Create runtime in a separate thread to avoid "Cannot start runtime from within runtime"
+        std::thread::spawn(|| {
+            tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(2)
+                .thread_name("rpc-worker")
+                .enable_all()
+                .build()
+                .expect("Failed to create RPC runtime")
+        })
+        .join()
+        .expect("Failed to create runtime thread")
+    })
 }
 
 impl<Block: BlockT + DeserializeOwned> RPC<Block> {
@@ -77,14 +95,12 @@ impl<Block: BlockT + DeserializeOwned> RPC<Block> {
         http_client: HttpClient,
         delay_between_requests_ms: u32,
         max_retries_per_request: u32,
-        tokio_handle: Handle,
     ) -> Self {
         Self {
             http_client,
             delay_between_requests_ms,
             max_retries_per_request,
             counter: Default::default(),
-            tokio_handle,
             block_type: PhantomData,
         }
     }
@@ -98,11 +114,11 @@ impl<Block: BlockT + DeserializeOwned> RPC<Block> {
         let id = self.counter.fetch_add(1, Ordering::SeqCst);
         let start = std::time::Instant::now();
         let delay_between_requests = Duration::from_millis(self.delay_between_requests_ms.into());
-        let handle = self.tokio_handle.clone();
 
-        // Execute in a blocking thread to avoid "Cannot start a runtime from within a runtime"
+        // Execute in a separate OS thread with dedicated runtime
+        // This completely isolates from any other Tokio runtime
         std::thread::spawn(move || {
-            handle.block_on(async move {
+            get_rpc_runtime().block_on(async move {
                 let start_req = std::time::Instant::now();
                 log::debug!(
                     target: super::LAZY_LOADING_LOG_TARGET,
@@ -271,8 +287,7 @@ mod tests {
     fn rpc_for_tests(delay_ms: u32, retries: u32) -> RPC<BlockType> {
         let client =
             HttpClientBuilder::default().build("http://127.0.0.1:8080").expect("build http client");
-        let handle = Handle::current();
-        RPC::new(client, delay_ms, retries, handle)
+        RPC::new(client, delay_ms, retries)
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -373,8 +388,7 @@ mod tests {
         let (addr, handle) = start_mock_server_ok().await;
         let url = format!("http://{}", addr);
         let client = HttpClientBuilder::default().build(&url).unwrap();
-        let tokio_handle = Handle::current();
-        (RPC::<BlockType>::new(client, 0, 1, tokio_handle), handle)
+        (RPC::<BlockType>::new(client, 0, 1), handle)
     }
 
     type BlockType = GenericBlock<GenericHeader<u32, BlakeTwo256>, OpaqueExtrinsic>;
