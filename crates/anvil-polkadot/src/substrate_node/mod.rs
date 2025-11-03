@@ -7,3 +7,4 @@ pub mod mining_engine;
 pub mod rpc;
 pub mod service;
 pub mod snapshot;
+mod lazy_loading;
