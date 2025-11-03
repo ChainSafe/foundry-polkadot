@@ -1,20 +1,20 @@
 use crate::substrate_node::{
     genesis::DevelopmentGenesisBlockBuilder,
+    lazy_loading::backend::new_backend as new_lazy_loading_backend,
     service::{
         Backend,
         backend::StorageOverrides,
         executor::{Executor, WasmExecutor},
     },
-    lazy_loading::backend::new_backend as new_lazy_loading_backend,
 };
 use parking_lot::Mutex;
 use polkadot_sdk::{
-    sp_runtime::traits::Header as HeaderT,
     parachains_common::opaque::{Block, Header},
     sc_chain_spec::get_extension,
     sc_client_api::{BadBlocks, ForkBlocks, execution_extensions::ExecutionExtensions},
     sc_service::{self, KeystoreContainer, LocalCallExecutor, TaskManager},
     sp_keystore::KeystorePtr,
+    sp_runtime::traits::Header as HeaderT,
 };
 use std::{collections::HashMap, sync::Arc};
 use substrate_runtime::RuntimeApi;
@@ -27,8 +27,13 @@ pub fn new_client(
     executor: WasmExecutor,
     storage_overrides: Arc<Mutex<StorageOverrides>>,
 ) -> Result<(Arc<Client>, Arc<Backend>, KeystorePtr, TaskManager), sc_service::error::Error> {
-
-    let checkpoint = Header::new(genesis_block_number.try_into().unwrap_or(0), Default::default(), Default::default(), Default::default(), Default::default());
+    let checkpoint = Header::new(
+        genesis_block_number.try_into().unwrap_or(0),
+        Default::default(),
+        Default::default(),
+        Default::default(),
+        Default::default(),
+    );
 
     let backend = new_lazy_loading_backend(None, checkpoint)?;
 

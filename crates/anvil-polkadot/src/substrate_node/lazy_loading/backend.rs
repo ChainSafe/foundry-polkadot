@@ -1,6 +1,5 @@
-use super::{
-    rpc_client::RPCClient,
-};
+use super::rpc_client::RPCClient;
+use alloy_primitives::hex;
 use polkadot_sdk::{
     sc_client_api::{
         StorageKey, TrieCacheContext, UsageInfo,
@@ -30,7 +29,6 @@ use std::{
     ptr,
     sync::Arc,
 };
-use alloy_primitives::hex;
 
 struct PendingBlock<B: BlockT> {
     block: StoredBlock<B>,
@@ -114,7 +112,7 @@ impl<Block: BlockT + DeserializeOwned> Blockchain<Block> {
             target: super::LAZY_LOADING_LOG_TARGET,
             "🏗️  Creating new Blockchain storage (empty)"
         );
-        
+
         let storage = Arc::new(parking_lot::RwLock::new(BlockchainStorage {
             blocks: HashMap::new(),
             hashes: HashMap::new(),
@@ -143,9 +141,9 @@ impl<Block: BlockT + DeserializeOwned> Blockchain<Block> {
                     target: super::LAZY_LOADING_LOG_TARGET,
                     "Looking up block hash for number={}", n
                 );
-                
+
                 let block_hash = self.storage.read().hashes.get(&n).cloned();
-                
+
                 log::info!(
                     target: super::LAZY_LOADING_LOG_TARGET,
                     "Lookup result: number={}, found={}, total_hashes={}",
@@ -153,7 +151,7 @@ impl<Block: BlockT + DeserializeOwned> Blockchain<Block> {
                     block_hash.is_some(),
                     self.storage.read().hashes.len()
                 );
-                
+
                 match block_hash {
                     None => {
                         log::info!(
@@ -183,7 +181,7 @@ impl<Block: BlockT + DeserializeOwned> Blockchain<Block> {
         new_state: NewBlockState,
     ) -> sp_blockchain::Result<()> {
         let number = *header.number();
-        
+
         log::info!(
             target: super::LAZY_LOADING_LOG_TARGET,
             "Inserting block: number={}, hash={:?}, new_state={:?}",
@@ -191,17 +189,17 @@ impl<Block: BlockT + DeserializeOwned> Blockchain<Block> {
             hash,
             new_state
         );
-        
+
         if new_state.is_best() {
             self.apply_head(&header)?;
         }
 
         let mut storage = self.storage.write();
-        
+
         // Always insert the block into blocks and hashes storage
         storage.blocks.insert(hash, StoredBlock::new(header.clone(), body, justifications));
         storage.hashes.insert(number, hash);
-        
+
         log::info!(
             target: super::LAZY_LOADING_LOG_TARGET,
             "Block inserted successfully: number={}, hash={:?}. Total blocks={}, Total hashes={}",
@@ -210,17 +208,17 @@ impl<Block: BlockT + DeserializeOwned> Blockchain<Block> {
             storage.blocks.len(),
             storage.hashes.len()
         );
-        
+
         // Set genesis_hash only for the first block inserted
         if storage.blocks.len() == 1 {
             storage.genesis_hash = hash;
         }
-        
+
         // Update leaves for non-genesis blocks
         if storage.blocks.len() > 1 {
             storage.leaves.import(hash, number, *header.parent_hash());
         }
-        
+
         // Finalize block only if explicitly requested via new_state
         if let NewBlockState::Final = new_state {
             storage.finalized_hash = hash;
@@ -400,7 +398,7 @@ impl<Block: BlockT + DeserializeOwned> HeaderBackend<Block> for Blockchain<Block
         } else {
             Some((storage.finalized_hash, storage.finalized_number))
         };
-        
+
         log::info!(
             target: super::LAZY_LOADING_LOG_TARGET,
             "📊 Blockchain::info() - blocks={}, best_hash={:?}, best_number={}, genesis_hash={:?}, finalized_hash={:?}, finalized_number={}, finalized_state={:?}",
@@ -412,7 +410,7 @@ impl<Block: BlockT + DeserializeOwned> HeaderBackend<Block> for Blockchain<Block
             storage.finalized_number,
             finalized_state
         );
-        
+
         blockchain::Info {
             best_hash: storage.best_hash,
             best_number: storage.best_number,
@@ -736,7 +734,10 @@ impl<Block: BlockT + DeserializeOwned> sp_state_machine::StorageIterator<Hashing
 
         let remote_fetch =
             |key: Option<StorageKey>, start_key: Option<StorageKey>, block: Option<Block::Hash>| {
-                backend.rpc().and_then(|rpc| rpc.storage_keys_paged(key, 5, start_key, block).ok()).and_then(|keys| keys.first().map(|key| key.clone()))
+                backend
+                    .rpc()
+                    .and_then(|rpc| rpc.storage_keys_paged(key, 5, start_key, block).ok())
+                    .and_then(|keys| keys.first().map(|key| key.clone()))
             };
 
         let prefix = self.args.prefix.clone().map(|k| StorageKey(k));
@@ -837,7 +838,10 @@ impl<Block: BlockT + DeserializeOwned> sp_state_machine::StorageIterator<Hashing
 
         let remote_fetch =
             |key: Option<StorageKey>, start_key: Option<StorageKey>, block: Option<Block::Hash>| {
-                backend.rpc().and_then(|rpc| rpc.storage_keys_paged(key, 5, start_key, block).ok()).and_then(|keys| keys.first().map(|key| key.clone()))
+                backend
+                    .rpc()
+                    .and_then(|rpc| rpc.storage_keys_paged(key, 5, start_key, block).ok())
+                    .and_then(|keys| keys.first().map(|key| key.clone()))
             };
 
         let prefix = self.args.prefix.clone().map(|k| StorageKey(k));
@@ -1002,11 +1006,8 @@ impl<Block: BlockT + DeserializeOwned> sp_state_machine::Backend<HashingFor<Bloc
             Ok(Some(data)) => Some(data),
             _ if !self.removed_keys.read().contains_key(key) => {
                 // Only try remote fetch if RPC client is available
-                let result = if self.rpc().is_some() {
-                    remote_fetch(Some(self.fork_block))
-                } else {
-                    None
-                };
+                let result =
+                    if self.rpc().is_some() { remote_fetch(Some(self.fork_block)) } else { None };
 
                 // Cache state
                 drop(readable_db);
@@ -1103,7 +1104,9 @@ impl<Block: BlockT + DeserializeOwned> sp_state_machine::Backend<HashingFor<Bloc
     ) -> Result<Option<sp_state_machine::StorageKey>, Self::Error> {
         let remote_fetch = |block: Option<Block::Hash>| {
             let start_key = Some(StorageKey(key.to_vec()));
-            self.rpc().and_then(|rpc| rpc.storage_keys_paged(start_key.clone(), 2, None, block).ok()).and_then(|keys| keys.last().map(|key| key.clone()))
+            self.rpc()
+                .and_then(|rpc| rpc.storage_keys_paged(start_key.clone(), 2, None, block).ok())
+                .and_then(|keys| keys.last().map(|key| key.clone()))
         };
 
         let maybe_next_key = if self.before_fork {
@@ -1375,7 +1378,9 @@ impl<Block: BlockT + DeserializeOwned> backend::Backend<Block> for Backend<Block
         let (backend, should_write) =
             self.states.read().get(&hash).cloned().map(|state| Ok((state, false))).unwrap_or_else(
                 || {
-                    self.rpc().and_then(|rpc| rpc.header(Some(hash)).ok()).flatten()
+                    self.rpc()
+                        .and_then(|rpc| rpc.header(Some(hash)).ok())
+                        .flatten()
                         .ok_or(sp_blockchain::Error::UnknownBlock(
                             format!("Failed to fetch block header: {:?}", hash).into(),
                         ))

@@ -1,10 +1,10 @@
 use crate::{
     AnvilNodeConfig,
     substrate_node::{
+        lazy_loading::backend::Backend as LazyLoadingBackend,
         mining_engine::{MiningEngine, MiningMode, run_mining_engine},
         rpc::spawn_rpc_server,
         service::consensus::SameSlotConsensusDataProvider,
-        lazy_loading::backend::Backend as LazyLoadingBackend,
     },
 };
 use anvil::eth::backend::time::TimeManager;
