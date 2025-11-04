@@ -95,9 +95,16 @@ pub fn new_client(
             })?
             .ok_or_else(|| sp_blockchain::Error::Backend("fork checkpoint not found".into()))?;
 
-        (Some(Arc::new(rpc_client)), checkpoint.block.header().clone())
+        let checkpoint_header = checkpoint.block.header().clone();
+        
+        log::info!(
+            "🔗 Forking from block #{} (hash: {:?})",
+            checkpoint_header.number(),
+            checkpoint_header.hash()
+        );
+
+        (Some(Arc::new(rpc_client)), checkpoint_header)
     } else {
-        // TODO: check this is correct
         let checkpoint = Header::new(
             genesis_block_number.try_into().unwrap_or(0),
             Default::default(),
@@ -109,15 +116,29 @@ pub fn new_client(
         (None, checkpoint)
     };
     
-    let backend = new_lazy_loading_backend(rpc_client, checkpoint)?;
+    let backend = new_lazy_loading_backend(rpc_client.clone(), checkpoint.clone())?;
 
-    let genesis_block_builder = DevelopmentGenesisBlockBuilder::new(
-        genesis_block_number,
-        config.chain_spec.as_storage_builder(),
-        !config.no_genesis(),
-        backend.clone(),
-        executor.clone(),
-    )?;
+    // In fork mode, use the checkpoint block as genesis
+    // In normal mode, create a new genesis block
+    let genesis_block_builder = if rpc_client.is_some() {
+        // Fork mode: use checkpoint block as genesis
+        DevelopmentGenesisBlockBuilder::new_with_checkpoint(
+            config.chain_spec.as_storage_builder(),
+            !config.no_genesis(),
+            backend.clone(),
+            executor.clone(),
+            checkpoint.clone(),
+        )?
+    } else {
+        // Normal mode: create standard genesis
+        DevelopmentGenesisBlockBuilder::new(
+            genesis_block_number,
+            config.chain_spec.as_storage_builder(),
+            !config.no_genesis(),
+            backend.clone(),
+            executor.clone(),
+        )?
+    };
 
     let keystore_container = KeystoreContainer::new(&config.keystore)?;
 
