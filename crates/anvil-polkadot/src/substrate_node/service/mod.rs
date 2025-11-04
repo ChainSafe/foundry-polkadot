@@ -2,7 +2,7 @@ use crate::{
     AnvilNodeConfig,
     substrate_node::{
         lazy_loading::{
-            backend::Backend as LazyLoadingBackend, rpc_client::RPC as LazyLoadingRPCClient,
+            backend::Backend as LazyLoadingBackend,
         },
         mining_engine::{MiningEngine, MiningMode, run_mining_engine},
         rpc::spawn_rpc_server,
@@ -14,41 +14,24 @@ use polkadot_sdk::{
     cumulus_client_parachain_inherent::MockValidationDataInherentDataProvider,
     cumulus_primitives_aura::AuraUnincludedSegmentApi,
     parachains_common::{Hash, SLOT_DURATION, opaque::Block},
-    polkadot_primitives::{self, Id, PersistedValidationData, UpgradeGoAhead},
-    sc_basic_authorship, sc_chain_spec, sc_consensus,
-    sc_consensus_aura::{self, AuraApi},
+    polkadot_primitives::{self, Id},
+    sc_basic_authorship, sc_consensus,
+    sc_consensus_aura,
     sc_consensus_manual_seal::{
-        ManualSealParams, consensus::aura::AuraConsensusDataProvider, run_manual_seal,
+        ManualSealParams, run_manual_seal,
     },
-    sc_executor,
     sc_service::{
         self, Configuration, RpcHandlers, SpawnTaskHandle, TaskManager,
         error::Error as ServiceError,
     },
-    sc_transaction_pool::{self, TransactionPoolWrapper},
+    sc_transaction_pool,
     sp_api::{ApiExt, ProvideRuntimeApi},
     sp_arithmetic::traits::UniqueSaturatedInto,
-    sp_core::H256,
-    sp_io,
-    sp_keystore::KeystorePtr,
     sp_timestamp,
-    sp_wasm_interface::ExtendedHostFunctions,
-    substrate_frame_rpc_system::SystemApiServer,
 };
-use std::marker::PhantomData;
 
 use std::sync::Arc;
-use tokio::runtime::Builder as TokioRtBuilder;
 use tokio_stream::wrappers::ReceiverStream;
-
-use serde_json::{Map, Value, json};
-
-use indicatif::{ProgressBar, ProgressStyle};
-use jsonrpsee::{
-    core::client::ClientT as JsonClientT,
-    http_client::{HeaderMap, HeaderValue, HttpClient, HttpClientBuilder},
-    rpc_params,
-};
 
 pub use backend::{BackendError, BackendWithOverlay, StorageOverrides};
 pub use client::Client;

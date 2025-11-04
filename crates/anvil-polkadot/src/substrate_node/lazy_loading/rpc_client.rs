@@ -5,7 +5,7 @@ use polkadot_sdk::{
     sp_api::__private::HeaderT,
     sp_core::H256,
     sp_rpc::{list::ListOrValue, number::NumberOrHex},
-    sp_runtime::{self, generic::SignedBlock, traits::Block as BlockT},
+    sp_runtime::{generic::SignedBlock, traits::Block as BlockT},
     sp_state_machine,
     sp_storage::{StorageData, StorageKey},
     substrate_rpc_client,

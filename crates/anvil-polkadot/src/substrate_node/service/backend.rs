@@ -1,6 +1,6 @@
 use crate::substrate_node::{
     lazy_loading::{
-        backend::Blockchain as LazyLoadingBlockchain, rpc_client::RPC as LazyLoadingRPCClient,
+        backend::Blockchain as LazyLoadingBlockchain,
     },
     service::{
         Backend,
@@ -15,7 +15,6 @@ use parking_lot::Mutex;
 use polkadot_sdk::{
     parachains_common::{AccountId, Hash, opaque::Block},
     sc_client_api::{Backend as BackendT, StateBackend, TrieCacheContext},
-    sc_client_db::BlockchainDb,
     sp_blockchain,
     sp_core::{H160, H256},
     sp_io::hashing::blake2_256,

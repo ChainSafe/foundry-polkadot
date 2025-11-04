@@ -1,5 +1,5 @@
 use super::{
-    rpc_client::{RPC, RPCClient},
+    rpc_client::RPCClient,
 };
 use polkadot_sdk::{
     sc_client_api::{
@@ -8,12 +8,12 @@ use polkadot_sdk::{
         blockchain::{self, BlockStatus, HeaderBackend},
         leaves::LeafSet,
     },
-    sc_service::{Configuration, Error},
+    sc_service::Error,
     sp_blockchain::{self, CachedHeaderMetadata, HeaderMetadata},
     sp_core::{self, H256, offchain::storage::InMemOffchainStorage, storage::well_known_keys},
     sp_runtime::{
         Justification, Justifications, StateVersion, Storage,
-        generic::{BlockId, SignedBlock},
+        generic::BlockId,
         traits::{Block as BlockT, HashingFor, Header as HeaderT, NumberFor, Zero},
     },
     sp_state_machine::{
@@ -29,7 +29,6 @@ use std::{
     marker::PhantomData,
     ptr,
     sync::Arc,
-    time::Duration,
 };
 
 struct PendingBlock<B: BlockT> {

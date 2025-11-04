@@ -7,6 +7,7 @@ use crate::{
             Backend,
             backend::StorageOverrides,
             executor::{Executor, WasmExecutor},
+            storage::well_known_keys,
         },
     },
 };
@@ -23,11 +24,10 @@ use polkadot_sdk::{
         generic::SignedBlock,
     },
     sp_blockchain,
-    sp_genesis_builder,
+    sp_storage::StorageKey,
 };
 use std::{collections::HashMap, sync::Arc, time::Duration};
 use substrate_runtime::RuntimeApi;
-use substrate_runtime::WASM_BINARY;
 
 pub type Client = sc_service::client::Client<Backend, Executor, Block, RuntimeApi>;
 
@@ -66,9 +66,18 @@ pub fn new_client(
             sp_blockchain::Error::Backend(format!("failed to fetch system_properties: {e}"))
         })?;
 
-        // TODO: retreive and replace wasm with the forked wasm
+        // Fetch the WASM runtime from the forked chain at the checkpoint block
+        let block_hash: Option<<Block as BlockT>::Hash> = anvil_config.fork_block_hash.map(Into::into);
+        
+        let wasm_binary = rpc_client
+            .storage(StorageKey(well_known_keys::CODE.to_vec()), block_hash)
+            .map_err(|e| {
+                sp_blockchain::Error::Backend(format!("failed to fetch runtime code: {e}"))
+            })?
+            .map(|data| data.0).expect("WASM binary not found in forked chain");
+
         let chain_spec = GenericChainSpec::<NoExtension, ()>::builder(
-            WASM_BINARY.expect("WASM binary was not build, please build it!"),
+            &wasm_binary,
             None,
         )
         .with_name(chain_name.as_str())
@@ -78,8 +87,6 @@ pub fn new_client(
         .build();
 
         config.chain_spec = Box::new(chain_spec);
-
-        let block_hash: Option<<Block as BlockT>::Hash> = anvil_config.fork_block_hash.map(Into::into);
 
         let checkpoint: SignedBlock<Block> = rpc_client
             .block(block_hash)

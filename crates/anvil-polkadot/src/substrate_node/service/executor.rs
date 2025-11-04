@@ -11,7 +11,7 @@ use polkadot_sdk::{
     sc_service,
     sp_api::{CallContext, ProofRecorder},
     sp_blockchain::{self, HeaderBackend},
-    sp_core, sp_externalities, sp_io,
+    sp_core, sp_externalities,
     sp_runtime::{generic::BlockId, traits::HashingFor},
     sp_state_machine::{OverlayedChanges, StorageProof},
     sp_storage::ChildInfo,

@@ -59,6 +59,9 @@ pub mod well_known_keys {
         sp_core::{H160, H256, blake2_128, twox_128},
     };
 
+    // Runtime code key: `:code` - where the WASM runtime is stored
+    pub const CODE: &[u8] = b":code";
+
     // Hex-encoded key: 0xc2261276cc9d1f8598ea4b6a74b15c2f57c875e4cff74148e4628f264b974c80
     pub const TOTAL_ISSUANCE: [u8; 32] = [
         194, 38, 18, 118, 204, 157, 31, 133, 152, 234, 75, 106, 116, 177, 92, 47, 87, 200, 117,
