@@ -139,20 +139,7 @@ impl<Block: BlockT + DeserializeOwned> Blockchain<Block> {
         match id {
             BlockId::Hash(h) => Some(h),
             BlockId::Number(n) => {
-                log::info!(
-                    target: super::LAZY_LOADING_LOG_TARGET,
-                    "Looking up block hash for number={}", n
-                );
-                
                 let block_hash = self.storage.read().hashes.get(&n).cloned();
-                
-                log::info!(
-                    target: super::LAZY_LOADING_LOG_TARGET,
-                    "Lookup result: number={}, found={}, total_hashes={}",
-                    n,
-                    block_hash.is_some(),
-                    self.storage.read().hashes.len()
-                );
                 
                 match block_hash {
                     None => {
@@ -400,18 +387,6 @@ impl<Block: BlockT + DeserializeOwned> HeaderBackend<Block> for Blockchain<Block
         } else {
             Some((storage.finalized_hash, storage.finalized_number))
         };
-        
-        log::info!(
-            target: super::LAZY_LOADING_LOG_TARGET,
-            "📊 Blockchain::info() - blocks={}, best_hash={:?}, best_number={}, genesis_hash={:?}, finalized_hash={:?}, finalized_number={}, finalized_state={:?}",
-            storage.blocks.len(),
-            storage.best_hash,
-            storage.best_number,
-            storage.genesis_hash,
-            storage.finalized_hash,
-            storage.finalized_number,
-            finalized_state
-        );
         
         blockchain::Info {
             best_hash: storage.best_hash,
