@@ -8,7 +8,6 @@ use std::path::PathBuf;
 use substrate_runtime::WASM_BINARY;
 
 pub mod backend;
-pub mod call_executor;
 pub mod rpc_client;
 
 pub const LAZY_LOADING_LOG_TARGET: &str = "lazy-loading";
