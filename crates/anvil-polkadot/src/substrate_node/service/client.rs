@@ -75,7 +75,6 @@ pub fn new_client(
         .with_id("lazy_loading")
         .with_properties(chain_properties)
         .with_chain_type(ChainType::Development)
-        .with_genesis_config_preset_name(sp_genesis_builder::DEV_RUNTIME_PRESET)
         .build();
 
         config.chain_spec = Box::new(chain_spec);

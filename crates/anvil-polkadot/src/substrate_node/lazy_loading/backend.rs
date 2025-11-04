@@ -221,7 +221,7 @@ impl<Block: BlockT + DeserializeOwned> Blockchain<Block> {
     pub fn blocks_count(&self) -> usize {
         let count = self.storage.read().blocks.len();
 
-        log::debug!(
+        log::info!(
             target: super::LAZY_LOADING_LOG_TARGET,
             "Total number of blocks: {:?}",
             count
@@ -930,11 +930,13 @@ pub struct ForkedLazyBackend<Block: BlockT + DeserializeOwned> {
 
 impl<Block: BlockT + DeserializeOwned> ForkedLazyBackend<Block> {
     fn update_storage(&self, key: &[u8], value: &Option<Vec<u8>>) {
-        if let Some(val) = value {
-            let mut entries: HashMap<Option<ChildInfo>, StorageCollection> = Default::default();
-            entries.insert(None, vec![(key.to_vec(), Some(val.clone()))]);
-
-            self.db.write().insert(entries, StateVersion::V1);
+        let mut entries: HashMap<Option<ChildInfo>, StorageCollection> = Default::default();
+        entries.insert(None, vec![(key.to_vec(), value.clone())]);
+        self.db.write().insert(entries, StateVersion::V1);
+        
+        // If value is None, mark as removed to avoid repeated remote fetches
+        if value.is_none() {
+            self.removed_keys.write().insert(key.to_vec(), ());
         }
     }
 
@@ -975,12 +977,27 @@ impl<Block: BlockT + DeserializeOwned> sp_state_machine::Backend<HashingFor<Bloc
             _ if !self.removed_keys.read().contains_key(key) => {
                 // Only try remote fetch if RPC client is available
                 let result = if self.rpc().is_some() {
-                    remote_fetch(Some(self.fork_block))
+                    log::info!(
+                        target: super::LAZY_LOADING_LOG_TARGET,
+                        "🔄 Fetching key {} from fork checkpoint",
+                        hex::encode(key)
+                    );
+                    
+                    let fetched = remote_fetch(Some(self.fork_block));
+                    
+                    log::info!(
+                        target: super::LAZY_LOADING_LOG_TARGET,
+                        "✅ Key {} {}",
+                        hex::encode(key),
+                        if fetched.is_some() { "found" } else { "not found (cached)" }
+                    );
+                    
+                    fetched
                 } else {
                     None
                 };
 
-                // Cache state
+                // Cache state (including None values to avoid repeated fetches)
                 drop(readable_db);
                 self.update_storage(key, &result);
 
@@ -1271,17 +1288,23 @@ impl<Block: BlockT + DeserializeOwned> backend::Backend<Block> for Backend<Block
                 }
             }
 
+            // Always clone and apply storage_updates normally
             let new_db = old_state.db.clone();
-            new_db
-                .write()
-                .insert(vec![(None::<ChildInfo>, operation.storage_updates)], StateVersion::V1);
+            if !operation.storage_updates.is_empty() {
+                new_db.write().insert(vec![(None::<ChildInfo>, operation.storage_updates)], StateVersion::V1);
+            }
+            
+            // For genesis block in fork mode, mark as before_fork=false
+            // This allows lazy loading to fetch missing keys from the fork checkpoint
+            let is_genesis = *header.number() == Zero::zero();
+            let is_fork_mode = self.rpc_client.is_some();
             let new_state = ForkedLazyBackend {
                 rpc_client: self.rpc_client.clone(),
                 block_hash: Some(hash.clone()),
                 fork_block: self.fork_checkpoint.hash(),
                 db: new_db,
                 removed_keys: new_removed_keys,
-                before_fork: operation.before_fork,
+                before_fork: if is_genesis && is_fork_mode { false } else { operation.before_fork },
             };
             self.states.write().insert(hash, new_state);
 
@@ -1562,6 +1585,14 @@ mod tests {
                 key: StorageKey,
                 at: Option<Block::Hash>,
             ) -> Result<Option<StorageData>, jsonrpsee::core::ClientError> {
+
+                log::info!(
+                    target: super::LAZY_LOADING_LOG_TARGET,
+                    "Get storage: key={:?}, at={:?}",
+                    key,
+                    at
+                );
+
                 self.counters.storage_calls.fetch_add(1, Ordering::Relaxed);
                 let map = self.storage.read();
                 Ok(map.get(&(at.unwrap_or_default(), key.clone())).cloned())
