@@ -755,21 +755,29 @@ impl<Block: BlockT + DeserializeOwned> sp_state_machine::StorageIterator<Hashing
                     .flatten()
             }
         } else {
-            let mut iter_args = sp_state_machine::backend::IterArgs::default();
-            iter_args.prefix = self.args.prefix.as_deref();
-            iter_args.start_at = self.args.start_at.as_deref();
-            iter_args.stop_on_incomplete_database = true;
+            // First, try to get next key from local DB
+            let next_storage_key = if let Some(ref start) = self.args.start_at {
+                // If we have a start_at, use next_storage_key to get the next one after it
+                backend.db.read().next_storage_key(start).ok().flatten()
+            } else {
+                // No start_at, use raw_iter to get the first key with the prefix
+                let mut iter_args = sp_state_machine::backend::IterArgs::default();
+                iter_args.prefix = self.args.prefix.as_deref();
+                iter_args.stop_on_incomplete_database = true;
 
-            let readable_db = backend.db.read();
-            let next_storage_key = readable_db
-                .raw_iter(iter_args)
-                .map(|mut iter| iter.next_key(&readable_db))
-                .map(|op| op.and_then(|result| result.ok()))
-                .ok()
-                .flatten();
+                let readable_db = backend.db.read();
+                readable_db
+                    .raw_iter(iter_args)
+                    .map(|mut iter| iter.next_key(&readable_db))
+                    .map(|op| op.and_then(|result| result.ok()))
+                    .ok()
+                    .flatten()
+            };
 
-            // IMPORTANT: free storage read lock
-            drop(readable_db);
+            // Filter by prefix if necessary
+            let next_storage_key = next_storage_key.filter(|key| {
+                prefix.as_ref().map(|p| key.starts_with(&p.0)).unwrap_or(true)
+            });
 
             let removed_key = start_key
                 .clone()
@@ -857,21 +865,29 @@ impl<Block: BlockT + DeserializeOwned> sp_state_machine::StorageIterator<Hashing
                     .flatten()
             }
         } else {
-            let mut iter_args = sp_state_machine::backend::IterArgs::default();
-            iter_args.prefix = self.args.prefix.as_deref();
-            iter_args.start_at = self.args.start_at.as_deref();
-            iter_args.stop_on_incomplete_database = true;
+            // First, try to get next key from local DB
+            let next_storage_key = if let Some(ref start) = self.args.start_at {
+                // If we have a start_at, use next_storage_key to get the next one after it
+                backend.db.read().next_storage_key(start).ok().flatten()
+            } else {
+                // No start_at, use raw_iter to get the first key with the prefix
+                let mut iter_args = sp_state_machine::backend::IterArgs::default();
+                iter_args.prefix = self.args.prefix.as_deref();
+                iter_args.stop_on_incomplete_database = true;
 
-            let readable_db = backend.db.read();
-            let next_storage_key = readable_db
-                .raw_iter(iter_args)
-                .map(|mut iter| iter.next_key(&readable_db))
-                .map(|op| op.and_then(|result| result.ok()))
-                .ok()
-                .flatten();
+                let readable_db = backend.db.read();
+                readable_db
+                    .raw_iter(iter_args)
+                    .map(|mut iter| iter.next_key(&readable_db))
+                    .map(|op| op.and_then(|result| result.ok()))
+                    .ok()
+                    .flatten()
+            };
 
-            // IMPORTANT: free storage read lock
-            drop(readable_db);
+            // Filter by prefix if necessary
+            let next_storage_key = next_storage_key.filter(|key| {
+                prefix.as_ref().map(|p| key.starts_with(&p.0)).unwrap_or(true)
+            });
 
             let removed_key = start_key
                 .clone()
@@ -1780,12 +1796,18 @@ mod tests {
 
         // Preload local DB with key "a1"
         state.update_storage(b"a1", &Some(b"v1".to_vec()));
+        
+        // Ensure storage_root is computed to make the key visible to raw_iter
+        let _ = state.db.write().storage_root(
+            vec![(b"a1".as_ref(), Some(b"v1".as_ref()))].into_iter(),
+            StateVersion::V1
+        );
 
-        // Remote has "a2" under same prefix at fork block
+        // Remote has only "a2" under same prefix at fork block (not "a1")
         rpc.put_storage_keys_page(
             cp.hash(),
             b"a".to_vec(),
-            vec![StorageKey(b"a1".to_vec()), StorageKey(b"a2".to_vec())],
+            vec![StorageKey(b"a2".to_vec())],
         );
         rpc.put_storage(cp.hash(), StorageKey(b"a2".to_vec()), StorageData(b"v2".to_vec()));
 
