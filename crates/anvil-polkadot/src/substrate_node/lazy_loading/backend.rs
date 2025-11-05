@@ -48,35 +48,35 @@ impl<B: BlockT> StoredBlock<B> {
         just: Option<Justifications>,
     ) -> Self {
         match body {
-            Some(body) => StoredBlock::Full(B::new(header, body), just),
-            None => StoredBlock::Header(header, just),
+            Some(body) => Self::Full(B::new(header, body), just),
+            None => Self::Header(header, just),
         }
     }
 
     fn header(&self) -> &B::Header {
         match *self {
-            StoredBlock::Header(ref h, _) => h,
-            StoredBlock::Full(ref b, _) => b.header(),
+            Self::Header(ref h, _) => h,
+            Self::Full(ref b, _) => b.header(),
         }
     }
 
     fn justifications(&self) -> Option<&Justifications> {
         match *self {
-            StoredBlock::Header(_, ref j) | StoredBlock::Full(_, ref j) => j.as_ref(),
+            Self::Header(_, ref j) | Self::Full(_, ref j) => j.as_ref(),
         }
     }
 
     fn extrinsics(&self) -> Option<&[B::Extrinsic]> {
         match *self {
-            StoredBlock::Header(_, _) => None,
-            StoredBlock::Full(ref b, _) => Some(b.extrinsics()),
+            Self::Header(_, _) => None,
+            Self::Full(ref b, _) => Some(b.extrinsics()),
         }
     }
 
     fn into_inner(self) -> (B::Header, Option<Vec<B::Extrinsic>>, Option<Justifications>) {
         match self {
-            StoredBlock::Header(header, just) => (header, None, just),
-            StoredBlock::Full(block, just) => {
+            Self::Header(header, just) => (header, None, just),
+            Self::Full(block, just) => {
                 let (header, body) = block.deconstruct();
                 (header, Some(body), just)
             }
@@ -107,7 +107,7 @@ pub struct Blockchain<Block: BlockT + DeserializeOwned> {
 
 impl<Block: BlockT + DeserializeOwned> Blockchain<Block> {
     /// Create new in-memory blockchain storage.
-    fn new(rpc_client: Option<Arc<dyn RPCClient<Block>>>) -> Blockchain<Block> {
+    fn new(rpc_client: Option<Arc<dyn RPCClient<Block>>>) -> Self {
         log::info!(
             target: super::LAZY_LOADING_LOG_TARGET,
             "🏗️  Creating new Blockchain storage (empty)"
@@ -125,7 +125,7 @@ impl<Block: BlockT + DeserializeOwned> Blockchain<Block> {
             leaves: LeafSet::new(),
             aux: HashMap::new(),
         }));
-        Blockchain { rpc_client, storage }
+        Self { rpc_client, storage }
     }
     #[inline]
     fn rpc(&self) -> Option<&dyn RPCClient<Block>> {
@@ -139,10 +139,10 @@ impl<Block: BlockT + DeserializeOwned> Blockchain<Block> {
             BlockId::Number(n) => {
                 log::info!(
                     target: super::LAZY_LOADING_LOG_TARGET,
-                    "Looking up block hash for number={}", n
+                    "Looking up block hash for number={n}",
                 );
 
-                let block_hash = self.storage.read().hashes.get(&n).cloned();
+                let block_hash = self.storage.read().hashes.get(&n).copied();
 
                 log::info!(
                     target: super::LAZY_LOADING_LOG_TARGET,
@@ -156,7 +156,7 @@ impl<Block: BlockT + DeserializeOwned> Blockchain<Block> {
                     None => {
                         log::info!(
                             target: super::LAZY_LOADING_LOG_TARGET,
-                            "Block hash not found locally, trying RPC for number={}", n
+                            "Block hash not found locally, trying RPC for number={n}",
                         );
                         let block_hash =
                             self.rpc().and_then(|rpc| rpc.block_hash(Some(n)).ok().flatten());
@@ -184,10 +184,7 @@ impl<Block: BlockT + DeserializeOwned> Blockchain<Block> {
 
         log::info!(
             target: super::LAZY_LOADING_LOG_TARGET,
-            "Inserting block: number={}, hash={:?}, new_state={:?}",
-            number,
-            hash,
-            new_state
+            "Inserting block: number={number}, hash={hash:?}, new_state={new_state:?}",
         );
 
         if new_state.is_best() {
@@ -234,8 +231,7 @@ impl<Block: BlockT + DeserializeOwned> Blockchain<Block> {
 
         log::debug!(
             target: super::LAZY_LOADING_LOG_TARGET,
-            "Total number of blocks: {:?}",
-            count
+            "Total number of blocks: {count:?}",
         );
 
         count
@@ -273,7 +269,7 @@ impl<Block: BlockT + DeserializeOwned> Blockchain<Block> {
     pub fn set_head(&self, hash: Block::Hash) -> sp_blockchain::Result<()> {
         let header = self
             .header(hash)?
-            .ok_or_else(|| sp_blockchain::Error::UnknownBlock(format!("{}", hash)))?;
+            .ok_or_else(|| sp_blockchain::Error::UnknownBlock(format!("{hash:?}")))?;
 
         self.apply_head(&header)
     }
@@ -437,9 +433,9 @@ impl<Block: BlockT + DeserializeOwned> HeaderBackend<Block> for Blockchain<Block
         match self.rpc() {
             Some(rpc) => match rpc.block(Some(hash)) {
                 Ok(Some(block)) => Ok(Some(*block.block.header().number())),
-                err => Err(sp_blockchain::Error::UnknownBlock(
-                    format!("Failed to fetch block number from RPC: {:?}", err).into(),
-                )),
+                err => Err(sp_blockchain::Error::UnknownBlock(format!(
+                    "Failed to fetch block number from RPC: {err:?}"
+                ))),
             },
             None => Err(sp_blockchain::Error::UnknownBlock(
                 "RPC not configured to resolve block number".into(),
@@ -463,7 +459,7 @@ impl<Block: BlockT + DeserializeOwned> HeaderMetadata<Block> for Blockchain<Bloc
         hash: Block::Hash,
     ) -> Result<CachedHeaderMetadata<Block>, Self::Error> {
         self.header(hash)?.map(|header| CachedHeaderMetadata::from(&header)).ok_or_else(|| {
-            sp_blockchain::Error::UnknownBlock(format!("header not found: {}", hash))
+            sp_blockchain::Error::UnknownBlock(format!("header not found: {hash:?}"))
         })
     }
 
@@ -662,7 +658,7 @@ impl<Block: BlockT + DeserializeOwned> backend::BlockImportOperation<Block>
         update: StorageCollection,
         _child_update: ChildStorageCollection,
     ) -> sp_blockchain::Result<()> {
-        self.storage_updates = update.clone();
+        self.storage_updates = update;
         Ok(())
     }
 
@@ -707,10 +703,6 @@ pub struct RawIterArgs {
     ///
     /// This is inclusive and the iteration will include the key which is specified here.
     pub start_at: Option<Vec<u8>>,
-
-    /// If this is `true` then the iteration will *not* include
-    /// the key specified in `start_at`, if there is such a key.
-    pub start_at_exclusive: bool,
 }
 
 /// A raw iterator over the `BenchmarkingState`.
@@ -737,11 +729,11 @@ impl<Block: BlockT + DeserializeOwned> sp_state_machine::StorageIterator<Hashing
                 backend
                     .rpc()
                     .and_then(|rpc| rpc.storage_keys_paged(key, 5, start_key, block).ok())
-                    .and_then(|keys| keys.first().map(|key| key.clone()))
+                    .and_then(|keys| keys.first().cloned())
             };
 
-        let prefix = self.args.prefix.clone().map(|k| StorageKey(k));
-        let start_key = self.args.start_at.clone().map(|k| StorageKey(k));
+        let prefix = self.args.prefix.clone().map(StorageKey);
+        let start_key = self.args.start_at.clone().map(StorageKey);
 
         let maybe_next_key = if backend.before_fork {
             // If RPC client is available, fetch remotely
@@ -752,7 +744,6 @@ impl<Block: BlockT + DeserializeOwned> sp_state_machine::StorageIterator<Hashing
                 let mut iter_args = sp_state_machine::backend::IterArgs::default();
                 iter_args.prefix = self.args.prefix.as_deref();
                 iter_args.start_at = self.args.start_at.as_deref();
-                iter_args.start_at_exclusive = true;
                 iter_args.stop_on_incomplete_database = true;
 
                 let readable_db = backend.db.read();
@@ -767,7 +758,6 @@ impl<Block: BlockT + DeserializeOwned> sp_state_machine::StorageIterator<Hashing
             let mut iter_args = sp_state_machine::backend::IterArgs::default();
             iter_args.prefix = self.args.prefix.as_deref();
             iter_args.start_at = self.args.start_at.as_deref();
-            iter_args.start_at_exclusive = true;
             iter_args.stop_on_incomplete_database = true;
 
             let readable_db = backend.db.read();
@@ -804,9 +794,9 @@ impl<Block: BlockT + DeserializeOwned> sp_state_machine::StorageIterator<Hashing
         log::trace!(
             target: super::LAZY_LOADING_LOG_TARGET,
             "next_key: (prefix: {:?}, start_at: {:?}, next_key: {:?})",
-            self.args.prefix.clone().map(|key| hex::encode(key)),
-            self.args.start_at.clone().map(|key| hex::encode(key)),
-            maybe_next_key.clone().map(|key| hex::encode(key))
+            self.args.prefix.clone().map(hex::encode),
+            self.args.start_at.clone().map(hex::encode),
+            maybe_next_key.clone().map(hex::encode)
         );
 
         if let Some(next_key) = maybe_next_key {
@@ -841,11 +831,11 @@ impl<Block: BlockT + DeserializeOwned> sp_state_machine::StorageIterator<Hashing
                 backend
                     .rpc()
                     .and_then(|rpc| rpc.storage_keys_paged(key, 5, start_key, block).ok())
-                    .and_then(|keys| keys.first().map(|key| key.clone()))
+                    .and_then(|keys| keys.first().cloned())
             };
 
-        let prefix = self.args.prefix.clone().map(|k| StorageKey(k));
-        let start_key = self.args.start_at.clone().map(|k| StorageKey(k));
+        let prefix = self.args.prefix.clone().map(StorageKey);
+        let start_key = self.args.start_at.clone().map(StorageKey);
 
         let maybe_next_key = if backend.before_fork {
             // If RPC client is available, fetch remotely
@@ -856,7 +846,6 @@ impl<Block: BlockT + DeserializeOwned> sp_state_machine::StorageIterator<Hashing
                 let mut iter_args = sp_state_machine::backend::IterArgs::default();
                 iter_args.prefix = self.args.prefix.as_deref();
                 iter_args.start_at = self.args.start_at.as_deref();
-                iter_args.start_at_exclusive = true;
                 iter_args.stop_on_incomplete_database = true;
 
                 let readable_db = backend.db.read();
@@ -871,7 +860,6 @@ impl<Block: BlockT + DeserializeOwned> sp_state_machine::StorageIterator<Hashing
             let mut iter_args = sp_state_machine::backend::IterArgs::default();
             iter_args.prefix = self.args.prefix.as_deref();
             iter_args.start_at = self.args.start_at.as_deref();
-            iter_args.start_at_exclusive = true;
             iter_args.stop_on_incomplete_database = true;
 
             let readable_db = backend.db.read();
@@ -908,9 +896,9 @@ impl<Block: BlockT + DeserializeOwned> sp_state_machine::StorageIterator<Hashing
         log::trace!(
             target: super::LAZY_LOADING_LOG_TARGET,
             "next_pair: (prefix: {:?}, start_at: {:?}, next_key: {:?})",
-            self.args.prefix.clone().map(|key| hex::encode(key)),
-            self.args.start_at.clone().map(|key| hex::encode(key)),
-            maybe_next_key.clone().map(|key| hex::encode(key))
+            self.args.prefix.clone().map(hex::encode),
+            self.args.start_at.clone().map(hex::encode),
+            maybe_next_key.clone().map(hex::encode)
         );
 
         let maybe_value = maybe_next_key
@@ -927,11 +915,7 @@ impl<Block: BlockT + DeserializeOwned> sp_state_machine::StorageIterator<Hashing
                 .unwrap_or(false)
             {
                 self.args.start_at = Some(next_key.clone());
-
-                match maybe_value {
-                    Some(value) => Some(Ok((next_key, value))),
-                    _ => None,
-                }
+                maybe_value.map(|value| Ok((next_key, value)))
             } else {
                 self.complete = true;
                 None
@@ -1032,7 +1016,7 @@ impl<Block: BlockT + DeserializeOwned> sp_state_machine::Backend<HashingFor<Bloc
             match self.rpc() {
                 Some(rpc) => rpc
                     .storage_hash(StorageKey(key.to_vec()), block)
-                    .map_err(|e| format!("Failed to fetch storage hash from RPC: {:?}", e).into()),
+                    .map_err(|e| format!("Failed to fetch storage hash from RPC: {e:?}")),
                 None => Ok(None),
             }
         };
@@ -1106,7 +1090,7 @@ impl<Block: BlockT + DeserializeOwned> sp_state_machine::Backend<HashingFor<Bloc
             let start_key = Some(StorageKey(key.to_vec()));
             self.rpc()
                 .and_then(|rpc| rpc.storage_keys_paged(start_key.clone(), 2, None, block).ok())
-                .and_then(|keys| keys.last().map(|key| key.clone()))
+                .and_then(|keys| keys.last().cloned())
         };
 
         let maybe_next_key = if self.before_fork {
@@ -1140,7 +1124,7 @@ impl<Block: BlockT + DeserializeOwned> sp_state_machine::Backend<HashingFor<Bloc
             target: super::LAZY_LOADING_LOG_TARGET,
             "next_storage_key: (key: {:?}, next_key: {:?})",
             hex::encode(key),
-            maybe_next_key.clone().map(|key| hex::encode(key))
+            maybe_next_key.clone().map(hex::encode)
         );
 
         Ok(maybe_next_key)
@@ -1178,10 +1162,10 @@ impl<Block: BlockT + DeserializeOwned> sp_state_machine::Backend<HashingFor<Bloc
     }
 
     fn raw_iter(&self, args: sp_state_machine::IterArgs<'_>) -> Result<Self::RawIter, Self::Error> {
-        let mut clone: RawIterArgs = Default::default();
-        clone.start_at_exclusive = args.start_at_exclusive.clone();
-        clone.prefix = args.prefix.map(|v| v.to_vec());
-        clone.start_at = args.start_at.map(|v| v.to_vec());
+        let clone = RawIterArgs {
+            prefix: args.prefix.map(|v| v.to_vec()),
+            start_at: args.start_at.map(|v| v.to_vec()),
+        };
 
         Ok(RawIter::<Block> { args: clone, complete: false, _phantom: Default::default() })
     }
@@ -1219,7 +1203,7 @@ pub struct Backend<Block: BlockT + DeserializeOwned> {
 
 impl<Block: BlockT + DeserializeOwned> Backend<Block> {
     fn new(rpc_client: Option<Arc<dyn RPCClient<Block>>>, fork_checkpoint: Block::Header) -> Self {
-        Backend {
+        Self {
             rpc_client: rpc_client.clone(),
             states: Default::default(),
             blockchain: Blockchain::new(rpc_client),
@@ -1309,7 +1293,7 @@ impl<Block: BlockT + DeserializeOwned> backend::Backend<Block> for Backend<Block
                 .insert(vec![(None::<ChildInfo>, operation.storage_updates)], StateVersion::V1);
             let new_state = ForkedLazyBackend {
                 rpc_client: self.rpc_client.clone(),
-                block_hash: Some(hash.clone()),
+                block_hash: Some(hash),
                 fork_block: self.fork_checkpoint.hash(),
                 db: new_db,
                 removed_keys: new_removed_keys,
@@ -1381,9 +1365,9 @@ impl<Block: BlockT + DeserializeOwned> backend::Backend<Block> for Backend<Block
                     self.rpc()
                         .and_then(|rpc| rpc.header(Some(hash)).ok())
                         .flatten()
-                        .ok_or(sp_blockchain::Error::UnknownBlock(
-                            format!("Failed to fetch block header: {:?}", hash).into(),
-                        ))
+                        .ok_or(sp_blockchain::Error::UnknownBlock(format!(
+                            "Failed to fetch block header: {hash:?}"
+                        )))
                         .map(|header| {
                             let checkpoint = self.fork_checkpoint.clone();
                             let state = if header.number().gt(checkpoint.number()) {
@@ -1489,7 +1473,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mock_rpc::{RPC, TestBlock, TestHeader};
+    use mock_rpc::{Rpc, TestBlock, TestHeader};
     use polkadot_sdk::{
         sc_client_api::{Backend as BackendT, StateBackend},
         sp_runtime::{
@@ -1506,7 +1490,6 @@ mod tests {
 
     mod mock_rpc {
         use super::*;
-        use crate::substrate_node::lazy_loading::rpc_client;
         use polkadot_sdk::sp_runtime::{
             generic::{Block as GenericBlock, Header, SignedBlock},
             traits::Header as HeaderT,
@@ -1524,36 +1507,28 @@ mod tests {
             pub storage_keys_paged_calls: AtomicUsize,
             pub header_calls: AtomicUsize,
             pub block_calls: AtomicUsize,
-            pub block_hash_calls: AtomicUsize,
         }
 
         /// Mockable RPC with interior mutability.
+        #[allow(clippy::type_complexity)]
         #[derive(Clone, Default, Debug)]
-        pub struct RPC<Block: BlockT + DeserializeOwned> {
+        pub struct Rpc<Block: BlockT + DeserializeOwned> {
             pub counters: std::sync::Arc<Counters>,
             /// storage[(block_hash, key)] = value
-            pub storage: std::sync::Arc<
-                parking_lot::RwLock<BTreeMap<(Block::Hash, StorageKey), StorageData>>,
-            >,
+            pub storage: Arc<parking_lot::RwLock<BTreeMap<(Block::Hash, StorageKey), StorageData>>>,
             /// storage_hash[(block_hash, key)] = hash
-            pub storage_hashes: std::sync::Arc<
-                parking_lot::RwLock<BTreeMap<(Block::Hash, StorageKey), Block::Hash>>,
-            >,
+            pub storage_hashes:
+                Arc<parking_lot::RwLock<BTreeMap<(Block::Hash, StorageKey), Block::Hash>>>,
             /// storage_keys_paged[(block_hash, (prefix,start))] = Vec<keys>
-            pub storage_keys_pages: std::sync::Arc<
-                parking_lot::RwLock<BTreeMap<(Block::Hash, Vec<u8>), Vec<StorageKey>>>,
-            >,
+            pub storage_keys_pages:
+                Arc<parking_lot::RwLock<BTreeMap<(Block::Hash, Vec<u8>), Vec<StorageKey>>>>,
             /// headers[hash] = header
-            pub headers: std::sync::Arc<parking_lot::RwLock<BTreeMap<Block::Hash, Block::Header>>>,
+            pub headers: Arc<parking_lot::RwLock<BTreeMap<Block::Hash, Block::Header>>>,
             /// blocks[hash] = SignedBlock
-            pub blocks:
-                std::sync::Arc<parking_lot::RwLock<BTreeMap<Block::Hash, SignedBlock<Block>>>>,
-            /// block_hash_by_number[n] = hash
-            pub block_hash_by_number:
-                std::sync::Arc<parking_lot::RwLock<BTreeMap<u64, Block::Hash>>>,
+            pub blocks: Arc<parking_lot::RwLock<BTreeMap<Block::Hash, SignedBlock<Block>>>>,
         }
 
-        impl<Block: BlockT + DeserializeOwned> RPC<Block> {
+        impl<Block: BlockT + DeserializeOwned> Rpc<Block> {
             pub fn new() -> Self {
                 Self {
                     counters: std::sync::Arc::new(Counters::default()),
@@ -1564,9 +1539,6 @@ mod tests {
                     )),
                     headers: std::sync::Arc::new(parking_lot::RwLock::new(BTreeMap::new())),
                     blocks: std::sync::Arc::new(parking_lot::RwLock::new(BTreeMap::new())),
-                    block_hash_by_number: std::sync::Arc::new(parking_lot::RwLock::new(
-                        BTreeMap::new(),
-                    )),
                 }
             }
 
@@ -1590,7 +1562,7 @@ mod tests {
             }
         }
 
-        impl<Block: BlockT + DeserializeOwned> RPCClient<Block> for RPC<Block> {
+        impl<Block: BlockT + DeserializeOwned> RPCClient<Block> for Rpc<Block> {
             fn storage(
                 &self,
                 key: StorageKey,
@@ -1598,7 +1570,7 @@ mod tests {
             ) -> Result<Option<StorageData>, jsonrpsee::core::ClientError> {
                 self.counters.storage_calls.fetch_add(1, Ordering::Relaxed);
                 let map = self.storage.read();
-                Ok(map.get(&(at.unwrap_or_default(), key.clone())).cloned())
+                Ok(map.get(&(at.unwrap_or_default(), key)).cloned())
             }
 
             fn storage_hash(
@@ -1609,7 +1581,7 @@ mod tests {
                 self.counters.storage_hash_calls.fetch_add(1, Ordering::Relaxed);
                 let bh = at.unwrap_or_default();
                 let map = self.storage_hashes.read();
-                Ok(map.get(&(bh, key.clone())).cloned())
+                Ok(map.get(&(bh, key)).copied())
             }
 
             fn storage_keys_paged(
@@ -1625,31 +1597,25 @@ mod tests {
                 use std::cmp::min;
 
                 let bh = at.unwrap_or_default();
-                let prefix = key.map(|k| k.0).unwrap_or_default(); // ✅ usar el prefix correcto
+                let prefix = key.map(|k| k.0).unwrap_or_default();
                 let start = start_key.map(|k| k.0);
 
                 let map = self.storage_keys_pages.read();
                 let mut all = map.get(&(bh, prefix.clone())).cloned().unwrap_or_default();
 
-                // Asegurar orden determinista (lexicográfico por bytes)
                 all.sort_by(|a, b| a.0.cmp(&b.0));
 
-                // Filtrar por prefix (defensivo)
                 let mut filtered: Vec<StorageKey> =
                     all.into_iter().filter(|k| k.0.starts_with(&prefix)).collect();
 
-                // Aplicar start_key EXCLUSIVO: devolver solo las > start
                 if let Some(s) = start {
-                    // buscar posición exacta, si existe
                     if let Some(pos) = filtered.iter().position(|k| k.0 == s) {
                         filtered = filtered.into_iter().skip(pos + 1).collect();
                     } else {
-                        // si no está, devolver la primera mayor
-                        filtered = filtered.into_iter().filter(|k| k.0 > s).collect();
+                        filtered.retain(|k| k.0 > s);
                     }
                 }
 
-                // Aplicar count
                 let take = min(filtered.len(), count as usize);
                 Ok(filtered.into_iter().take(take).map(|k| k.0).collect())
             }
@@ -1676,7 +1642,7 @@ mod tests {
 
             fn block_hash(
                 &self,
-                num: Option<NumberFor<Block>>,
+                _num: Option<NumberFor<Block>>,
             ) -> Result<Option<Block::Hash>, jsonrpsee::core::ClientError> {
                 todo!()
             }
@@ -1698,13 +1664,7 @@ mod tests {
     type TestBlockT = TestBlock<N>;
 
     fn make_header(number: N, parent: <TestBlock as BlockT>::Hash) -> TestHeader<N> {
-        TestHeader::new(
-            number.into(),
-            Default::default(),
-            Default::default(),
-            parent,
-            Default::default(),
-        )
+        TestHeader::new(number, Default::default(), Default::default(), parent, Default::default())
     }
 
     fn make_block(
@@ -1722,10 +1682,10 @@ mod tests {
 
     #[test]
     fn before_fork_reads_remote_only() {
-        let rpc = std::sync::Arc::new(RPC::new());
+        let rpc = std::sync::Arc::new(Rpc::new());
         // fork checkpoint at #100
         let cp = checkpoint(100);
-        let backend = Backend::<TestBlockT>::new(Some(rpc.clone()), cp.clone());
+        let backend = Backend::<TestBlockT>::new(Some(rpc.clone()), cp);
 
         // state_at(Default::default()) => before_fork=true
         let state = backend.state_at(Default::default(), TrieCacheContext::Trusted).unwrap();
@@ -1747,7 +1707,7 @@ mod tests {
 
     #[test]
     fn after_fork_first_fetch_caches_subsequent_hits_local() {
-        let rpc = std::sync::Arc::new(RPC::new());
+        let rpc = std::sync::Arc::new(Rpc::new());
         let cp = checkpoint(10);
         let backend = Backend::<TestBlockT>::new(Some(rpc.clone()), cp.clone());
 
@@ -1757,7 +1717,7 @@ mod tests {
         let h11 = b11.header.hash();
 
         rpc.put_header(b11.header.clone());
-        rpc.put_block(b11.clone(), None);
+        rpc.put_block(b11, None);
 
         // remote storage at fork block (checkpoint hash)
         let fork_hash = cp.hash();
@@ -1782,7 +1742,7 @@ mod tests {
 
     #[test]
     fn removed_keys_prevents_remote_fetch() {
-        let rpc = std::sync::Arc::new(RPC::new());
+        let rpc = std::sync::Arc::new(Rpc::new());
         let cp = checkpoint(5);
         let backend = Backend::<TestBlockT>::new(Some(rpc.clone()), cp.clone());
 
@@ -1808,7 +1768,7 @@ mod tests {
 
     #[test]
     fn raw_iter_merges_local_then_remote() {
-        let rpc = std::sync::Arc::new(RPC::new());
+        let rpc = std::sync::Arc::new(Rpc::new());
         let cp = checkpoint(7);
         let backend = Backend::<TestBlockT>::new(Some(rpc.clone()), cp.clone());
 
@@ -1850,16 +1810,16 @@ mod tests {
 
     #[test]
     fn blockchain_header_and_number_are_cached() {
-        let rpc = std::sync::Arc::new(RPC::new());
+        let rpc = std::sync::Arc::new(Rpc::new());
         let cp = checkpoint(3);
         let backend = Backend::<TestBlockT>::new(Some(rpc.clone()), cp.clone());
         let chain = backend.blockchain();
 
         // prepare one block w/ extrinsics
         let xts: Vec<OpaqueExtrinsic> = vec![];
-        let b4 = make_block(4, cp.hash(), xts.clone());
+        let b4 = make_block(4, cp.hash(), xts);
         let h4 = b4.header().hash();
-        rpc.put_block(b4.clone(), None);
+        rpc.put_block(b4, None);
 
         // first header() fetches RPC and caches as Full
         let h = chain.header(h4).unwrap().unwrap();
