@@ -775,9 +775,8 @@ impl<Block: BlockT + DeserializeOwned> sp_state_machine::StorageIterator<Hashing
             };
 
             // Filter by prefix if necessary
-            let next_storage_key = next_storage_key.filter(|key| {
-                prefix.as_ref().map(|p| key.starts_with(&p.0)).unwrap_or(true)
-            });
+            let next_storage_key = next_storage_key
+                .filter(|key| prefix.as_ref().map(|p| key.starts_with(&p.0)).unwrap_or(true));
 
             let removed_key = start_key
                 .clone()
@@ -885,9 +884,8 @@ impl<Block: BlockT + DeserializeOwned> sp_state_machine::StorageIterator<Hashing
             };
 
             // Filter by prefix if necessary
-            let next_storage_key = next_storage_key.filter(|key| {
-                prefix.as_ref().map(|p| key.starts_with(&p.0)).unwrap_or(true)
-            });
+            let next_storage_key = next_storage_key
+                .filter(|key| prefix.as_ref().map(|p| key.starts_with(&p.0)).unwrap_or(true));
 
             let removed_key = start_key
                 .clone()
@@ -1796,19 +1794,15 @@ mod tests {
 
         // Preload local DB with key "a1"
         state.update_storage(b"a1", &Some(b"v1".to_vec()));
-        
+
         // Ensure storage_root is computed to make the key visible to raw_iter
         let _ = state.db.write().storage_root(
             vec![(b"a1".as_ref(), Some(b"v1".as_ref()))].into_iter(),
-            StateVersion::V1
+            StateVersion::V1,
         );
 
         // Remote has only "a2" under same prefix at fork block (not "a1")
-        rpc.put_storage_keys_page(
-            cp.hash(),
-            b"a".to_vec(),
-            vec![StorageKey(b"a2".to_vec())],
-        );
+        rpc.put_storage_keys_page(cp.hash(), b"a".to_vec(), vec![StorageKey(b"a2".to_vec())]);
         rpc.put_storage(cp.hash(), StorageKey(b"a2".to_vec()), StorageData(b"v2".to_vec()));
 
         let mut args = sp_state_machine::IterArgs::default();
