@@ -129,6 +129,9 @@ rand_08.workspace = true
 eyre.workspace = true
 lru = "0.16.0"
 indexmap = "2.0"
+log = { version = "0.4.21", default-features = false }
+hex-literal = { version = "0.4.1", default-features = false }
+polkadot-core-primitives = "18.0.0"
 
 # cli
 clap = { version = "4", features = [
@@ -142,7 +145,7 @@ clap_complete_fig = "4"
 subxt = "0.43.0"
 subxt-signer = "0.43.0"
 tokio-stream = "0.1.17"
-jsonrpsee = "0.24.9"
+jsonrpsee = "0.24.10"
 sqlx = "0.8.6"
 revm.workspace = true
 
