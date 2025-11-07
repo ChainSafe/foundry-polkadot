@@ -110,11 +110,6 @@ pub struct Blockchain<Block: BlockT + DeserializeOwned> {
 impl<Block: BlockT + DeserializeOwned> Blockchain<Block> {
     /// Create new in-memory blockchain storage.
     fn new(rpc_client: Option<Arc<dyn RPCClient<Block>>>) -> Self {
-        log::info!(
-            target: super::LAZY_LOADING_LOG_TARGET,
-            "🏗️  Creating new Blockchain storage (empty)"
-        );
-
         let storage = Arc::new(parking_lot::RwLock::new(BlockchainStorage {
             blocks: HashMap::new(),
             hashes: HashMap::new(),
@@ -139,27 +134,10 @@ impl<Block: BlockT + DeserializeOwned> Blockchain<Block> {
         match id {
             BlockId::Hash(h) => Some(h),
             BlockId::Number(n) => {
-                log::info!(
-                    target: super::LAZY_LOADING_LOG_TARGET,
-                    "Looking up block hash for number={n}",
-                );
-
                 let block_hash = self.storage.read().hashes.get(&n).copied();
-
-                log::info!(
-                    target: super::LAZY_LOADING_LOG_TARGET,
-                    "Lookup result: number={}, found={}, total_hashes={}",
-                    n,
-                    block_hash.is_some(),
-                    self.storage.read().hashes.len()
-                );
 
                 match block_hash {
                     None => {
-                        log::info!(
-                            target: super::LAZY_LOADING_LOG_TARGET,
-                            "Block hash not found locally, trying RPC for number={n}",
-                        );
                         let block_hash =
                             self.rpc().and_then(|rpc| rpc.block_hash(Some(n)).ok().flatten());
                         if let Some(h) = block_hash {
@@ -184,11 +162,6 @@ impl<Block: BlockT + DeserializeOwned> Blockchain<Block> {
     ) -> sp_blockchain::Result<()> {
         let number = *header.number();
 
-        log::info!(
-            target: super::LAZY_LOADING_LOG_TARGET,
-            "Inserting block: number={number}, hash={hash:?}, new_state={new_state:?}",
-        );
-
         if new_state.is_best() {
             self.apply_head(&header)?;
         }
@@ -198,15 +171,6 @@ impl<Block: BlockT + DeserializeOwned> Blockchain<Block> {
         // Always insert the block into blocks and hashes storage
         storage.blocks.insert(hash, StoredBlock::new(header.clone(), body, justifications));
         storage.hashes.insert(number, hash);
-
-        log::info!(
-            target: super::LAZY_LOADING_LOG_TARGET,
-            "Block inserted successfully: number={}, hash={:?}. Total blocks={}, Total hashes={}",
-            number,
-            hash,
-            storage.blocks.len(),
-            storage.hashes.len()
-        );
 
         // Set genesis_hash only for the first block inserted
         if storage.blocks.len() == 1 {
@@ -230,12 +194,6 @@ impl<Block: BlockT + DeserializeOwned> Blockchain<Block> {
     /// Get total number of blocks.
     pub fn blocks_count(&self) -> usize {
         let count = self.storage.read().blocks.len();
-
-        log::debug!(
-            target: super::LAZY_LOADING_LOG_TARGET,
-            "Total number of blocks: {count:?}",
-        );
-
         count
     }
 
@@ -388,26 +346,11 @@ impl<Block: BlockT + DeserializeOwned> HeaderBackend<Block> for Blockchain<Block
 
     fn info(&self) -> blockchain::Info<Block> {
         let storage = self.storage.read();
-        // Return None for finalized_state when blockchain is empty or only has genesis block
-        // This allows Client::new to properly initialize and complete genesis setup
-        // finalized_state should only be Some() when there are blocks beyond genesis
         let finalized_state = if storage.blocks.len() <= 1 {
             None
         } else {
             Some((storage.finalized_hash, storage.finalized_number))
         };
-
-        log::info!(
-            target: super::LAZY_LOADING_LOG_TARGET,
-            "📊 Blockchain::info() - blocks={}, best_hash={:?}, best_number={}, genesis_hash={:?}, finalized_hash={:?}, finalized_number={}, finalized_state={:?}",
-            storage.blocks.len(),
-            storage.best_hash,
-            storage.best_number,
-            storage.genesis_hash,
-            storage.finalized_hash,
-            storage.finalized_number,
-            finalized_state
-        );
 
         blockchain::Info {
             best_hash: storage.best_hash,
@@ -707,10 +650,7 @@ impl<Block: BlockT + DeserializeOwned> backend::BlockImportOperation<Block>
         Ok(())
     }
 
-    fn set_create_gap(&mut self, _create_gap: bool) {
-        // This implementation can be left empty or implemented as needed
-        // For now, we're just implementing the trait method with no functionality
-    }
+    fn set_create_gap(&mut self, _create_gap: bool) {}
 }
 
 /// DB-backed patricia trie state, transaction type is an overaay of changes to commit.
@@ -1015,7 +955,6 @@ impl<Block: BlockT + DeserializeOwned> sp_state_machine::Backend<HashingFor<Bloc
                 return Ok(remote_fetch(self.block_hash));
             } else {
                 // No RPC client, try to read from local DB
-                // This allows reading genesis state that has been committed
                 let readable_db = self.db.read();
                 return Ok(readable_db.storage(key).ok().flatten());
             }
