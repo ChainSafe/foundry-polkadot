@@ -13,7 +13,9 @@ use polkadot_sdk::{
     sp_runtime::{
         Justification, Justifications, StateVersion, Storage,
         generic::BlockId,
-        traits::{Block as BlockT, HashingFor, Header as HeaderT, NumberFor, Zero},
+        traits::{
+            Block as BlockT, HashingFor, Header as HeaderT, NumberFor, One, Saturating, Zero,
+        },
     },
     sp_state_machine::{
         self, BackendTransaction, ChildStorageCollection, IndexOperation, StorageCollection,
@@ -602,7 +604,11 @@ impl<Block: BlockT + DeserializeOwned> BlockImportOperation<Block> {
                         .data
                         .iter()
                         .map(|(k, v)| {
-                            if v.is_empty() { (k.clone(), None) } else { (k.clone(), Some(v.clone())) }
+                            if v.is_empty() {
+                                (k.clone(), None)
+                            } else {
+                                (k.clone(), Some(v.clone()))
+                            }
                         })
                         .collect();
                     (child_content.child_info.storage_key().to_vec(), child_storage)
@@ -1323,9 +1329,12 @@ impl<Block: BlockT + DeserializeOwned> backend::Backend<Block> for Backend<Block
             {
                 let mut entries = vec![(None::<ChildInfo>, operation.storage_updates.clone())];
                 if !operation.child_storage_updates.is_empty() {
-                    entries.extend(operation.child_storage_updates.into_iter().map(|(key, data)| {
-                        (Some(ChildInfo::new_default(&key)), data)
-                    }));
+                    entries.extend(
+                        operation
+                            .child_storage_updates
+                            .into_iter()
+                            .map(|(key, data)| (Some(ChildInfo::new_default(&key)), data)),
+                    );
                 }
                 new_db.write().insert(entries, StateVersion::V1);
             }
@@ -1447,13 +1456,192 @@ impl<Block: BlockT + DeserializeOwned> backend::Backend<Block> for Backend<Block
 
     fn revert(
         &self,
-        _n: NumberFor<Block>,
-        _revert_finalized: bool,
+        n: NumberFor<Block>,
+        revert_finalized: bool,
     ) -> sp_blockchain::Result<(NumberFor<Block>, HashSet<Block::Hash>)> {
-        Ok((Zero::zero(), HashSet::new()))
+        let mut storage = self.blockchain.storage.write();
+
+        if storage.blocks.is_empty() {
+            return Ok((Zero::zero(), HashSet::new()));
+        }
+
+        let mut states = self.states.write();
+        let pinned = self.pinned_blocks.read();
+
+        let mut target = n;
+        let original_finalized_number = storage.finalized_number;
+
+        if !target.is_zero() && !revert_finalized {
+            let revertible = storage.best_number.saturating_sub(storage.finalized_number);
+            if target > revertible {
+                target = revertible;
+            }
+        }
+
+        let mut reverted = NumberFor::<Block>::zero();
+        let mut reverted_finalized = HashSet::new();
+
+        let mut current_hash = storage.best_hash.clone();
+        let mut current_number = storage.best_number;
+
+        while reverted < target {
+            if current_number.is_zero() {
+                break;
+            }
+
+            if let Some(count) = pinned.get(&current_hash) {
+                if *count > 0 {
+                    break;
+                }
+            }
+
+            let Some(block) = storage.blocks.get(&current_hash) else {
+                break;
+            };
+
+            let header = block.header().clone();
+            let number = *header.number();
+            let parent_hash = header.parent_hash().clone();
+            let parent_number = number.saturating_sub(One::one());
+
+            let parent_becomes_leaf = if number.is_zero() {
+                false
+            } else {
+                !storage.blocks.iter().any(|(other_hash, stored)| {
+                    *other_hash != current_hash && stored.header().parent_hash() == &parent_hash
+                })
+            };
+
+            let hash_to_remove = current_hash.clone();
+
+            storage.blocks.remove(&hash_to_remove);
+            if let Some(entry) = storage.hashes.get(&number) {
+                if *entry == hash_to_remove {
+                    storage.hashes.remove(&number);
+                }
+            }
+            states.remove(&hash_to_remove);
+
+            storage.leaves.remove(
+                hash_to_remove.clone(),
+                number,
+                parent_becomes_leaf.then_some(parent_hash.clone()),
+            );
+
+            if number <= original_finalized_number {
+                reverted_finalized.insert(hash_to_remove);
+            }
+
+            reverted = reverted.saturating_add(One::one());
+
+            current_hash = parent_hash;
+            current_number = parent_number;
+
+            storage.best_hash = current_hash;
+            storage.best_number = current_number;
+        }
+
+        let best_hash_after = storage.best_hash.clone();
+        let best_number_after = storage.best_number;
+        let extra_leaves: Vec<_> =
+            storage.leaves.revert(best_hash_after.clone(), best_number_after).collect();
+
+        for (hash, number) in extra_leaves {
+            if let Some(count) = pinned.get(&hash) {
+                if *count > 0 {
+                    return Err(sp_blockchain::Error::Backend(format!(
+                        "Can't revert pinned block {hash:?}",
+                    )));
+                }
+            }
+
+            storage.blocks.remove(&hash);
+            if let Some(entry) = storage.hashes.get(&number) {
+                if *entry == hash {
+                    storage.hashes.remove(&number);
+                }
+            }
+            states.remove(&hash);
+
+            if number <= original_finalized_number {
+                reverted_finalized.insert(hash);
+            }
+        }
+
+        storage.hashes.insert(best_number_after, best_hash_after.clone());
+
+        if storage.finalized_number > best_number_after {
+            storage.finalized_number = best_number_after;
+        }
+
+        while storage.finalized_number > Zero::zero()
+            && !storage.hashes.contains_key(&storage.finalized_number)
+        {
+            storage.finalized_number = storage.finalized_number.saturating_sub(One::one());
+        }
+
+        if let Some(hash) = storage.hashes.get(&storage.finalized_number).cloned() {
+            storage.finalized_hash = hash;
+        } else {
+            storage.finalized_hash = storage.genesis_hash;
+        }
+
+        drop(pinned);
+        drop(states);
+
+        Ok((reverted, reverted_finalized))
     }
 
-    fn remove_leaf_block(&self, _hash: Block::Hash) -> sp_blockchain::Result<()> {
+    fn remove_leaf_block(&self, hash: Block::Hash) -> sp_blockchain::Result<()> {
+        let best_hash = self.blockchain.info().best_hash;
+
+        if best_hash == hash {
+            return Err(sp_blockchain::Error::Backend(
+                format!("Can't remove best block {hash:?}",),
+            ));
+        }
+
+        let mut storage = self.blockchain.storage.write();
+
+        let Some(block) = storage.blocks.get(&hash) else {
+            return Err(sp_blockchain::Error::UnknownBlock(format!("{hash:?}")));
+        };
+
+        let number = *block.header().number();
+        let parent_hash = *block.header().parent_hash();
+
+        if !storage.leaves.contains(number, hash.clone()) {
+            return Err(sp_blockchain::Error::Backend(format!(
+                "Can't remove non-leaf block {hash:?}",
+            )));
+        }
+
+        if self.pinned_blocks.read().get(&hash).map_or(false, |count| *count > 0) {
+            return Err(sp_blockchain::Error::Backend(format!(
+                "Can't remove pinned block {hash:?}",
+            )));
+        }
+
+        let parent_becomes_leaf = if number.is_zero() {
+            false
+        } else {
+            !storage.blocks.iter().any(|(other_hash, stored)| {
+                *other_hash != hash && stored.header().parent_hash() == &parent_hash
+            })
+        };
+
+        let mut states = self.states.write();
+
+        storage.blocks.remove(&hash);
+        if let Some(entry) = storage.hashes.get(&number) {
+            if *entry == hash {
+                storage.hashes.remove(&number);
+            }
+        }
+        states.remove(&hash);
+
+        storage.leaves.remove(hash, number, parent_becomes_leaf.then_some(parent_hash));
+
         Ok(())
     }
 
