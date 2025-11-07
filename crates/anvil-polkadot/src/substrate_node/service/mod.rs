@@ -5,6 +5,7 @@ use crate::{
         rpc::spawn_rpc_server,
         service::consensus::SameSlotConsensusDataProvider,
         service::storage::well_known_keys,
+        service::AuraConsensusDataProvider,
     },
 };
 use codec::Encode;
@@ -230,74 +231,6 @@ impl sp_inherents::InherentDataProvider for MockTimestampInherentDataProvider {
 	) -> Option<Result<(), sp_inherents::Error>> {
 		// The pallet never reports error.
 		None
-	}
-}
-
-/// Consensus data provider for Aura. This allows to use manual-seal driven nodes to author valid
-/// AURA blocks. It will inspect incoming [`InherentData`] and look for included timestamps. Based
-/// on these timestamps, the [`AuraConsensusDataProvider`] will emit fitting digest items.
-pub struct AuraConsensusDataProvider<B, P> {
-	// slot duration
-	slot_duration: sc_consensus_aura::SlotDuration,
-	// phantom data for required generics
-	_phantom: PhantomData<(B, P)>,
-}
-
-impl<B, P> AuraConsensusDataProvider<B, P>
-where
-	B: BlockT,
-{
-	/// Creates a new instance of the [`AuraConsensusDataProvider`], requires that `client`
-	/// implements [`sp_consensus_aura::AuraApi`]
-	pub fn new<C>(client: Arc<C>) -> Self
-	where
-		C: AuxStore + ProvideRuntimeApi<B> + UsageProvider<B>,
-		C::Api: AuraApi<B, AuthorityId>,
-	{
-		let slot_duration = sc_consensus_aura::slot_duration(&*client)
-			.expect("slot_duration is always present; qed.");
-
-		Self { slot_duration, _phantom: PhantomData }
-	}
-
-	/// Creates a new instance of the [`AuraConsensusDataProvider`]
-	pub fn new_with_slot_duration(slot_duration: sc_consensus_aura::SlotDuration) -> Self {
-		Self { slot_duration, _phantom: PhantomData }
-	}
-}
-
-impl<B, P> ConsensusDataProvider<B> for AuraConsensusDataProvider<B, P>
-where
-	B: BlockT,
-	P: Send + Sync,
-{
-	type Proof = P;
-
-	fn create_digest(
-		&self,
-		_parent: &B::Header,
-		inherents: &InherentData,
-	) -> Result<Digest, Error> {
-		let timestamp =
-			inherents.timestamp_inherent_data()?.expect("Timestamp is always present; qed");
-
-		// we always calculate the new slot number based on the current time-stamp and the slot
-		// duration.
-		let digest_item = <DigestItem as CompatibleDigestItem<AuthoritySignature>>::aura_pre_digest(
-			Slot::from_timestamp(timestamp, self.slot_duration),
-		);
-
-		Ok(Digest { logs: vec![digest_item] })
-	}
-
-	fn append_block_import(
-		&self,
-		_parent: &B::Header,
-		_params: &mut BlockImportParams<B>,
-		_inherents: &InherentData,
-		_proof: Self::Proof,
-	) -> Result<(), Error> {
-		Ok(())
 	}
 }
 
@@ -577,14 +510,13 @@ pub fn new(
     let mining_mode =
         MiningMode::new(anvil_config.block_time, anvil_config.mixed_mining, anvil_config.no_mining);
     let time_manager = Arc::new(TimeManager::new_with_milliseconds(
-        sp_timestamp::Timestamp::current().as_millis(),
-        // sp_timestamp::Timestamp::from(
-        //     anvil_config
-        //         .get_genesis_timestamp()
-        //         .checked_mul(1000)
-        //         .ok_or(ServiceError::Application("Genesis timestamp overflow".into()))?,
-        // )
-        // .into(),
+        sp_timestamp::Timestamp::from(
+            anvil_config
+                .get_genesis_timestamp()
+                .checked_mul(1000)
+                .ok_or(ServiceError::Application("Genesis timestamp overflow".into()))?,
+        )
+        .into(),
     ));
 
     let mining_engine = Arc::new(MiningEngine::new(
@@ -618,7 +550,7 @@ pub fn new(
         None,
     );
 
-   let slot_duration= sc_consensus_aura::SlotDuration::from_millis(SLOT_DURATION);
+   let slot_duration= sc_consensus_aura::SlotDuration::from_millis(6000);
 
     // Polkadot-sdk doesnt seem to use the latest changes here, so this function isnt available yet. Can use `new()` instead but our client 
     // doesnt implement all the needed traits
@@ -640,11 +572,7 @@ pub fn new(
         pool: transaction_pool.clone(),
         select_chain: SelectChain::new(backend.clone()),
         commands_stream: Box::pin(commands_stream),
-<<<<<<< HEAD
-        consensus_data_provider: Some(Box::new(SameSlotConsensusDataProvider::new())),
-=======
         consensus_data_provider: Some(Box::new(aura_digest_provider)),
->>>>>>> 36a5b580e (wip/mock digests)
         create_inherent_data_providers,
     };
     let authorship_future = run_manual_seal(params);

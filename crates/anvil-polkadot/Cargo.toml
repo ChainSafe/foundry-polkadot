@@ -159,12 +159,9 @@ subxt-signer = "0.43.0"
 tokio-stream = "0.1.17"
 jsonrpsee = "0.24.10"
 sqlx = "0.8.6"
-<<<<<<< HEAD
 revm.workspace = true
-=======
 indicatif.workspace = true
 #sc-consensus-manual-seal = "0.54.0"
->>>>>>> f383d1323 (wip/postForkBlockProduction)
 
 [dev-dependencies]
 alloy-provider = { workspace = true, features = ["txpool-api"] }
