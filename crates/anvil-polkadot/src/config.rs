@@ -885,7 +885,7 @@ impl AnvilNodeConfig {
         self
     }
 
-     /// Sets the fork delay between RPC requests
+    /// Sets the fork delay between RPC requests
     #[must_use]
     pub fn with_fork_delay(mut self, fork_delay: u32) -> Self {
         self.fork_delay = fork_delay;
