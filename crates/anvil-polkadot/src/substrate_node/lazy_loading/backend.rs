@@ -1316,28 +1316,32 @@ impl<Block: BlockT + DeserializeOwned> backend::Backend<Block> for Backend<Block
             let (header, body, justification) = pending_block.block.into_inner();
             let hash = header.hash();
 
-            let new_removed_keys = old_state.removed_keys.clone();
-            for (key, value) in operation.storage_updates.clone() {
+            let storage_updates = operation.storage_updates.clone();
+            let child_storage_updates = operation.child_storage_updates.clone();
+
+            let mut removed_keys_map = old_state.removed_keys.read().clone();
+            for (key, value) in &storage_updates {
                 if value.is_some() {
-                    new_removed_keys.write().remove(&key.clone());
+                    removed_keys_map.remove(key);
                 } else {
-                    new_removed_keys.write().insert(key.clone(), ());
+                    removed_keys_map.insert(key.clone(), ());
                 }
             }
+            let new_removed_keys = Arc::new(parking_lot::RwLock::new(removed_keys_map));
 
-            let new_db = old_state.db.clone();
+            let mut db_clone = old_state.db.read().clone();
             {
-                let mut entries = vec![(None::<ChildInfo>, operation.storage_updates.clone())];
-                if !operation.child_storage_updates.is_empty() {
+                let mut entries = vec![(None::<ChildInfo>, storage_updates.clone())];
+                if !child_storage_updates.is_empty() {
                     entries.extend(
-                        operation
-                            .child_storage_updates
-                            .into_iter()
-                            .map(|(key, data)| (Some(ChildInfo::new_default(&key)), data)),
+                        child_storage_updates
+                            .iter()
+                            .map(|(key, data)| (Some(ChildInfo::new_default(key)), data.clone())),
                     );
                 }
-                new_db.write().insert(entries, StateVersion::V1);
+                db_clone.insert(entries, StateVersion::V1);
             }
+            let new_db = Arc::new(parking_lot::RwLock::new(db_clone));
             let new_state = ForkedLazyBackend {
                 rpc_client: self.rpc_client.clone(),
                 block_hash: Some(hash),
