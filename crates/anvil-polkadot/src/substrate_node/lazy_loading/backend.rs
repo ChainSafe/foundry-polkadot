@@ -554,6 +554,7 @@ pub struct BlockImportOperation<Block: BlockT + DeserializeOwned> {
     new_state: Option<BackendTransaction<HashingFor<Block>>>,
     aux: Vec<(Vec<u8>, Option<Vec<u8>>)>,
     storage_updates: StorageCollection,
+    child_storage_updates: ChildStorageCollection,
     finalized_blocks: Vec<(Block::Hash, Option<Justification>)>,
     set_head: Option<Block::Hash>,
     pub(crate) before_fork: bool,
@@ -592,6 +593,21 @@ impl<Block: BlockT + DeserializeOwned> BlockImportOperation<Block> {
                         if v.is_empty() { (k.clone(), None) } else { (k.clone(), Some(v.clone())) }
                     })
                     .collect();
+
+            self.child_storage_updates = storage
+                .children_default
+                .iter()
+                .map(|(_, child_content)| {
+                    let child_storage: StorageCollection = child_content
+                        .data
+                        .iter()
+                        .map(|(k, v)| {
+                            if v.is_empty() { (k.clone(), None) } else { (k.clone(), Some(v.clone())) }
+                        })
+                        .collect();
+                    (child_content.child_info.storage_key().to_vec(), child_storage)
+                })
+                .collect();
         }
         Ok(root)
     }
@@ -656,9 +672,10 @@ impl<Block: BlockT + DeserializeOwned> backend::BlockImportOperation<Block>
     fn update_storage(
         &mut self,
         update: StorageCollection,
-        _child_update: ChildStorageCollection,
+        child_update: ChildStorageCollection,
     ) -> sp_blockchain::Result<()> {
         self.storage_updates = update;
+        self.child_storage_updates = child_update;
         Ok(())
     }
 
@@ -1082,18 +1099,18 @@ impl<Block: BlockT + DeserializeOwned> sp_state_machine::Backend<HashingFor<Bloc
 
     fn child_storage(
         &self,
-        _child_info: &sp_storage::ChildInfo,
-        _key: &[u8],
+        child_info: &sp_storage::ChildInfo,
+        key: &[u8],
     ) -> Result<Option<sp_state_machine::StorageValue>, Self::Error> {
-        unimplemented!("child_storage: unsupported feature for lazy loading");
+        Ok(self.db.read().child_storage(child_info, key).ok().flatten())
     }
 
     fn child_storage_hash(
         &self,
-        _child_info: &sp_storage::ChildInfo,
-        _key: &[u8],
+        child_info: &sp_storage::ChildInfo,
+        key: &[u8],
     ) -> Result<Option<<HashingFor<Block> as sp_core::Hasher>::Out>, Self::Error> {
-        unimplemented!("child_storage_hash: unsupported feature for lazy loading");
+        Ok(self.db.read().child_storage_hash(child_info, key).ok().flatten())
     }
 
     fn next_storage_key(
@@ -1146,10 +1163,10 @@ impl<Block: BlockT + DeserializeOwned> sp_state_machine::Backend<HashingFor<Bloc
 
     fn next_child_storage_key(
         &self,
-        _child_info: &sp_storage::ChildInfo,
-        _key: &[u8],
+        child_info: &sp_storage::ChildInfo,
+        key: &[u8],
     ) -> Result<Option<sp_state_machine::StorageKey>, Self::Error> {
-        unimplemented!("next_child_storage_key: unsupported feature for lazy loading");
+        Ok(self.db.read().next_child_storage_key(child_info, key).ok().flatten())
     }
 
     fn storage_root<'a>(
@@ -1165,14 +1182,14 @@ impl<Block: BlockT + DeserializeOwned> sp_state_machine::Backend<HashingFor<Bloc
 
     fn child_storage_root<'a>(
         &self,
-        _child_info: &sp_storage::ChildInfo,
-        _delta: impl Iterator<Item = (&'a [u8], Option<&'a [u8]>)>,
-        _state_version: StateVersion,
+        child_info: &sp_storage::ChildInfo,
+        delta: impl Iterator<Item = (&'a [u8], Option<&'a [u8]>)>,
+        state_version: StateVersion,
     ) -> (<HashingFor<Block> as sp_core::Hasher>::Out, bool, BackendTransaction<HashingFor<Block>>)
     where
         <HashingFor<Block> as sp_core::Hasher>::Out: Ord,
     {
-        unimplemented!("child_storage_root: unsupported in lazy loading")
+        self.db.read().child_storage_root(child_info, delta, state_version)
     }
 
     fn raw_iter(&self, args: sp_state_machine::IterArgs<'_>) -> Result<Self::RawIter, Self::Error> {
@@ -1267,6 +1284,7 @@ impl<Block: BlockT + DeserializeOwned> backend::Backend<Block> for Backend<Block
             new_state: None,
             aux: Default::default(),
             storage_updates: Default::default(),
+            child_storage_updates: Default::default(),
             finalized_blocks: Default::default(),
             set_head: None,
             before_fork: false,
@@ -1302,9 +1320,15 @@ impl<Block: BlockT + DeserializeOwned> backend::Backend<Block> for Backend<Block
             }
 
             let new_db = old_state.db.clone();
-            new_db
-                .write()
-                .insert(vec![(None::<ChildInfo>, operation.storage_updates)], StateVersion::V1);
+            {
+                let mut entries = vec![(None::<ChildInfo>, operation.storage_updates.clone())];
+                if !operation.child_storage_updates.is_empty() {
+                    entries.extend(operation.child_storage_updates.into_iter().map(|(key, data)| {
+                        (Some(ChildInfo::new_default(&key)), data)
+                    }));
+                }
+                new_db.write().insert(entries, StateVersion::V1);
+            }
             let new_state = ForkedLazyBackend {
                 rpc_client: self.rpc_client.clone(),
                 block_hash: Some(hash),
@@ -1458,14 +1482,6 @@ impl<Block: BlockT + DeserializeOwned> backend::LocalBackend<Block> for Backend<
 /// Check that genesis storage is valid.
 pub fn check_genesis_storage(storage: &Storage) -> sp_blockchain::Result<()> {
     if storage.top.iter().any(|(k, _)| well_known_keys::is_child_storage_key(k)) {
-        return Err(sp_blockchain::Error::InvalidState);
-    }
-
-    if storage
-        .children_default
-        .keys()
-        .any(|child_key| !well_known_keys::is_child_storage_key(child_key))
-    {
         return Err(sp_blockchain::Error::InvalidState);
     }
 
