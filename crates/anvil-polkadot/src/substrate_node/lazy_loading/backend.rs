@@ -193,8 +193,7 @@ impl<Block: BlockT + DeserializeOwned> Blockchain<Block> {
 
     /// Get total number of blocks.
     pub fn blocks_count(&self) -> usize {
-        let count = self.storage.read().blocks.len();
-        count
+        self.storage.read().blocks.len()
     }
 
     /// Compare this blockchain with another in-mem blockchain
@@ -541,8 +540,8 @@ impl<Block: BlockT + DeserializeOwned> BlockImportOperation<Block> {
 
             self.child_storage_updates = storage
                 .children_default
-                .iter()
-                .map(|(_, child_content)| {
+                .values()
+                .map(|child_content| {
                     let child_storage: StorageCollection = child_content
                         .data
                         .iter()
@@ -1424,7 +1423,7 @@ impl<Block: BlockT + DeserializeOwned> backend::Backend<Block> for Backend<Block
         let mut reverted = NumberFor::<Block>::zero();
         let mut reverted_finalized = HashSet::new();
 
-        let mut current_hash = storage.best_hash.clone();
+        let mut current_hash = storage.best_hash;
         let mut current_number = storage.best_number;
 
         while reverted < target {
@@ -1444,18 +1443,18 @@ impl<Block: BlockT + DeserializeOwned> backend::Backend<Block> for Backend<Block
 
             let header = block.header().clone();
             let number = *header.number();
-            let parent_hash = header.parent_hash().clone();
+            let parent_hash = header.parent_hash();
             let parent_number = number.saturating_sub(One::one());
 
             let parent_becomes_leaf = if number.is_zero() {
                 false
             } else {
                 !storage.blocks.iter().any(|(other_hash, stored)| {
-                    *other_hash != current_hash && stored.header().parent_hash() == &parent_hash
+                    *other_hash != current_hash && stored.header().parent_hash() == parent_hash
                 })
             };
 
-            let hash_to_remove = current_hash.clone();
+            let hash_to_remove = current_hash;
 
             storage.blocks.remove(&hash_to_remove);
             if let Some(entry) = storage.hashes.get(&number) {
@@ -1466,9 +1465,9 @@ impl<Block: BlockT + DeserializeOwned> backend::Backend<Block> for Backend<Block
             states.remove(&hash_to_remove);
 
             storage.leaves.remove(
-                hash_to_remove.clone(),
+                hash_to_remove,
                 number,
-                parent_becomes_leaf.then_some(parent_hash.clone()),
+                parent_becomes_leaf.then_some(*parent_hash),
             );
 
             if number <= original_finalized_number {
@@ -1477,17 +1476,17 @@ impl<Block: BlockT + DeserializeOwned> backend::Backend<Block> for Backend<Block
 
             reverted = reverted.saturating_add(One::one());
 
-            current_hash = parent_hash;
+            current_hash = *parent_hash;
             current_number = parent_number;
 
             storage.best_hash = current_hash;
             storage.best_number = current_number;
         }
 
-        let best_hash_after = storage.best_hash.clone();
+        let best_hash_after = storage.best_hash;
         let best_number_after = storage.best_number;
         let extra_leaves: Vec<_> =
-            storage.leaves.revert(best_hash_after.clone(), best_number_after).collect();
+            storage.leaves.revert(best_hash_after, best_number_after).collect();
 
         for (hash, number) in extra_leaves {
             if let Some(count) = pinned.get(&hash) {
@@ -1511,7 +1510,7 @@ impl<Block: BlockT + DeserializeOwned> backend::Backend<Block> for Backend<Block
             }
         }
 
-        storage.hashes.insert(best_number_after, best_hash_after.clone());
+        storage.hashes.insert(best_number_after, best_hash_after);
 
         if storage.finalized_number > best_number_after {
             storage.finalized_number = best_number_after;
@@ -1523,7 +1522,7 @@ impl<Block: BlockT + DeserializeOwned> backend::Backend<Block> for Backend<Block
             storage.finalized_number = storage.finalized_number.saturating_sub(One::one());
         }
 
-        if let Some(hash) = storage.hashes.get(&storage.finalized_number).cloned() {
+        if let Some(hash) = storage.hashes.get(&storage.finalized_number).copied() {
             storage.finalized_hash = hash;
         } else {
             storage.finalized_hash = storage.genesis_hash;
@@ -1553,13 +1552,13 @@ impl<Block: BlockT + DeserializeOwned> backend::Backend<Block> for Backend<Block
         let number = *block.header().number();
         let parent_hash = *block.header().parent_hash();
 
-        if !storage.leaves.contains(number, hash.clone()) {
+        if !storage.leaves.contains(number, hash) {
             return Err(sp_blockchain::Error::Backend(format!(
                 "Can't remove non-leaf block {hash:?}",
             )));
         }
 
-        if self.pinned_blocks.read().get(&hash).map_or(false, |count| *count > 0) {
+        if self.pinned_blocks.read().get(&hash).is_some_and(|count| *count > 0) {
             return Err(sp_blockchain::Error::Backend(format!(
                 "Can't remove pinned block {hash:?}",
             )));
