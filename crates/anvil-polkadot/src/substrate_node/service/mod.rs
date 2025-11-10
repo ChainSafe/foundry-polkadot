@@ -199,7 +199,8 @@ impl MockTimestampInherentDataProvider {
 	fn advance_timestamp(slot_duration: u64) {
 		if TIMESTAMP.load(Ordering::SeqCst) == 0 {
 			// Initialize timestamp inherent provider
-			TIMESTAMP.store(
+			//TIMESTAMP.store()
+            TIMESTAMP.store(
 				sp_timestamp::Timestamp::current().as_millis(),
 				Ordering::SeqCst,
 			);
@@ -279,6 +280,9 @@ where
 		let timestamp =
 			inherents.timestamp_inherent_data()?.expect("Timestamp is always present; qed");
 
+            print!("time da {}", timestamp);
+             print!("time db {}", TIMESTAMP.load(Ordering::SeqCst));
+
 		// we always calculate the new slot number based on the current time-stamp and the slot
 		// duration.
 		let digest_item = <DigestItem as CompatibleDigestItem<AuthoritySignature>>::aura_pre_digest(
@@ -317,9 +321,7 @@ fn create_manual_seal_inherent_data_providers(
 	       + Sync{
 		move |block: Hash, ()| {
 
-        MockTimestampInherentDataProvider::advance_timestamp(
-            RELAY_CHAIN_SLOT_DURATION_MILLIS,
-        );
+        print!("time c {}", TIMESTAMP.load(Ordering::SeqCst));
 
 
         let current_para_head = client
@@ -357,17 +359,18 @@ fn create_manual_seal_inherent_data_providers(
         print!("current block num {}", current_para_head.number);
 
         // // Unsure here but triggers new error than before
-     //   let time = anvil_config.get_genesis_timestamp();
+        let time = anvil_config.get_genesis_timestamp();
+     //let time = TIMESTAMP.load(Ordering::SeqCst)
 
         let mocked_parachain = MockValidationDataInherentDataProvider::<()> {
             current_para_block: current_para_head.number,
             para_id: para_id,
             current_para_block_head,
-         //  relay_offset: time as u32,
+           // relay_offset: 0,
             relay_blocks_per_para_block: requires_relay_progress
                 .then(|| 1)
                 .unwrap_or_default(),
-          // relay_blocks_per_para_block: 1,
+          //relay_blocks_per_para_block: 1,
 			para_blocks_per_relay_epoch: 10,
             // upgrade_go_ahead: should_send_go_ahead.then(|| {
             //     //log::info!("Detected pending validation code, sending go-ahead signal.");
@@ -379,6 +382,10 @@ fn create_manual_seal_inherent_data_providers(
         // let timestamp_provider = sp_timestamp::InherentDataProvider::new(
         //     (slot_duration.as_millis() * current_block_number as u64).into(),
         // );
+
+         MockTimestampInherentDataProvider::advance_timestamp(
+            RELAY_CHAIN_SLOT_DURATION_MILLIS,
+        );
 
 
         futures::future::ready(Ok((MockTimestampInherentDataProvider, mocked_parachain)))
@@ -572,17 +579,29 @@ pub fn new(
     let (seal_engine_command_sender, commands_stream) = tokio::sync::mpsc::channel(1024);
     let commands_stream = ReceiverStream::new(commands_stream);
 
+    let genesis_time =  anvil_config.get_genesis_timestamp();
+    print!("genesis time {}", genesis_time);
+    print!("time a {}", TIMESTAMP.load(Ordering::SeqCst));
+    TIMESTAMP.store(
+				genesis_time,
+				Ordering::SeqCst,
+			);
+    //  TIMESTAMP.fetch_add(SLOT_DURATION, Ordering::SeqCst);
+
+    print!("time b {}", TIMESTAMP.load(Ordering::SeqCst));
+
+   // let current_time = sp_timestamp::Timestamp::current().as_millis();
     let mining_mode =
         MiningMode::new(anvil_config.block_time, anvil_config.mixed_mining, anvil_config.no_mining);
     let time_manager = Arc::new(TimeManager::new_with_milliseconds(
-        sp_timestamp::Timestamp::current().as_millis(),
-        // sp_timestamp::Timestamp::from(
-        //     anvil_config
-        //         .get_genesis_timestamp()
-        //         .checked_mul(1000)
-        //         .ok_or(ServiceError::Application("Genesis timestamp overflow".into()))?,
-        // )
-        // .into(),
+      genesis_time,
+    //     sp_timestamp::Timestamp::from(
+    //         anvil_config
+    //             .get_genesis_timestamp()
+    //             .checked_mul(1000)
+    //             .ok_or(ServiceError::Application("Genesis timestamp overflow".into()))?,
+    //     )
+    //    .into(),
     ));
     let mining_engine = Arc::new(MiningEngine::new(
         mining_mode,
