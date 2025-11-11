@@ -324,6 +324,10 @@ pub struct AnvilNodeConfig {
     pub memory_limit: Option<u64>,
     /// Do not print log messages.
     pub silent: bool,
+    /// Fetch state over a remote endpoint instead of starting from an empty state.
+    pub fork_url: Option<String>,
+    /// Fetch state from a specific block hash over a remote endpoint.
+    pub fork_block_hash: Option<String>,
 }
 
 impl AnvilNodeConfig {
@@ -545,6 +549,8 @@ impl Default for AnvilNodeConfig {
             disable_default_create2_deployer: false,
             memory_limit: None,
             silent: false,
+            fork_url: None,
+            fork_block_hash: None,
         }
     }
 }
@@ -798,6 +804,20 @@ impl AnvilNodeConfig {
     #[must_use]
     pub fn with_host(mut self, host: Vec<IpAddr>) -> Self {
         self.host = if host.is_empty() { vec![IpAddr::V4(Ipv4Addr::LOCALHOST)] } else { host };
+        self
+    }
+
+    /// Sets the fork url
+    #[must_use]
+    pub fn with_fork_url(mut self, fork_url: Option<String>) -> Self {
+        self.fork_url = fork_url;
+        self
+    }
+
+    /// Sets the fork block
+    #[must_use]
+    pub fn with_fork_block_hash(mut self, fork_block_hash: Option<String>) -> Self {
+        self.fork_block_hash = fork_block_hash;
         self
     }
 
