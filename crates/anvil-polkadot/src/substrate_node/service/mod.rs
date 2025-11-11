@@ -328,6 +328,8 @@ fn create_manual_seal_inherent_data_providers(
 > + Send
 + Sync {
     move |block: Hash, ()| {
+
+         MockTimestampInherentDataProvider::advance_timestamp(RELAY_CHAIN_SLOT_DURATION_MILLIS);
         print!("time c {}", TIMESTAMP.load(Ordering::SeqCst));
 
         let current_para_head = client
@@ -361,17 +363,17 @@ fn create_manual_seal_inherent_data_providers(
         print!("current block num {}", current_para_head.number);
 
         // // Unsure here but triggers new error than before
-        let time = anvil_config.get_genesis_timestamp();
-        //let time = TIMESTAMP.load(Ordering::SeqCst)
+        //let time = anvil_config.get_genesis_timestamp();
+        let time = TIMESTAMP.load(Ordering::SeqCst);
 
         let mocked_parachain = MockValidationDataInherentDataProvider::<()> {
             current_para_block: current_para_head.number,
             para_id,
             current_para_block_head,
-            // relay_offset: 0,
+            relay_offset:  time as u32,
             relay_blocks_per_para_block: requires_relay_progress.then(|| 1).unwrap_or_default(),
             //relay_blocks_per_para_block: 1,
-            para_blocks_per_relay_epoch: 10,
+            para_blocks_per_relay_epoch: 1,
             // upgrade_go_ahead: should_send_go_ahead.then(|| {
             //     //log::info!("Detected pending validation code, sending go-ahead signal.");
             //     UpgradeGoAhead::GoAhead
@@ -383,7 +385,7 @@ fn create_manual_seal_inherent_data_providers(
         //     (slot_duration.as_millis() * current_block_number as u64).into(),
         // );
 
-        MockTimestampInherentDataProvider::advance_timestamp(RELAY_CHAIN_SLOT_DURATION_MILLIS);
+        // MockTimestampInherentDataProvider::advance_timestamp(RELAY_CHAIN_SLOT_DURATION_MILLIS);
 
         futures::future::ready(Ok((MockTimestampInherentDataProvider, mocked_parachain)))
     }
