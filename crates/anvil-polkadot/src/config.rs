@@ -3,7 +3,7 @@ use crate::{
     substrate_node::chain_spec::keypairs_from_private_keys,
 };
 use alloy_genesis::Genesis;
-use alloy_primitives::{Address, U256, hex, map::HashMap, utils::Unit};
+use alloy_primitives::{Address, TxHash, U256, hex, map::HashMap, utils::Unit};
 use alloy_signer::Signer;
 use alloy_signer_local::{
     MnemonicBuilder, PrivateKeySigner,
@@ -11,7 +11,7 @@ use alloy_signer_local::{
 };
 use anvil_server::ServerConfig;
 use eyre::{Context, Result};
-use foundry_common::{duration_since_unix_epoch, sh_println};
+use foundry_common::{REQUEST_TIMEOUT, duration_since_unix_epoch, sh_println};
 use polkadot_sdk::{
     pallet_revive::evm::Account,
     sc_cli::{
@@ -331,6 +331,14 @@ pub struct AnvilNodeConfig {
     pub memory_limit: Option<u64>,
     /// Do not print log messages.
     pub silent: bool,
+    /// url of the rpc server that should be used for any rpc calls
+    pub eth_rpc_url: Option<String>,
+    /// pins the block number or transaction hash for the state fork
+    pub fork_choice: Option<ForkChoice>,
+    /// Timeout in for requests sent to remote JSON-RPC server in forking mode
+    pub fork_request_timeout: Duration,
+    /// Number of request retries for spurious networks
+    pub fork_request_retries: u32,
 }
 
 impl AnvilNodeConfig {
@@ -554,6 +562,10 @@ impl Default for AnvilNodeConfig {
             disable_default_create2_deployer: false,
             memory_limit: None,
             silent: false,
+            eth_rpc_url: None,
+            fork_choice: None,
+            fork_request_timeout: REQUEST_TIMEOUT,
+            fork_request_retries: 5,
         }
     }
 }
@@ -856,6 +868,96 @@ impl AnvilNodeConfig {
     pub fn set_silent(mut self, silent: bool) -> Self {
         self.silent = silent;
         self
+    }
+
+    /// Sets the `eth_rpc_url` to use when forking
+    #[must_use]
+    pub fn with_eth_rpc_url<U: Into<String>>(mut self, eth_rpc_url: Option<U>) -> Self {
+        self.eth_rpc_url = eth_rpc_url.map(Into::into);
+        self
+    }
+
+    /// Sets the `fork_choice` to use to fork off from based on a block number
+    #[must_use]
+    pub fn with_fork_block_number<U: Into<u64>>(self, fork_block_number: Option<U>) -> Self {
+        self.with_fork_choice(fork_block_number.map(Into::into))
+    }
+
+    /// Sets the `fork_choice` to use to fork off from based on a transaction hash
+    #[must_use]
+    pub fn with_fork_transaction_hash<U: Into<TxHash>>(
+        self,
+        fork_transaction_hash: Option<U>,
+    ) -> Self {
+        self.with_fork_choice(fork_transaction_hash.map(Into::into))
+    }
+
+    /// Sets the `fork_choice` to use to fork off from
+    #[must_use]
+    pub fn with_fork_choice<U: Into<ForkChoice>>(mut self, fork_choice: Option<U>) -> Self {
+        self.fork_choice = fork_choice.map(Into::into);
+        self
+    }
+
+    /// Sets the `fork_request_timeout` to use for requests
+    #[must_use]
+    pub fn fork_request_timeout(mut self, fork_request_timeout: Option<Duration>) -> Self {
+        if let Some(fork_request_timeout) = fork_request_timeout {
+            self.fork_request_timeout = fork_request_timeout;
+        }
+        self
+    }
+
+    /// Sets the `fork_request_retries` to use for spurious networks
+    #[must_use]
+    pub fn fork_request_retries(mut self, fork_request_retries: Option<u32>) -> Self {
+        if let Some(fork_request_retries) = fork_request_retries {
+            self.fork_request_retries = fork_request_retries;
+        }
+        self
+    }
+}
+
+/// Fork delimiter used to specify which block or transaction to fork from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ForkChoice {
+    /// Block number to fork from.
+    ///
+    /// If negative, the given value is subtracted from the `latest` block number.
+    Block(i128),
+    /// Transaction hash to fork from.
+    Transaction(TxHash),
+}
+
+impl ForkChoice {
+    /// Returns the block number to fork from
+    pub fn block_number(&self) -> Option<i128> {
+        match self {
+            Self::Block(block_number) => Some(*block_number),
+            Self::Transaction(_) => None,
+        }
+    }
+
+    /// Returns the transaction hash to fork from
+    pub fn transaction_hash(&self) -> Option<TxHash> {
+        match self {
+            Self::Block(_) => None,
+            Self::Transaction(transaction_hash) => Some(*transaction_hash),
+        }
+    }
+}
+
+/// Convert a transaction hash into a ForkChoice
+impl From<TxHash> for ForkChoice {
+    fn from(tx_hash: TxHash) -> Self {
+        Self::Transaction(tx_hash)
+    }
+}
+
+/// Convert a decimal block number into a ForkChoice
+impl From<u64> for ForkChoice {
+    fn from(block: u64) -> Self {
+        Self::Block(block as i128)
     }
 }
 
