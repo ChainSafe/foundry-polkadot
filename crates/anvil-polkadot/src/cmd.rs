@@ -1,15 +1,16 @@
 use crate::config::{
-    AccountGenerator, AnvilNodeConfig, CHAIN_ID, DEFAULT_MNEMONIC, SubstrateNodeConfig,
+    AccountGenerator, AnvilNodeConfig, CHAIN_ID, DEFAULT_MNEMONIC, ForkChoice, SubstrateNodeConfig,
 };
 use alloy_genesis::Genesis;
-use alloy_primitives::{U256, utils::Unit};
+use alloy_primitives::{B256, U256, utils::Unit};
 use alloy_signer_local::coins_bip39::{English, Mnemonic};
 use anvil_server::ServerConfig;
 use clap::Parser;
+use core::fmt;
 use foundry_common::shell;
 use foundry_config::Chain;
 use rand_08::{SeedableRng, rngs::StdRng};
-use std::{net::IpAddr, path::PathBuf, time::Duration};
+use std::{net::IpAddr, path::PathBuf, str::FromStr, time::Duration};
 
 #[derive(Clone, Debug, Parser)]
 pub struct NodeArgs {
@@ -134,7 +135,20 @@ impl NodeArgs {
             .with_code_size_limit(self.evm.code_size_limit)
             .disable_code_size_limit(self.evm.disable_code_size_limit)
             .with_disable_default_create2_deployer(self.evm.disable_default_create2_deployer)
-            .with_memory_limit(self.evm.memory_limit);
+            .with_memory_limit(self.evm.memory_limit)
+            .with_fork_choice(match (self.evm.fork_block_number, self.evm.fork_transaction_hash) {
+                (Some(block), None) => Some(ForkChoice::Block(block)),
+                (None, Some(hash)) => Some(ForkChoice::Transaction(hash)),
+                _ => self
+                    .evm
+                    .fork_url
+                    .as_ref()
+                    .and_then(|f| f.block)
+                    .map(|num| ForkChoice::Block(num as i128)),
+            })
+            .with_eth_rpc_url(self.evm.fork_url.map(|fork| fork.url))
+            .fork_request_timeout(self.evm.fork_request_timeout.map(Duration::from_millis))
+            .fork_request_retries(self.evm.fork_request_retries);
 
         let substrate_node_config = SubstrateNodeConfig::new(&anvil_config);
 
@@ -170,6 +184,56 @@ impl NodeArgs {
 #[derive(Clone, Debug, Parser)]
 #[command(next_help_heading = "EVM options")]
 pub struct AnvilEvmArgs {
+    /// Fetch state over a remote endpoint instead of starting from an empty state.
+    ///
+    /// If you want to fetch state from a specific block number, add a block number like `http://localhost:8545@1400000` or use the `--fork-block-number` argument.
+    #[arg(
+        long,
+        short,
+        visible_alias = "rpc-url",
+        value_name = "URL",
+        help_heading = "Fork config"
+    )]
+    pub fork_url: Option<ForkUrl>,
+
+    /// Fetch state from a specific block number over a remote endpoint.
+    ///
+    /// If negative, the given value is subtracted from the `latest` block number.
+    ///
+    /// See --fork-url.
+    #[arg(
+        long,
+        requires = "fork_url",
+        value_name = "BLOCK",
+        help_heading = "Fork config",
+        allow_hyphen_values = true
+    )]
+    pub fork_block_number: Option<i128>,
+
+    /// Fetch state from a specific transaction hash over a remote endpoint.
+    ///
+    /// See --fork-url.
+    #[arg(
+        long,
+        requires = "fork_url",
+        value_name = "TRANSACTION",
+        help_heading = "Fork config",
+        conflicts_with = "fork_block_number"
+    )]
+    pub fork_transaction_hash: Option<B256>,
+
+    /// Timeout in ms for requests sent to remote JSON-RPC server in forking mode.
+    ///
+    /// Default value 45000
+    #[arg(id = "timeout", long = "timeout", help_heading = "Fork config", requires = "fork_url")]
+    pub fork_request_timeout: Option<u64>,
+
+    /// Number of retry requests for spurious networks (timed out requests)
+    ///
+    /// Default value 5
+    #[arg(id = "retries", long = "retries", help_heading = "Fork config", requires = "fork_url")]
+    pub fork_request_retries: Option<u32>,
+
     /// The block gas limit.
     #[arg(long, alias = "block-gas-limit", help_heading = "Environment config")]
     pub gas_limit: Option<u128>,
@@ -243,6 +307,46 @@ pub struct AnvilEvmArgs {
     /// The memory limit per EVM execution in bytes.
     #[arg(long)]
     pub memory_limit: Option<u64>,
+}
+
+/// Represents the input URL for a fork with an optional trailing block number:
+/// `http://localhost:8545@1000000`
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ForkUrl {
+    /// The endpoint url
+    pub url: String,
+    /// Optional trailing block
+    pub block: Option<u64>,
+}
+
+impl fmt::Display for ForkUrl {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.url.fmt(f)?;
+        if let Some(block) = self.block {
+            write!(f, "@{block}")?;
+        }
+        Ok(())
+    }
+}
+
+impl FromStr for ForkUrl {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if let Some((url, block)) = s.rsplit_once('@') {
+            if block == "latest" {
+                return Ok(Self { url: url.to_string(), block: None });
+            }
+            // this will prevent false positives for auths `user:password@example.com`
+            if !block.is_empty() && !block.contains(':') && !block.contains('.') {
+                let block: u64 = block
+                    .parse()
+                    .map_err(|_| format!("Failed to parse block number: `{block}`"))?;
+                return Ok(Self { url: url.to_string(), block: Some(block) });
+            }
+        }
+        Ok(Self { url: s.to_string(), block: None })
+    }
 }
 
 /// Clap's value parser for genesis. Loads a genesis.json file.
