@@ -13,7 +13,7 @@ use polkadot_sdk::{
     },
 };
 use serde::de::DeserializeOwned;
-use std::{collections::HashMap, ptr, sync::Arc};
+use std::{collections::HashMap, sync::Arc};
 
 #[derive(PartialEq, Eq, Clone)]
 pub(crate) enum StoredBlock<B: BlockT> {
@@ -75,7 +75,6 @@ pub(crate) struct BlockchainStorage<Block: BlockT> {
     pub(crate) finalized_hash: Block::Hash,
     pub(crate) finalized_number: NumberFor<Block>,
     pub(crate) genesis_hash: Block::Hash,
-    pub(crate) header_cht_roots: HashMap<NumberFor<Block>, Block::Hash>,
     pub(crate) leaves: LeafSet<Block::Hash, NumberFor<Block>>,
     pub(crate) aux: HashMap<Vec<u8>, Vec<u8>>,
 }
@@ -98,7 +97,6 @@ impl<Block: BlockT + DeserializeOwned> Blockchain<Block> {
             finalized_hash: Default::default(),
             finalized_number: Zero::zero(),
             genesis_hash: Default::default(),
-            header_cht_roots: HashMap::new(),
             leaves: LeafSet::new(),
             aux: HashMap::new(),
         }));
@@ -170,39 +168,6 @@ impl<Block: BlockT + DeserializeOwned> Blockchain<Block> {
         }
 
         Ok(())
-    }
-
-    /// Get total number of blocks.
-    pub fn blocks_count(&self) -> usize {
-        self.storage.read().blocks.len()
-    }
-
-    /// Compare this blockchain with another in-mem blockchain
-    pub fn equals_to(&self, other: &Self) -> bool {
-        // Check ptr equality first to avoid double read locks.
-        if ptr::eq(self, other) {
-            return true;
-        }
-        self.canon_equals_to(other) && self.storage.read().blocks == other.storage.read().blocks
-    }
-
-    /// Compare canonical chain to other canonical chain.
-    pub fn canon_equals_to(&self, other: &Self) -> bool {
-        // Check ptr equality first to avoid double read locks.
-        if ptr::eq(self, other) {
-            return true;
-        }
-        let this = self.storage.read();
-        let other = other.storage.read();
-        this.hashes == other.hashes
-            && this.best_hash == other.best_hash
-            && this.best_number == other.best_number
-            && this.genesis_hash == other.genesis_hash
-    }
-
-    /// Insert header CHT root.
-    pub fn insert_cht_root(&self, block: NumberFor<Block>, cht_root: Block::Hash) {
-        self.storage.write().header_cht_roots.insert(block, cht_root);
     }
 
     /// Set an existing block as head.
@@ -314,7 +279,7 @@ impl<Block: BlockT + DeserializeOwned> HeaderBackend<Block> for Blockchain<Block
         };
 
         if header.is_none() {
-            log::warn!(
+            tracing::warn!(
                 target: LAZY_LOADING_LOG_TARGET,
                 "Expected block {:x?} to exist.",
                 &hash

@@ -125,7 +125,7 @@ impl<Block: BlockT + DeserializeOwned> sp_state_machine::StorageIterator<Hashing
             }
         };
 
-        log::trace!(
+        tracing::trace!(
             target: LAZY_LOADING_LOG_TARGET,
             "next_key: (prefix: {:?}, start_at: {:?}, next_key: {:?})",
             self.args.prefix.clone().map(hex::encode),
@@ -234,7 +234,7 @@ impl<Block: BlockT + DeserializeOwned> sp_state_machine::StorageIterator<Hashing
             }
         };
 
-        log::trace!(
+        tracing::trace!(
             target: LAZY_LOADING_LOG_TARGET,
             "next_pair: (prefix: {:?}, start_at: {:?}, next_key: {:?})",
             self.args.prefix.clone().map(hex::encode),
@@ -460,7 +460,7 @@ impl<Block: BlockT + DeserializeOwned> sp_state_machine::Backend<HashingFor<Bloc
         }
         .filter(|next_key| next_key != key);
 
-        log::trace!(
+        tracing::trace!(
             target: LAZY_LOADING_LOG_TARGET,
             "next_storage_key: (key: {:?}, next_key: {:?})",
             hex::encode(key),

@@ -93,7 +93,6 @@ impl<Block: BlockT + DeserializeOwned> backend::Backend<Block> for Backend<Block
             child_storage_updates: Default::default(),
             finalized_blocks: Default::default(),
             set_head: None,
-            before_fork: false,
         })
     }
 
@@ -146,7 +145,7 @@ impl<Block: BlockT + DeserializeOwned> backend::Backend<Block> for Backend<Block
                 fork_block: self.fork_checkpoint.hash(),
                 db: new_db,
                 removed_keys: new_removed_keys,
-                before_fork: operation.before_fork,
+                before_fork: false,
             };
             self.states.write().insert(hash, new_state);
 
@@ -387,9 +386,6 @@ impl<Block: BlockT + DeserializeOwned> backend::Backend<Block> for Backend<Block
         } else {
             storage.finalized_hash = storage.genesis_hash;
         }
-
-        drop(pinned);
-        drop(states);
 
         Ok((reverted, reverted_finalized))
     }

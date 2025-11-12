@@ -24,7 +24,6 @@ pub struct BlockImportOperation<Block: BlockT + DeserializeOwned> {
     pub(crate) child_storage_updates: ChildStorageCollection,
     pub(crate) finalized_blocks: Vec<(Block::Hash, Option<Justification>)>,
     pub(crate) set_head: Option<Block::Hash>,
-    pub(crate) before_fork: bool,
 }
 
 impl<Block: BlockT + DeserializeOwned> BlockImportOperation<Block> {
