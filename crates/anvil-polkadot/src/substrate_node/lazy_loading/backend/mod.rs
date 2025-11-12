@@ -26,16 +26,17 @@ use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
 };
+use parking_lot::RwLock;
 
 use crate::substrate_node::lazy_loading::rpc_client::RPCClient;
 
 pub struct Backend<Block: BlockT + DeserializeOwned> {
     pub(crate) rpc_client: Option<Arc<dyn RPCClient<Block>>>,
     pub(crate) fork_checkpoint: Block::Header,
-    states: parking_lot::RwLock<HashMap<Block::Hash, ForkedLazyBackend<Block>>>,
+    states: RwLock<HashMap<Block::Hash, ForkedLazyBackend<Block>>>,
     pub(crate) blockchain: Blockchain<Block>,
-    import_lock: parking_lot::RwLock<()>,
-    pinned_blocks: parking_lot::RwLock<HashMap<Block::Hash, i64>>,
+    import_lock: RwLock<()>,
+    pinned_blocks: RwLock<HashMap<Block::Hash, i64>>,
 }
 
 impl<Block: BlockT + DeserializeOwned> Backend<Block> {
@@ -126,7 +127,7 @@ impl<Block: BlockT + DeserializeOwned> backend::Backend<Block> for Backend<Block
                     removed_keys_map.insert(key.clone(), ());
                 }
             }
-            let new_removed_keys = Arc::new(parking_lot::RwLock::new(removed_keys_map));
+            let new_removed_keys = Arc::new(RwLock::new(removed_keys_map));
 
             let mut db_clone = old_state.db.read().clone();
             {
@@ -138,7 +139,7 @@ impl<Block: BlockT + DeserializeOwned> backend::Backend<Block> for Backend<Block
                 }
                 db_clone.insert(entries, StateVersion::V1);
             }
-            let new_db = Arc::new(parking_lot::RwLock::new(db_clone));
+            let new_db = Arc::new(RwLock::new(db_clone));
             let new_state = ForkedLazyBackend {
                 rpc_client: self.rpc_client.clone(),
                 block_hash: Some(hash),
@@ -443,7 +444,7 @@ impl<Block: BlockT + DeserializeOwned> backend::Backend<Block> for Backend<Block
         Ok(())
     }
 
-    fn get_import_lock(&self) -> &parking_lot::RwLock<()> {
+    fn get_import_lock(&self) -> &RwLock<()> {
         &self.import_lock
     }
 
