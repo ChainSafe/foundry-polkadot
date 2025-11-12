@@ -32,7 +32,7 @@ pub struct RawIterArgs {
     pub start_at: Option<Vec<u8>>,
 }
 
-/// A raw iterator over the `BenchmarkingState`.
+/// A raw iterator over the storage keys.
 pub struct RawIter<Block: BlockT + DeserializeOwned> {
     pub(crate) args: RawIterArgs,
     complete: bool,
