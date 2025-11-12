@@ -14,6 +14,7 @@ use polkadot_sdk::{
 };
 use serde::de::DeserializeOwned;
 use std::{collections::HashMap, sync::Arc};
+use parking_lot::RwLock;
 
 #[derive(PartialEq, Eq, Clone)]
 pub(crate) enum StoredBlock<B: BlockT> {
@@ -83,13 +84,13 @@ pub(crate) struct BlockchainStorage<Block: BlockT> {
 #[derive(Clone)]
 pub struct Blockchain<Block: BlockT + DeserializeOwned> {
     rpc_client: Option<Arc<dyn RPCClient<Block>>>,
-    pub(crate) storage: Arc<parking_lot::RwLock<BlockchainStorage<Block>>>,
+    pub(crate) storage: Arc<RwLock<BlockchainStorage<Block>>>,
 }
 
 impl<Block: BlockT + DeserializeOwned> Blockchain<Block> {
     /// Create new in-memory blockchain storage.
     pub(crate) fn new(rpc_client: Option<Arc<dyn RPCClient<Block>>>) -> Self {
-        let storage = Arc::new(parking_lot::RwLock::new(BlockchainStorage {
+        let storage = Arc::new(RwLock::new(BlockchainStorage {
             blocks: HashMap::new(),
             hashes: HashMap::new(),
             best_hash: Default::default(),

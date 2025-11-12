@@ -1,5 +1,6 @@
 use super::*;
 use mock_rpc::{Rpc, TestBlock, TestHeader};
+use parking_lot::RwLock;
 use polkadot_sdk::{
     sc_client_api::{Backend as BackendT, StateBackend},
     sp_runtime::{
@@ -43,28 +44,28 @@ mod mock_rpc {
     pub struct Rpc<Block: BlockT + DeserializeOwned> {
         pub counters: std::sync::Arc<Counters>,
         /// storage[(block_hash, key)] = value
-        pub storage: Arc<parking_lot::RwLock<BTreeMap<(Block::Hash, StorageKey), StorageData>>>,
+        pub storage: Arc<RwLock<BTreeMap<(Block::Hash, StorageKey), StorageData>>>,
         /// storage_hash[(block_hash, key)] = hash
         pub storage_hashes:
-            Arc<parking_lot::RwLock<BTreeMap<(Block::Hash, StorageKey), Block::Hash>>>,
+            Arc<RwLock<BTreeMap<(Block::Hash, StorageKey), Block::Hash>>>,
         /// storage_keys_paged[(block_hash, (prefix,start))] = Vec<keys>
         pub storage_keys_pages:
-            Arc<parking_lot::RwLock<BTreeMap<(Block::Hash, Vec<u8>), Vec<StorageKey>>>>,
+            Arc<RwLock<BTreeMap<(Block::Hash, Vec<u8>), Vec<StorageKey>>>>,
         /// headers[hash] = header
-        pub headers: Arc<parking_lot::RwLock<BTreeMap<Block::Hash, Block::Header>>>,
+        pub headers: Arc<RwLock<BTreeMap<Block::Hash, Block::Header>>>,
         /// blocks[hash] = SignedBlock
-        pub blocks: Arc<parking_lot::RwLock<BTreeMap<Block::Hash, SignedBlock<Block>>>>,
+        pub blocks: Arc<RwLock<BTreeMap<Block::Hash, SignedBlock<Block>>>>,
     }
 
     impl<Block: BlockT + DeserializeOwned> Rpc<Block> {
         pub fn new() -> Self {
             Self {
                 counters: std::sync::Arc::new(Counters::default()),
-                storage: std::sync::Arc::new(parking_lot::RwLock::new(BTreeMap::new())),
-                storage_hashes: std::sync::Arc::new(parking_lot::RwLock::new(BTreeMap::new())),
-                storage_keys_pages: std::sync::Arc::new(parking_lot::RwLock::new(BTreeMap::new())),
-                headers: std::sync::Arc::new(parking_lot::RwLock::new(BTreeMap::new())),
-                blocks: std::sync::Arc::new(parking_lot::RwLock::new(BTreeMap::new())),
+                storage: std::sync::Arc::new(RwLock::new(BTreeMap::new())),
+                storage_hashes: std::sync::Arc::new(RwLock::new(BTreeMap::new())),
+                storage_keys_pages: std::sync::Arc::new(RwLock::new(BTreeMap::new())),
+                headers: std::sync::Arc::new(RwLock::new(BTreeMap::new())),
+                blocks: std::sync::Arc::new(RwLock::new(BTreeMap::new())),
             }
         }
 
