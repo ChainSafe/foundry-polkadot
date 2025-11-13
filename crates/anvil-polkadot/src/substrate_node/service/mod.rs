@@ -52,16 +52,13 @@ pub struct Service {
 /// Builds a new service for a full client.
 pub fn new(
     anvil_config: &AnvilNodeConfig,
-    config: Configuration,
+    mut config: Configuration,
 ) -> Result<(Service, TaskManager), ServiceError> {
     let storage_overrides = Arc::new(Mutex::new(StorageOverrides::default()));
+    let executor = sc_service::new_wasm_executor(&config.executor);
 
-    let (client, backend, keystore, mut task_manager) = client::new_client(
-        anvil_config.get_genesis_number(),
-        &config,
-        sc_service::new_wasm_executor(&config.executor),
-        storage_overrides.clone(),
-    )?;
+    let (client, backend, keystore, mut task_manager) =
+        client::new_client(anvil_config, &mut config, executor, storage_overrides.clone())?;
 
     let transaction_pool = Arc::from(
         sc_transaction_pool::Builder::new(
