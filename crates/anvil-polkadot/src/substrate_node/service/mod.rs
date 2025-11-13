@@ -91,30 +91,24 @@ async fn resolve_fork_hash_http(client: &HttpClient, fork_block_hash: Option<Str
     Ok(res)
 }
 
-async fn fetch_para_id(url: String) -> eyre::Result<u32> {
-    // Connect to the node (adjust URL for your local foundry-polkadot/anvil-polkadot node)
-  //  let ws_url = "ws://127.0.0.1:9944"; // or appropriate RPC/WS endpoint
-    let api = OnlineClient::<PolkadotConfig>::from_url(url).await?;
+// async fn fetch_para_id(url: String) -> eyre::Result<u32> {
+//     // Connect to the node (adjust URL for your local foundry-polkadot/anvil-polkadot node)
+//   //  let ws_url = "ws://127.0.0.1:9944"; // or appropriate RPC/WS endpoint
+//     let api = OnlineClient::<PolkadotConfig>::from_url(url).await?;
 
-    // Name of runtime API – check your runtime’s implementation, but typical is something like:
-    let api_name = "ParachainInfo_parachainId";
+//     // Name of runtime API – check your runtime’s implementation, but typical is something like:
+//     let api_name = "ParachainInfo_parachainId";
 
-    // Call the runtime API at the latest block (None)
-    let para_id: u32 = api
-        .rpc()
-        .call_runtime_api(api_name, None, ())
-        .await?;
+//     // Call the runtime API at the latest block (None)
+//     let para_id: u32 = api
+//         .rpc()
+//         .call_runtime_api(api_name, None, ())
+//         .await?;
 
-    println!("Parachain ID: {}", para_id);
-    Ok(())
-}
+//     println!("Parachain ID: {}", para_id);
+//     Ok(())
+// }
 
-async fn fetch_methods(client: &HttpClient) -> eyre::Result<u32> {
-    let res: String = client.request("system_chain", rpc_params![]).await?;
-     print!("methods {:#?}", res);
-      Ok(0)
-
-}
 
 async fn fetch_sync_spec_http(client: &HttpClient, at_hex_opt: Option<String>) -> eyre::Result<Vec<u8>> {
     let pb = ProgressBar::new_spinner();
@@ -343,9 +337,9 @@ pub fn new(
     anvil_config: &AnvilNodeConfig,
     mut config: Configuration,
 ) -> Result<(Service, TaskManager), ServiceError> {
-    let c;
+    //let c;
     //let mut para_id = 0;
-     if let Some(ref fork_url) = anvil_config.fork_url {
+     if let Some(ref fork_url) = anvil_config.eth_rpc_url {
         let http_url = fork_url.clone();
         let fork_block_hash = anvil_config.fork_block_hash.clone();
         let spec_or_top = std::thread::spawn(move || -> eyre::Result<Result<Vec<u8>, Map<String, Value>>> {
@@ -363,7 +357,7 @@ pub fn new(
                 let at_hex = resolve_fork_hash_http(&http, fork_block_hash).await?;  
               // fetch_methods(&http).await; 
                // let id = fetch_methods(&http).await?; 
-               fetch_para_id(fork_url).await?; 
+              // fetch_para_id(fork_url).await?; 
                 // para_id = id;
                 let try_sync = fetch_sync_spec_http(&http, Some(at_hex.clone())).await;
                 match try_sync {
@@ -386,12 +380,12 @@ pub fn new(
                     sc_chain_spec::GenericChainSpec::from_json_bytes(spec_bytes)
                         .map_err(|e| ServiceError::Other(format!("from_json_bytes failed: {e}")))?;
                 config.chain_spec = Box::new(new_spec);
-                c = new_spec;
+               // c = new_spec;
 
             }
             Err(top_map) => {
                 config.chain_spec = build_forked_chainspec_from_raw_top(top_map)?;
-                c = build_forked_chainspec_from_raw_top(top_map)?;
+              //  c = build_forked_chainspec_from_raw_top(top_map)?;
             }
         }
     }

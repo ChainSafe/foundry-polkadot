@@ -150,7 +150,7 @@ impl NodeArgs {
             })
             .with_eth_rpc_url(self.evm.fork_url.map(|fork| fork.url))
             .fork_request_timeout(self.evm.fork_request_timeout.map(Duration::from_millis))
-            .fork_request_retries(self.evm.fork_request_retries);
+            .fork_request_retries(self.evm.fork_request_retries)
             // for my testing
             .with_fork_block_hash(self.fork.fork_block_hash);
 
