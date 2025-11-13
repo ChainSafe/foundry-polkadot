@@ -172,6 +172,7 @@ pub struct DevelopmentGenesisBlockBuilder<Block: BlockT, B, E> {
     backend: Arc<B>,
     executor: E,
     checkpoint: Option<Block::Header>,
+    checkpoint_extrinsics: Option<Vec<Block::Extrinsic>>,
     _phantom: PhantomData<Block>,
 }
 
@@ -219,6 +220,7 @@ impl<Block: BlockT, B: Backend<Block>, E: RuntimeVersionOf>
             backend,
             executor,
             checkpoint: None,
+            checkpoint_extrinsics: None,
             _phantom: PhantomData::<Block>,
         })
     }
@@ -229,6 +231,7 @@ impl<Block: BlockT, B: Backend<Block>, E: RuntimeVersionOf>
         backend: Arc<B>,
         executor: E,
         checkpoint: Block::Header,
+        checkpoint_extrinsics: Vec<Block::Extrinsic>,
     ) -> sp_blockchain::Result<Self> {
         let genesis_storage =
             build_genesis_storage.build_storage().map_err(sp_blockchain::Error::Storage)?;
@@ -252,6 +255,7 @@ impl<Block: BlockT, B: Backend<Block>, E: RuntimeVersionOf>
             backend,
             executor,
             checkpoint: Some(checkpoint),
+            checkpoint_extrinsics: Some(checkpoint_extrinsics),
             _phantom: PhantomData::<Block>,
         })
     }
@@ -270,6 +274,7 @@ impl<Block: BlockT, B: Backend<Block>, E: RuntimeVersionOf> BuildGenesisBlock<Bl
             backend,
             executor,
             checkpoint,
+            checkpoint_extrinsics,
             _phantom,
         } = self;
 
@@ -282,7 +287,8 @@ impl<Block: BlockT, B: Backend<Block>, E: RuntimeVersionOf> BuildGenesisBlock<Bl
             );
 
             let op = backend.begin_operation()?;
-            let genesis_block = Block::new(checkpoint_header, Default::default());
+            let extrinsics = checkpoint_extrinsics.unwrap_or_default();
+            let genesis_block = Block::new(checkpoint_header, extrinsics);
             Ok((genesis_block, op))
         } else {
             // Normal mode: create new genesis block
