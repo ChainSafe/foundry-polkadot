@@ -38,8 +38,11 @@ pub fn new_client(
     executor: WasmExecutor,
     storage_overrides: Arc<Mutex<StorageOverrides>>,
 ) -> Result<(Arc<Client>, Arc<Backend>, KeystorePtr, TaskManager), sc_service::error::Error> {
-    let (rpc_client, checkpoint): (Option<Arc<dyn RPCClient<Block>>>, <Block as BlockT>::Header) =
-        if let Some(fork_url) = &anvil_config.eth_rpc_url {
+    let (rpc_client, checkpoint, checkpoint_extrinsics): (
+        Option<Arc<dyn RPCClient<Block>>>,
+        <Block as BlockT>::Header,
+        Vec<<Block as BlockT>::Extrinsic>,
+    ) = if let Some(fork_url) = &anvil_config.eth_rpc_url {
             let http_client = jsonrpsee::http_client::HttpClientBuilder::default()
                 .max_request_size(u32::MAX)
                 .max_response_size(u32::MAX)
@@ -88,6 +91,7 @@ pub fn new_client(
                 .ok_or_else(|| sp_blockchain::Error::Backend("fork checkpoint not found".into()))?;
 
             let checkpoint_header = checkpoint.block.header().clone();
+            let checkpoint_extrinsics = checkpoint.block.extrinsics().to_vec();
 
             tracing::info!(
                 "🔗 Forking from block #{} (hash: {:?})",
@@ -95,7 +99,7 @@ pub fn new_client(
                 checkpoint_header.hash()
             );
 
-            (Some(Arc::new(rpc_client)), checkpoint_header)
+            (Some(Arc::new(rpc_client)), checkpoint_header, checkpoint_extrinsics)
         } else {
             let checkpoint = Header::new(
                 anvil_config.get_genesis_number().try_into().expect("genesis number too large"),
@@ -105,7 +109,7 @@ pub fn new_client(
                 Default::default(),
             );
 
-            (None, checkpoint)
+            (None, checkpoint, Vec::new())
         };
 
     let backend = new_lazy_loading_backend(rpc_client.clone(), Some(checkpoint.clone()))?;
@@ -120,6 +124,7 @@ pub fn new_client(
             backend.clone(),
             executor.clone(),
             checkpoint.clone(),
+            checkpoint_extrinsics.clone(),
         )?
     } else {
         // Normal mode: create standard genesis
