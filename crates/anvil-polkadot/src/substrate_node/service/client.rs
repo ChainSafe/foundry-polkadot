@@ -1,40 +1,136 @@
-use crate::substrate_node::{
-    genesis::DevelopmentGenesisBlockBuilder,
-    lazy_loading::backend::new_backend as new_lazy_loading_backend,
-    service::{
-        Backend,
-        backend::StorageOverrides,
-        executor::{Executor, WasmExecutor},
+use crate::{
+    AnvilNodeConfig,
+    substrate_node::{
+        genesis::DevelopmentGenesisBlockBuilder,
+        lazy_loading::{
+            backend::new_backend as new_lazy_loading_backend,
+            rpc_client::{RPCClient, Rpc},
+        },
+        service::{
+            Backend,
+            backend::StorageOverrides,
+            executor::{Executor, WasmExecutor},
+            storage::well_known_keys,
+        },
     },
 };
 use parking_lot::Mutex;
 use polkadot_sdk::{
-    parachains_common::opaque::Block,
-    sc_chain_spec::get_extension,
+    parachains_common::opaque::{Block, Header},
+    sc_chain_spec::{NoExtension, get_extension},
     sc_client_api::{BadBlocks, ForkBlocks, execution_extensions::ExecutionExtensions},
-    sc_service::{self, KeystoreContainer, LocalCallExecutor, TaskManager},
+    sc_service::{
+        self, ChainType, GenericChainSpec, KeystoreContainer, LocalCallExecutor, TaskManager,
+    },
+    sp_blockchain,
     sp_keystore::KeystorePtr,
+    sp_runtime::{generic::SignedBlock, traits::Block as BlockT, traits::Header as HeaderT},
+    sp_storage::StorageKey,
 };
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, sync::Arc, time::Duration};
 use substrate_runtime::RuntimeApi;
 
 pub type Client = sc_service::client::Client<Backend, Executor, Block, RuntimeApi>;
 
 pub fn new_client(
-    genesis_block_number: u64,
-    config: &sc_service::Configuration,
+    anvil_config: &AnvilNodeConfig,
+    config: &mut sc_service::Configuration,
     executor: WasmExecutor,
     storage_overrides: Arc<Mutex<StorageOverrides>>,
 ) -> Result<(Arc<Client>, Arc<Backend>, KeystorePtr, TaskManager), sc_service::error::Error> {
-    let backend = new_lazy_loading_backend(None, None)?;
+    let (rpc_client, checkpoint): (Option<Arc<dyn RPCClient<Block>>>, <Block as BlockT>::Header) =
+        if let Some(fork_url) = &anvil_config.eth_rpc_url {
+            let http_client = jsonrpsee::http_client::HttpClientBuilder::default()
+                .max_request_size(u32::MAX)
+                .max_response_size(u32::MAX)
+                .request_timeout(Duration::from_secs(10))
+                .build(fork_url)
+                .map_err(|e| {
+                    sp_blockchain::Error::Backend(format!("failed to build http client: {e}"))
+                })?;
 
-    let genesis_block_builder = DevelopmentGenesisBlockBuilder::new(
-        genesis_block_number,
-        config.chain_spec.as_storage_builder(),
-        !config.no_genesis(),
-        backend.clone(),
-        executor.clone(),
-    )?;
+            let rpc_client = Rpc::<Block>::new(http_client, 0);
+
+            // Create new chainspec for the forked chain
+            let chain_name = rpc_client.system_chain().map_err(|e| {
+                sp_blockchain::Error::Backend(format!("failed to fetch system_chain: {e}"))
+            })?;
+
+            let chain_properties = rpc_client.system_properties().map_err(|e| {
+                sp_blockchain::Error::Backend(format!("failed to fetch system_properties: {e}"))
+            })?;
+
+            // TODO: get block hash using block number from config
+            let block_hash: Option<<Block as BlockT>::Hash> = None;
+
+            let wasm_binary = rpc_client
+                .storage(StorageKey(well_known_keys::CODE.to_vec()), block_hash)
+                .map_err(|e| {
+                    sp_blockchain::Error::Backend(format!("failed to fetch runtime code: {e}"))
+                })?
+                .map(|data| data.0)
+                .expect("WASM binary not found in forked chain");
+
+            let chain_spec = GenericChainSpec::<NoExtension, ()>::builder(&wasm_binary, None)
+                .with_name(chain_name.as_str())
+                .with_id("lazy_loading")
+                .with_properties(chain_properties)
+                .with_chain_type(ChainType::Development)
+                .build();
+
+            config.chain_spec = Box::new(chain_spec);
+
+            let checkpoint: SignedBlock<Block> = rpc_client
+                .block(block_hash)
+                .map_err(|e| {
+                    sp_blockchain::Error::Backend(format!("failed to fetch checkpoint block: {e}"))
+                })?
+                .ok_or_else(|| sp_blockchain::Error::Backend("fork checkpoint not found".into()))?;
+
+            let checkpoint_header = checkpoint.block.header().clone();
+
+            tracing::info!(
+                "🔗 Forking from block #{} (hash: {:?})",
+                checkpoint_header.number(),
+                checkpoint_header.hash()
+            );
+
+            (Some(Arc::new(rpc_client)), checkpoint_header)
+        } else {
+            let checkpoint = Header::new(
+                anvil_config.get_genesis_number().try_into().expect("genesis number too large"),
+                Default::default(),
+                Default::default(),
+                Default::default(),
+                Default::default(),
+            );
+
+            (None, checkpoint)
+        };
+
+    let backend = new_lazy_loading_backend(rpc_client.clone(), Some(checkpoint.clone()))?;
+
+    // In fork mode, use the checkpoint block as genesis
+    // In normal mode, create a new genesis block
+    let genesis_block_builder = if rpc_client.is_some() {
+        // Fork mode: use checkpoint block as genesis
+        DevelopmentGenesisBlockBuilder::new_with_checkpoint(
+            config.chain_spec.as_storage_builder(),
+            !config.no_genesis(),
+            backend.clone(),
+            executor.clone(),
+            checkpoint.clone(),
+        )?
+    } else {
+        // Normal mode: create standard genesis
+        DevelopmentGenesisBlockBuilder::new(
+            anvil_config.get_genesis_number(),
+            config.chain_spec.as_storage_builder(),
+            !config.no_genesis(),
+            backend.clone(),
+            executor.clone(),
+        )?
+    };
 
     let keystore_container = KeystoreContainer::new(&config.keystore)?;
 
