@@ -44,6 +44,8 @@ use polkadot_sdk::{
 };
 use std::sync::Arc;
 use tokio_stream::wrappers::ReceiverStream;
+use sqlx::types::JsonValue;
+
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -87,6 +89,31 @@ async fn resolve_fork_hash_http(client: &HttpClient, fork_block_hash: Option<Str
     if let Some(h) = fork_block_hash { return Ok(h); }
     let res: String = client.request("chain_getBlockHash", rpc_params![]).await?;
     Ok(res)
+}
+
+async fn fetch_para_id(url: String) -> eyre::Result<u32> {
+    // Connect to the node (adjust URL for your local foundry-polkadot/anvil-polkadot node)
+  //  let ws_url = "ws://127.0.0.1:9944"; // or appropriate RPC/WS endpoint
+    let api = OnlineClient::<PolkadotConfig>::from_url(url).await?;
+
+    // Name of runtime API – check your runtime’s implementation, but typical is something like:
+    let api_name = "ParachainInfo_parachainId";
+
+    // Call the runtime API at the latest block (None)
+    let para_id: u32 = api
+        .rpc()
+        .call_runtime_api(api_name, None, ())
+        .await?;
+
+    println!("Parachain ID: {}", para_id);
+    Ok(())
+}
+
+async fn fetch_methods(client: &HttpClient) -> eyre::Result<u32> {
+    let res: String = client.request("system_chain", rpc_params![]).await?;
+     print!("methods {:#?}", res);
+      Ok(0)
+
 }
 
 async fn fetch_sync_spec_http(client: &HttpClient, at_hex_opt: Option<String>) -> eyre::Result<Vec<u8>> {
@@ -273,6 +300,7 @@ fn create_manual_seal_inherent_data_providers(
             .ok()
             .unwrap_or_default();
 
+
         let current_para_block_head =
             Some(polkadot_primitives::HeadData(current_para_head.hash().as_bytes().to_vec()));
 
@@ -315,7 +343,8 @@ pub fn new(
     anvil_config: &AnvilNodeConfig,
     mut config: Configuration,
 ) -> Result<(Service, TaskManager), ServiceError> {
-
+    let c;
+    //let mut para_id = 0;
      if let Some(ref fork_url) = anvil_config.fork_url {
         let http_url = fork_url.clone();
         let fork_block_hash = anvil_config.fork_block_hash.clone();
@@ -332,6 +361,10 @@ pub fn new(
                     .build(http_url)
                     .map_err(|e| eyre::eyre!("http client build error: {e}"))?;
                 let at_hex = resolve_fork_hash_http(&http, fork_block_hash).await?;  
+              // fetch_methods(&http).await; 
+               // let id = fetch_methods(&http).await?; 
+               fetch_para_id(fork_url).await?; 
+                // para_id = id;
                 let try_sync = fetch_sync_spec_http(&http, Some(at_hex.clone())).await;
                 match try_sync {
                     Ok(spec_bytes) => Ok(Ok(spec_bytes)),
@@ -353,9 +386,12 @@ pub fn new(
                     sc_chain_spec::GenericChainSpec::from_json_bytes(spec_bytes)
                         .map_err(|e| ServiceError::Other(format!("from_json_bytes failed: {e}")))?;
                 config.chain_spec = Box::new(new_spec);
+                c = new_spec;
+
             }
             Err(top_map) => {
                 config.chain_spec = build_forked_chainspec_from_raw_top(top_map)?;
+                c = build_forked_chainspec_from_raw_top(top_map)?;
             }
         }
     }
@@ -446,7 +482,15 @@ pub fn new(
     // doesnt implement all the needed traits
 	let aura_digest_provider = AuraConsensusDataProvider::new_with_slot_duration(slot_duration);
 
-    let para_id = Id::new(anvil_config.get_chain_id().try_into().unwrap());
+
+  //let para_id = Id::new(anvil_config.get_chain_id().try_into().unwrap());
+
+    let para_id = Id::new(420420421);
+    
+   // anvil_config.set_chain_id(Some(420420421 as u64));
+   // let id = config;
+   // print!("paraID 1: {:#?}", id);
+    print!("paraID: {}", para_id);
 
     let create_inherent_data_providers = create_manual_seal_inherent_data_providers(
 			client.clone(),
