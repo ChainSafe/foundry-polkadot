@@ -67,7 +67,18 @@ polkadot-sdk = { git = "https://github.com/paritytech/polkadot-sdk.git", branch 
 	"substrate-frame-rpc-system",
 	"substrate-rpc-client",
 	"substrate-wasm-builder",
+	"sc-consensus-aura",
+	"polkadot-primitives",
+	"cumulus-client-parachain-inherent",
+	"sp-arithmetic",
+	"cumulus-client-service",
+	"cumulus-primitives-aura",
+
+	"cumulus-primitives-core",
+	"sp-inherents",
 ] }
+
+indicatif.workspace = true
 anvil.workspace = true
 anvil-core.workspace = true
 anvil-server = { workspace = true, features = ["clap"] }
