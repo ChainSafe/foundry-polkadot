@@ -9,6 +9,7 @@ pub use forked_lazy_backend::ForkedLazyBackend;
 #[cfg(test)]
 mod tests;
 
+use parking_lot::RwLock;
 use polkadot_sdk::{
     sc_client_api::{
         HeaderBackend, TrieCacheContext, UsageInfo,
@@ -26,7 +27,6 @@ use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
 };
-use parking_lot::RwLock;
 
 use crate::substrate_node::lazy_loading::rpc_client::RPCClient;
 
@@ -40,7 +40,10 @@ pub struct Backend<Block: BlockT + DeserializeOwned> {
 }
 
 impl<Block: BlockT + DeserializeOwned> Backend<Block> {
-    fn new(rpc_client: Option<Arc<dyn RPCClient<Block>>>, fork_checkpoint: Option<Block::Header>) -> Self {
+    fn new(
+        rpc_client: Option<Arc<dyn RPCClient<Block>>>,
+        fork_checkpoint: Option<Block::Header>,
+    ) -> Self {
         Self {
             rpc_client: rpc_client.clone(),
             states: Default::default(),
@@ -214,44 +217,23 @@ impl<Block: BlockT + DeserializeOwned> backend::Backend<Block> for Backend<Block
             });
         }
 
-        let (backend, should_write) =
-            self.states.read().get(&hash).cloned().map(|state| Ok((state, false))).unwrap_or_else(
-                || {
-                    self.rpc()
-                        .and_then(|rpc| rpc.header(Some(hash)).ok())
-                        .flatten()
-                        .ok_or(sp_blockchain::Error::UnknownBlock(format!(
-                            "Failed to fetch block header: {hash:?}"
-                        )))
-                        .map(|header| {
-                            let state = match &self.fork_checkpoint {
-                                Some(checkpoint) => {
-                                    if header.number().gt(checkpoint.number()) {
-                                        let parent = self
-                                            .state_at(*header.parent_hash(), TrieCacheContext::Trusted)
-                                            .ok();
-
-                                        ForkedLazyBackend::<Block> {
-                                            rpc_client: self.rpc_client.clone(),
-                                            block_hash: Some(hash),
-                                            fork_block: Some(checkpoint.hash()),
-                                            db: parent.clone().map_or(Default::default(), |p| p.db),
-                                            removed_keys: parent
-                                                .map_or(Default::default(), |p| p.removed_keys),
-                                            before_fork: false,
-                                        }
-                                    } else {
-                                        ForkedLazyBackend::<Block> {
-                                            rpc_client: self.rpc_client.clone(),
-                                            block_hash: Some(hash),
-                                            fork_block: Some(checkpoint.hash()),
-                                            db: Default::default(),
-                                            removed_keys: Default::default(),
-                                            before_fork: true,
-                                        }
-                                    }
-                                }
-                                None => {
+        let (backend, should_write) = self
+            .states
+            .read()
+            .get(&hash)
+            .cloned()
+            .map(|state| Ok((state, false)))
+            .unwrap_or_else(|| {
+                self.rpc()
+                    .and_then(|rpc| rpc.header(Some(hash)).ok())
+                    .flatten()
+                    .ok_or(sp_blockchain::Error::UnknownBlock(format!(
+                        "Failed to fetch block header: {hash:?}"
+                    )))
+                    .map(|header| {
+                        let state = match &self.fork_checkpoint {
+                            Some(checkpoint) => {
+                                if header.number().gt(checkpoint.number()) {
                                     let parent = self
                                         .state_at(*header.parent_hash(), TrieCacheContext::Trusted)
                                         .ok();
@@ -259,19 +241,43 @@ impl<Block: BlockT + DeserializeOwned> backend::Backend<Block> for Backend<Block
                                     ForkedLazyBackend::<Block> {
                                         rpc_client: self.rpc_client.clone(),
                                         block_hash: Some(hash),
-                                        fork_block: None,
+                                        fork_block: Some(checkpoint.hash()),
                                         db: parent.clone().map_or(Default::default(), |p| p.db),
                                         removed_keys: parent
                                             .map_or(Default::default(), |p| p.removed_keys),
                                         before_fork: false,
                                     }
+                                } else {
+                                    ForkedLazyBackend::<Block> {
+                                        rpc_client: self.rpc_client.clone(),
+                                        block_hash: Some(hash),
+                                        fork_block: Some(checkpoint.hash()),
+                                        db: Default::default(),
+                                        removed_keys: Default::default(),
+                                        before_fork: true,
+                                    }
                                 }
-                            };
+                            }
+                            None => {
+                                let parent = self
+                                    .state_at(*header.parent_hash(), TrieCacheContext::Trusted)
+                                    .ok();
 
-                            (state, true)
-                        })
-                },
-            )?;
+                                ForkedLazyBackend::<Block> {
+                                    rpc_client: self.rpc_client.clone(),
+                                    block_hash: Some(hash),
+                                    fork_block: None,
+                                    db: parent.clone().map_or(Default::default(), |p| p.db),
+                                    removed_keys: parent
+                                        .map_or(Default::default(), |p| p.removed_keys),
+                                    before_fork: false,
+                                }
+                            }
+                        };
+
+                        (state, true)
+                    })
+            })?;
 
         if should_write {
             self.states.write().insert(hash, backend.clone());
@@ -415,56 +421,8 @@ impl<Block: BlockT + DeserializeOwned> backend::Backend<Block> for Backend<Block
         Ok((reverted, reverted_finalized))
     }
 
-    fn remove_leaf_block(&self, hash: Block::Hash) -> sp_blockchain::Result<()> {
-        let best_hash = self.blockchain.info().best_hash;
-
-        if best_hash == hash {
-            return Err(sp_blockchain::Error::Backend(
-                format!("Can't remove best block {hash:?}",),
-            ));
-        }
-
-        let mut storage = self.blockchain.storage.write();
-
-        let Some(block) = storage.blocks.get(&hash) else {
-            return Err(sp_blockchain::Error::UnknownBlock(format!("{hash:?}")));
-        };
-
-        let number = *block.header().number();
-        let parent_hash = *block.header().parent_hash();
-
-        if !storage.leaves.contains(number, hash) {
-            return Err(sp_blockchain::Error::Backend(format!(
-                "Can't remove non-leaf block {hash:?}",
-            )));
-        }
-
-        if self.pinned_blocks.read().get(&hash).is_some_and(|count| *count > 0) {
-            return Err(sp_blockchain::Error::Backend(format!(
-                "Can't remove pinned block {hash:?}",
-            )));
-        }
-
-        let parent_becomes_leaf = if number.is_zero() {
-            false
-        } else {
-            !storage.blocks.iter().any(|(other_hash, stored)| {
-                *other_hash != hash && stored.header().parent_hash() == &parent_hash
-            })
-        };
-
-        let mut states = self.states.write();
-
-        storage.blocks.remove(&hash);
-        if let Some(entry) = storage.hashes.get(&number) {
-            if *entry == hash {
-                storage.hashes.remove(&number);
-            }
-        }
-        states.remove(&hash);
-
-        storage.leaves.remove(hash, number, parent_becomes_leaf.then_some(parent_hash));
-
+    fn remove_leaf_block(&self, _hash: Block::Hash) -> sp_blockchain::Result<()> {
+        // Not used
         Ok(())
     }
 
