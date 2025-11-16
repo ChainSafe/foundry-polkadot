@@ -112,7 +112,7 @@ impl<Block: BlockT + DeserializeOwned> sp_state_machine::StorageIterator<Hashing
                 .unwrap_or(false);
             if next_storage_key.is_none() && !removed_key {
                 let maybe_next_key = if backend.rpc().is_some() {
-                    remote_fetch(prefix, start_key, Some(backend.fork_block))
+                    remote_fetch(prefix, start_key, backend.fork_block)
                 } else {
                     None
                 };
@@ -221,7 +221,7 @@ impl<Block: BlockT + DeserializeOwned> sp_state_machine::StorageIterator<Hashing
                 .unwrap_or(false);
             if next_storage_key.is_none() && !removed_key {
                 let maybe_next_key = if backend.rpc().is_some() {
-                    remote_fetch(prefix, start_key, Some(backend.fork_block))
+                    remote_fetch(prefix, start_key, backend.fork_block)
                 } else {
                     None
                 };
@@ -276,7 +276,7 @@ impl<Block: BlockT + DeserializeOwned> sp_state_machine::StorageIterator<Hashing
 pub struct ForkedLazyBackend<Block: BlockT + DeserializeOwned> {
     pub(crate) rpc_client: Option<Arc<dyn RPCClient<Block>>>,
     pub(crate) block_hash: Option<Block::Hash>,
-    pub(crate) fork_block: Block::Hash,
+    pub(crate) fork_block: Option<Block::Hash>,
     pub(crate) db: Arc<parking_lot::RwLock<InMemoryBackend<HashingFor<Block>>>>,
     pub(crate) removed_keys: Arc<parking_lot::RwLock<HashMap<Vec<u8>, ()>>>,
     pub(crate) before_fork: bool,
@@ -329,11 +329,9 @@ impl<Block: BlockT + DeserializeOwned> sp_state_machine::Backend<HashingFor<Bloc
         let value = match maybe_storage {
             Ok(Some(data)) => Some(data),
             _ if !self.removed_keys.read().contains_key(key) => {
-                // Only try remote fetch if RPC client is available
                 let result =
-                    if self.rpc().is_some() { remote_fetch(Some(self.fork_block)) } else { None };
+                    if self.rpc().is_some() { remote_fetch(self.fork_block) } else { None };
 
-                // Cache state
                 drop(readable_db);
                 self.update_storage(key, &result);
 
@@ -376,7 +374,7 @@ impl<Block: BlockT + DeserializeOwned> sp_state_machine::Backend<HashingFor<Bloc
             Ok(Some(hash)) => Ok(Some(hash)),
             _ if !self.removed_keys.read().contains_key(key) => {
                 if self.rpc().is_some() {
-                    remote_fetch(Some(self.fork_block))
+                    remote_fetch(self.fork_block)
                 } else {
                     Ok(None)
                 }
@@ -449,7 +447,7 @@ impl<Block: BlockT + DeserializeOwned> sp_state_machine::Backend<HashingFor<Bloc
                 // If not found locally and key is not marked as removed, fetch remotely
                 _ if !self.removed_keys.read().contains_key(key) => {
                     if self.rpc().is_some() {
-                        remote_fetch(Some(self.fork_block))
+                        remote_fetch(self.fork_block)
                     } else {
                         None
                     }

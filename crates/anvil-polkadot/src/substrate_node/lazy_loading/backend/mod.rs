@@ -32,7 +32,7 @@ use crate::substrate_node::lazy_loading::rpc_client::RPCClient;
 
 pub struct Backend<Block: BlockT + DeserializeOwned> {
     pub(crate) rpc_client: Option<Arc<dyn RPCClient<Block>>>,
-    pub(crate) fork_checkpoint: Block::Header,
+    pub(crate) fork_checkpoint: Option<Block::Header>,
     states: RwLock<HashMap<Block::Hash, ForkedLazyBackend<Block>>>,
     pub(crate) blockchain: Blockchain<Block>,
     import_lock: RwLock<()>,
@@ -40,7 +40,7 @@ pub struct Backend<Block: BlockT + DeserializeOwned> {
 }
 
 impl<Block: BlockT + DeserializeOwned> Backend<Block> {
-    fn new(rpc_client: Option<Arc<dyn RPCClient<Block>>>, fork_checkpoint: Block::Header) -> Self {
+    fn new(rpc_client: Option<Arc<dyn RPCClient<Block>>>, fork_checkpoint: Option<Block::Header>) -> Self {
         Self {
             rpc_client: rpc_client.clone(),
             states: Default::default(),
@@ -140,10 +140,11 @@ impl<Block: BlockT + DeserializeOwned> backend::Backend<Block> for Backend<Block
                 db_clone.insert(entries, StateVersion::V1);
             }
             let new_db = Arc::new(RwLock::new(db_clone));
+            let fork_block = self.fork_checkpoint.as_ref().map(|checkpoint| checkpoint.hash());
             let new_state = ForkedLazyBackend {
                 rpc_client: self.rpc_client.clone(),
                 block_hash: Some(hash),
-                fork_block: self.fork_checkpoint.hash(),
+                fork_block,
                 db: new_db,
                 removed_keys: new_removed_keys,
                 before_fork: false,
@@ -198,13 +199,18 @@ impl<Block: BlockT + DeserializeOwned> backend::Backend<Block> for Backend<Block
         _trie_cache_context: TrieCacheContext,
     ) -> sp_blockchain::Result<Self::State> {
         if hash == Default::default() {
+            let (fork_block, before_fork) = match &self.fork_checkpoint {
+                Some(checkpoint) => (Some(checkpoint.hash()), true),
+                None => (None, false),
+            };
+
             return Ok(ForkedLazyBackend::<Block> {
                 rpc_client: self.rpc_client.clone(),
                 block_hash: Some(hash),
-                fork_block: self.fork_checkpoint.hash(),
+                fork_block,
                 db: Default::default(),
                 removed_keys: Default::default(),
-                before_fork: true,
+                before_fork,
             });
         }
 
@@ -218,29 +224,47 @@ impl<Block: BlockT + DeserializeOwned> backend::Backend<Block> for Backend<Block
                             "Failed to fetch block header: {hash:?}"
                         )))
                         .map(|header| {
-                            let checkpoint = self.fork_checkpoint.clone();
-                            let state = if header.number().gt(checkpoint.number()) {
-                                let parent = self
-                                    .state_at(*header.parent_hash(), TrieCacheContext::Trusted)
-                                    .ok();
+                            let state = match &self.fork_checkpoint {
+                                Some(checkpoint) => {
+                                    if header.number().gt(checkpoint.number()) {
+                                        let parent = self
+                                            .state_at(*header.parent_hash(), TrieCacheContext::Trusted)
+                                            .ok();
 
-                                ForkedLazyBackend::<Block> {
-                                    rpc_client: self.rpc_client.clone(),
-                                    block_hash: Some(hash),
-                                    fork_block: checkpoint.hash(),
-                                    db: parent.clone().map_or(Default::default(), |p| p.db),
-                                    removed_keys: parent
-                                        .map_or(Default::default(), |p| p.removed_keys),
-                                    before_fork: false,
+                                        ForkedLazyBackend::<Block> {
+                                            rpc_client: self.rpc_client.clone(),
+                                            block_hash: Some(hash),
+                                            fork_block: Some(checkpoint.hash()),
+                                            db: parent.clone().map_or(Default::default(), |p| p.db),
+                                            removed_keys: parent
+                                                .map_or(Default::default(), |p| p.removed_keys),
+                                            before_fork: false,
+                                        }
+                                    } else {
+                                        ForkedLazyBackend::<Block> {
+                                            rpc_client: self.rpc_client.clone(),
+                                            block_hash: Some(hash),
+                                            fork_block: Some(checkpoint.hash()),
+                                            db: Default::default(),
+                                            removed_keys: Default::default(),
+                                            before_fork: true,
+                                        }
+                                    }
                                 }
-                            } else {
-                                ForkedLazyBackend::<Block> {
-                                    rpc_client: self.rpc_client.clone(),
-                                    block_hash: Some(hash),
-                                    fork_block: checkpoint.hash(),
-                                    db: Default::default(),
-                                    removed_keys: Default::default(),
-                                    before_fork: true,
+                                None => {
+                                    let parent = self
+                                        .state_at(*header.parent_hash(), TrieCacheContext::Trusted)
+                                        .ok();
+
+                                    ForkedLazyBackend::<Block> {
+                                        rpc_client: self.rpc_client.clone(),
+                                        block_hash: Some(hash),
+                                        fork_block: None,
+                                        db: parent.clone().map_or(Default::default(), |p| p.db),
+                                        removed_keys: parent
+                                            .map_or(Default::default(), |p| p.removed_keys),
+                                        before_fork: false,
+                                    }
                                 }
                             };
 
@@ -468,7 +492,7 @@ impl<Block: BlockT + DeserializeOwned> backend::LocalBackend<Block> for Backend<
 
 pub fn new_backend<Block>(
     rpc_client: Option<Arc<dyn RPCClient<Block>>>,
-    checkpoint: Block::Header,
+    checkpoint: Option<Block::Header>,
 ) -> Result<Arc<Backend<Block>>, polkadot_sdk::sc_service::Error>
 where
     Block: BlockT + DeserializeOwned,

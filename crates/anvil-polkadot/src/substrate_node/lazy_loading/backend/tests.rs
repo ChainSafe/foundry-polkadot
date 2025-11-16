@@ -213,7 +213,7 @@ fn before_fork_reads_remote_only() {
     let rpc = std::sync::Arc::new(Rpc::new());
     // fork checkpoint at #100
     let cp = checkpoint(100);
-    let backend = Backend::<TestBlockT>::new(Some(rpc.clone()), cp);
+    let backend = Backend::<TestBlockT>::new(Some(rpc.clone()), Some(cp));
 
     // state_at(Default::default()) => before_fork=true
     let state = backend.state_at(Default::default(), TrieCacheContext::Trusted).unwrap();
@@ -237,7 +237,7 @@ fn before_fork_reads_remote_only() {
 fn after_fork_first_fetch_caches_subsequent_hits_local() {
     let rpc = std::sync::Arc::new(Rpc::new());
     let cp = checkpoint(10);
-    let backend = Backend::<TestBlockT>::new(Some(rpc.clone()), cp.clone());
+    let backend = Backend::<TestBlockT>::new(Some(rpc.clone()), Some(cp.clone()));
 
     // Build a block #11 > checkpoint (#10), with parent #10
     let parent = cp.hash();
@@ -272,7 +272,7 @@ fn after_fork_first_fetch_caches_subsequent_hits_local() {
 fn removed_keys_prevents_remote_fetch() {
     let rpc = std::sync::Arc::new(Rpc::new());
     let cp = checkpoint(5);
-    let backend = Backend::<TestBlockT>::new(Some(rpc.clone()), cp.clone());
+    let backend = Backend::<TestBlockT>::new(Some(rpc.clone()), Some(cp.clone()));
 
     // make block #6
     let b6 = make_block(6, cp.hash(), vec![]);
@@ -298,7 +298,7 @@ fn removed_keys_prevents_remote_fetch() {
 fn raw_iter_merges_local_then_remote() {
     let rpc = std::sync::Arc::new(Rpc::new());
     let cp = checkpoint(7);
-    let backend = Backend::<TestBlockT>::new(Some(rpc.clone()), cp.clone());
+    let backend = Backend::<TestBlockT>::new(Some(rpc.clone()), Some(cp.clone()));
 
     // block #8
     let b8 = make_block(8, cp.hash(), vec![]);
@@ -342,7 +342,7 @@ fn raw_iter_merges_local_then_remote() {
 fn blockchain_header_and_number_are_cached() {
     let rpc = std::sync::Arc::new(Rpc::new());
     let cp = checkpoint(3);
-    let backend = Backend::<TestBlockT>::new(Some(rpc.clone()), cp.clone());
+    let backend = Backend::<TestBlockT>::new(Some(rpc.clone()), Some(cp.clone()));
     let chain = backend.blockchain();
 
     // prepare one block w/ extrinsics
@@ -362,4 +362,48 @@ fn blockchain_header_and_number_are_cached() {
 
     assert_eq!(number, 4);
     assert_eq!(calls_before, calls_after, "number() should be served from cache after header()");
+}
+
+#[test]
+fn no_fork_mode_uses_local_db_only() {
+    let backend = Backend::<TestBlockT>::new(None, None);
+    let state = backend.state_at(Default::default(), TrieCacheContext::Trusted).unwrap();
+
+    assert!(!state.before_fork);
+
+    let key = b":test_key".to_vec();
+    let v1 = state.storage(&key).unwrap();
+    assert_eq!(v1, None);
+
+    state.update_storage(&key, &Some(b"local_value".to_vec()));
+
+    let v2 = state.storage(&key).unwrap();
+    assert_eq!(v2, Some(b"local_value".to_vec()));
+}
+
+#[test]
+fn no_fork_mode_state_at_default() {
+    let backend = Backend::<TestBlockT>::new(None, None);
+    let state = backend.state_at(Default::default(), TrieCacheContext::Trusted).unwrap();
+
+    assert!(!state.before_fork);
+    assert_eq!(state.fork_block, None);
+    assert!(state.rpc_client.is_none());
+}
+
+#[test]
+fn no_fork_mode_storage_operations() {
+    let backend = Backend::<TestBlockT>::new(None, None);
+    let state = backend.state_at(Default::default(), TrieCacheContext::Trusted).unwrap();
+
+    let key1 = b":key1".to_vec();
+    let key2 = b":key2".to_vec();
+    let key3 = b":key3".to_vec();
+
+    state.update_storage(&key1, &Some(b"value1".to_vec()));
+    state.update_storage(&key2, &Some(b"value2".to_vec()));
+
+    assert_eq!(state.storage(&key1).unwrap(), Some(b"value1".to_vec()));
+    assert_eq!(state.storage(&key2).unwrap(), Some(b"value2".to_vec()));
+    assert_eq!(state.storage(&key3).unwrap(), None);
 }
