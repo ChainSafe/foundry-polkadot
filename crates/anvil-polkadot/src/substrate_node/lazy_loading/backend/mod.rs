@@ -12,7 +12,7 @@ mod tests;
 use parking_lot::RwLock;
 use polkadot_sdk::{
     sc_client_api::{
-        HeaderBackend, TrieCacheContext, UsageInfo,
+        TrieCacheContext, UsageInfo,
         backend::{self, AuxStore},
     },
     sp_blockchain,

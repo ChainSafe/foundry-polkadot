@@ -1,11 +1,11 @@
 use crate::substrate_node::lazy_loading::{LAZY_LOADING_LOG_TARGET, rpc_client::RPCClient};
+use parking_lot::RwLock;
 use polkadot_sdk::{
     sc_client_api::{
         backend::{self, NewBlockState},
-        blockchain::{self, BlockStatus, HeaderBackend},
         leaves::LeafSet,
     },
-    sp_blockchain::{self, CachedHeaderMetadata, HeaderMetadata},
+    sp_blockchain::{self, BlockStatus, CachedHeaderMetadata, HeaderBackend, HeaderMetadata},
     sp_runtime::{
         Justification, Justifications,
         generic::BlockId,
@@ -14,7 +14,6 @@ use polkadot_sdk::{
 };
 use serde::de::DeserializeOwned;
 use std::{collections::HashMap, sync::Arc};
-use parking_lot::RwLock;
 
 #[derive(PartialEq, Eq, Clone)]
 pub(crate) enum StoredBlock<B: BlockT> {
@@ -290,7 +289,7 @@ impl<Block: BlockT + DeserializeOwned> HeaderBackend<Block> for Blockchain<Block
         Ok(header)
     }
 
-    fn info(&self) -> blockchain::Info<Block> {
+    fn info(&self) -> sp_blockchain::Info<Block> {
         let storage = self.storage.read();
         let finalized_state = if storage.blocks.len() <= 1 {
             None
@@ -298,7 +297,7 @@ impl<Block: BlockT + DeserializeOwned> HeaderBackend<Block> for Blockchain<Block
             Some((storage.finalized_hash, storage.finalized_number))
         };
 
-        blockchain::Info {
+        sp_blockchain::Info {
             best_hash: storage.best_hash,
             best_number: storage.best_number,
             genesis_hash: storage.genesis_hash,
@@ -364,7 +363,7 @@ impl<Block: BlockT + DeserializeOwned> HeaderMetadata<Block> for Blockchain<Bloc
     }
 }
 
-impl<Block: BlockT + DeserializeOwned> blockchain::Backend<Block> for Blockchain<Block> {
+impl<Block: BlockT + DeserializeOwned> sp_blockchain::Backend<Block> for Blockchain<Block> {
     fn body(
         &self,
         hash: Block::Hash,

@@ -46,11 +46,9 @@ mod mock_rpc {
         /// storage[(block_hash, key)] = value
         pub storage: Arc<RwLock<BTreeMap<(Block::Hash, StorageKey), StorageData>>>,
         /// storage_hash[(block_hash, key)] = hash
-        pub storage_hashes:
-            Arc<RwLock<BTreeMap<(Block::Hash, StorageKey), Block::Hash>>>,
+        pub storage_hashes: Arc<RwLock<BTreeMap<(Block::Hash, StorageKey), Block::Hash>>>,
         /// storage_keys_paged[(block_hash, (prefix,start))] = Vec<keys>
-        pub storage_keys_pages:
-            Arc<RwLock<BTreeMap<(Block::Hash, Vec<u8>), Vec<StorageKey>>>>,
+        pub storage_keys_pages: Arc<RwLock<BTreeMap<(Block::Hash, Vec<u8>), Vec<StorageKey>>>>,
         /// headers[hash] = header
         pub headers: Arc<RwLock<BTreeMap<Block::Hash, Block::Header>>>,
         /// blocks[hash] = SignedBlock
@@ -188,222 +186,231 @@ mod mock_rpc {
     }
 }
 
-type N = u32;
-type TestBlockT = TestBlock<N>;
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use polkadot_sdk::sc_client_api::HeaderBackend;
 
-fn make_header(number: N, parent: <TestBlock as BlockT>::Hash) -> TestHeader<N> {
-    TestHeader::new(number, Default::default(), Default::default(), parent, Default::default())
-}
+    type N = u32;
+    type TestBlockT = TestBlock<N>;
 
-fn make_block(
-    number: N,
-    parent: <TestBlock as BlockT>::Hash,
-    xts: Vec<OpaqueExtrinsic>,
-) -> TestBlock<N> {
-    let header = make_header(number, parent);
-    TestBlock::new(header, xts)
-}
+    fn make_header(number: N, parent: <TestBlock as BlockT>::Hash) -> TestHeader<N> {
+        TestHeader::new(number, Default::default(), Default::default(), parent, Default::default())
+    }
 
-fn checkpoint(n: N) -> TestHeader<N> {
-    make_header(n, Default::default())
-}
+    fn make_block(
+        number: N,
+        parent: <TestBlock as BlockT>::Hash,
+        xts: Vec<OpaqueExtrinsic>,
+    ) -> TestBlock<N> {
+        let header = make_header(number, parent);
+        TestBlock::new(header, xts)
+    }
 
-#[test]
-fn before_fork_reads_remote_only() {
-    let rpc = std::sync::Arc::new(Rpc::new());
-    // fork checkpoint at #100
-    let cp = checkpoint(100);
-    let backend = Backend::<TestBlockT>::new(Some(rpc.clone()), Some(cp));
+    fn checkpoint(n: N) -> TestHeader<N> {
+        make_header(n, Default::default())
+    }
 
-    // state_at(Default::default()) => before_fork=true
-    let state = backend.state_at(Default::default(), TrieCacheContext::Trusted).unwrap();
+    #[test]
+    fn before_fork_reads_remote_only() {
+        let rpc = std::sync::Arc::new(Rpc::new());
+        // fork checkpoint at #100
+        let cp = checkpoint(100);
+        let backend = Backend::<TestBlockT>::new(Some(rpc.clone()), Some(cp));
 
-    let key = b":foo".to_vec();
-    // prepare remote value at "block_hash = Default::default()"
-    let at = Default::default();
-    rpc.put_storage(at, StorageKey(key.clone()), StorageData(b"bar".to_vec()));
+        // state_at(Default::default()) => before_fork=true
+        let state = backend.state_at(Default::default(), TrieCacheContext::Trusted).unwrap();
 
-    // read storage
-    let v1 = state.storage(&key).unwrap();
-    assert_eq!(v1, Some(b"bar".to_vec()));
+        let key = b":foo".to_vec();
+        // prepare remote value at "block_hash = Default::default()"
+        let at = Default::default();
+        rpc.put_storage(at, StorageKey(key.clone()), StorageData(b"bar".to_vec()));
 
-    // not cached in DB: second read still goes to RPC
-    let v2 = state.storage(&key).unwrap();
-    assert_eq!(v2, Some(b"bar".to_vec()));
-    assert!(rpc.counters.storage_calls.load(Ordering::Relaxed) >= 2);
-}
+        // read storage
+        let v1 = state.storage(&key).unwrap();
+        assert_eq!(v1, Some(b"bar".to_vec()));
 
-#[test]
-fn after_fork_first_fetch_caches_subsequent_hits_local() {
-    let rpc = std::sync::Arc::new(Rpc::new());
-    let cp = checkpoint(10);
-    let backend = Backend::<TestBlockT>::new(Some(rpc.clone()), Some(cp.clone()));
+        // not cached in DB: second read still goes to RPC
+        let v2 = state.storage(&key).unwrap();
+        assert_eq!(v2, Some(b"bar".to_vec()));
+        assert!(rpc.counters.storage_calls.load(Ordering::Relaxed) >= 2);
+    }
 
-    // Build a block #11 > checkpoint (#10), with parent #10
-    let parent = cp.hash();
-    let b11 = make_block(11, parent, vec![]);
-    let h11 = b11.header.hash();
+    #[test]
+    fn after_fork_first_fetch_caches_subsequent_hits_local() {
+        let rpc = std::sync::Arc::new(Rpc::new());
+        let cp = checkpoint(10);
+        let backend = Backend::<TestBlockT>::new(Some(rpc.clone()), Some(cp.clone()));
 
-    rpc.put_header(b11.header.clone());
-    rpc.put_block(b11, None);
+        // Build a block #11 > checkpoint (#10), with parent #10
+        let parent = cp.hash();
+        let b11 = make_block(11, parent, vec![]);
+        let h11 = b11.header.hash();
 
-    // remote storage at fork block (checkpoint hash)
-    let fork_hash = cp.hash();
-    let key = b":k".to_vec();
-    rpc.put_storage(fork_hash, StorageKey(key.clone()), StorageData(b"v".to_vec()));
+        rpc.put_header(b11.header.clone());
+        rpc.put_block(b11, None);
 
-    // Grab state_at(#11): after_fork=false; local DB empty
-    let state = backend.state_at(h11, TrieCacheContext::Trusted).unwrap();
+        // remote storage at fork block (checkpoint hash)
+        let fork_hash = cp.hash();
+        let key = b":k".to_vec();
+        rpc.put_storage(fork_hash, StorageKey(key.clone()), StorageData(b"v".to_vec()));
 
-    // First read fetches remote and caches
-    let v1 = state.storage(&key).unwrap();
-    assert_eq!(v1, Some(b"v".to_vec()));
+        // Grab state_at(#11): after_fork=false; local DB empty
+        let state = backend.state_at(h11, TrieCacheContext::Trusted).unwrap();
 
-    // Mutate RPC to detect second call (remove remote value)
-    // If second read still tries RPC, it would return None; but it should come from cache.
-    // So we do not change the mock; instead, assert RPC call count increases only once.
-    let calls_before = rpc.counters.storage_calls.load(Ordering::Relaxed);
-    let _ = state.storage(&key).unwrap();
-    let calls_after = rpc.counters.storage_calls.load(Ordering::Relaxed);
-    assert_eq!(calls_before, calls_after, "second hit should be served from cache");
-}
+        // First read fetches remote and caches
+        let v1 = state.storage(&key).unwrap();
+        assert_eq!(v1, Some(b"v".to_vec()));
 
-#[test]
-fn removed_keys_prevents_remote_fetch() {
-    let rpc = std::sync::Arc::new(Rpc::new());
-    let cp = checkpoint(5);
-    let backend = Backend::<TestBlockT>::new(Some(rpc.clone()), Some(cp.clone()));
+        // Mutate RPC to detect second call (remove remote value)
+        // If second read still tries RPC, it would return None; but it should come from cache.
+        // So we do not change the mock; instead, assert RPC call count increases only once.
+        let calls_before = rpc.counters.storage_calls.load(Ordering::Relaxed);
+        let _ = state.storage(&key).unwrap();
+        let calls_after = rpc.counters.storage_calls.load(Ordering::Relaxed);
+        assert_eq!(calls_before, calls_after, "second hit should be served from cache");
+    }
 
-    // make block #6
-    let b6 = make_block(6, cp.hash(), vec![]);
-    rpc.put_header(b6.header.clone());
-    rpc.put_block(b6.clone(), None);
-    let state = backend.state_at(b6.header.hash(), TrieCacheContext::Trusted).unwrap();
+    #[test]
+    fn removed_keys_prevents_remote_fetch() {
+        let rpc = std::sync::Arc::new(Rpc::new());
+        let cp = checkpoint(5);
+        let backend = Backend::<TestBlockT>::new(Some(rpc.clone()), Some(cp.clone()));
 
-    // mark key as removed
-    let key = b":dead".to_vec();
-    state.removed_keys.write().insert(key.clone(), ());
+        // make block #6
+        let b6 = make_block(6, cp.hash(), vec![]);
+        rpc.put_header(b6.header.clone());
+        rpc.put_block(b6.clone(), None);
+        let state = backend.state_at(b6.header.hash(), TrieCacheContext::Trusted).unwrap();
 
-    // Even if remote has a value, backend must not fetch it
-    rpc.put_storage(cp.hash(), StorageKey(key.clone()), StorageData(b"ghost".to_vec()));
-    let calls_before = rpc.counters.storage_calls.load(Ordering::Relaxed);
-    let v = state.storage(&key).unwrap();
-    let calls_after = rpc.counters.storage_calls.load(Ordering::Relaxed);
+        // mark key as removed
+        let key = b":dead".to_vec();
+        state.removed_keys.write().insert(key.clone(), ());
 
-    assert!(v.is_none());
-    assert_eq!(calls_before, calls_after, "should not call RPC for removed keys");
-}
+        // Even if remote has a value, backend must not fetch it
+        rpc.put_storage(cp.hash(), StorageKey(key.clone()), StorageData(b"ghost".to_vec()));
+        let calls_before = rpc.counters.storage_calls.load(Ordering::Relaxed);
+        let v = state.storage(&key).unwrap();
+        let calls_after = rpc.counters.storage_calls.load(Ordering::Relaxed);
 
-#[test]
-fn raw_iter_merges_local_then_remote() {
-    let rpc = std::sync::Arc::new(Rpc::new());
-    let cp = checkpoint(7);
-    let backend = Backend::<TestBlockT>::new(Some(rpc.clone()), Some(cp.clone()));
+        assert!(v.is_none());
+        assert_eq!(calls_before, calls_after, "should not call RPC for removed keys");
+    }
 
-    // block #8
-    let b8 = make_block(8, cp.hash(), vec![]);
-    rpc.put_header(b8.header.clone());
-    rpc.put_block(b8.clone(), None);
-    let state = backend.state_at(b8.header.hash(), TrieCacheContext::Trusted).unwrap();
+    #[test]
+    fn raw_iter_merges_local_then_remote() {
+        let rpc = std::sync::Arc::new(Rpc::new());
+        let cp = checkpoint(7);
+        let backend = Backend::<TestBlockT>::new(Some(rpc.clone()), Some(cp.clone()));
 
-    // Preload local DB with key "a1"
-    state.update_storage(b"a1", &Some(b"v1".to_vec()));
+        // block #8
+        let b8 = make_block(8, cp.hash(), vec![]);
+        rpc.put_header(b8.header.clone());
+        rpc.put_block(b8.clone(), None);
+        let state = backend.state_at(b8.header.hash(), TrieCacheContext::Trusted).unwrap();
 
-    // Ensure storage_root is computed to make the key visible to raw_iter
-    let _ = state
-        .db
-        .write()
-        .storage_root(vec![(b"a1".as_ref(), Some(b"v1".as_ref()))].into_iter(), StateVersion::V1);
+        // Preload local DB with key "a1"
+        state.update_storage(b"a1", &Some(b"v1".to_vec()));
 
-    // Remote has only "a2" under same prefix at fork block (not "a1")
-    rpc.put_storage_keys_page(cp.hash(), b"a".to_vec(), vec![StorageKey(b"a2".to_vec())]);
-    rpc.put_storage(cp.hash(), StorageKey(b"a2".to_vec()), StorageData(b"v2".to_vec()));
+        // Ensure storage_root is computed to make the key visible to raw_iter
+        let _ = state.db.write().storage_root(
+            vec![(b"a1".as_ref(), Some(b"v1".as_ref()))].into_iter(),
+            StateVersion::V1,
+        );
 
-    let mut args = polkadot_sdk::sp_state_machine::IterArgs::default();
-    args.prefix = Some(&b"a"[..]);
-    let mut it = state.raw_iter(args).unwrap();
+        // Remote has only "a2" under same prefix at fork block (not "a1")
+        rpc.put_storage_keys_page(cp.hash(), b"a".to_vec(), vec![StorageKey(b"a2".to_vec())]);
+        rpc.put_storage(cp.hash(), StorageKey(b"a2".to_vec()), StorageData(b"v2".to_vec()));
 
-    // next_pair should return ("a1","v1") from local
-    let p1 = it.next_pair(&state).unwrap().unwrap();
-    assert_eq!(p1.0, b"a1".to_vec());
-    assert_eq!(p1.1, b"v1".to_vec());
+        let mut args = polkadot_sdk::sp_state_machine::IterArgs::default();
+        args.prefix = Some(&b"a"[..]);
+        let mut it = state.raw_iter(args).unwrap();
 
-    // next_pair should now bring remote ("a2","v2")
-    let p2 = it.next_pair(&state).unwrap().unwrap();
-    assert_eq!(p2.0, b"a2".to_vec());
-    assert_eq!(p2.1, b"v2".to_vec());
+        // next_pair should return ("a1","v1") from local
+        let p1 = it.next_pair(&state).unwrap().unwrap();
+        assert_eq!(p1.0, b"a1".to_vec());
+        assert_eq!(p1.1, b"v1".to_vec());
 
-    // done
-    assert!(it.next_pair(&state).is_none());
-    assert!(it.was_complete());
-}
+        // next_pair should now bring remote ("a2","v2")
+        let p2 = it.next_pair(&state).unwrap().unwrap();
+        assert_eq!(p2.0, b"a2".to_vec());
+        assert_eq!(p2.1, b"v2".to_vec());
 
-#[test]
-fn blockchain_header_and_number_are_cached() {
-    let rpc = std::sync::Arc::new(Rpc::new());
-    let cp = checkpoint(3);
-    let backend = Backend::<TestBlockT>::new(Some(rpc.clone()), Some(cp.clone()));
-    let chain = backend.blockchain();
+        // done
+        assert!(it.next_pair(&state).is_none());
+        assert!(it.was_complete());
+    }
 
-    // prepare one block w/ extrinsics
-    let xts: Vec<OpaqueExtrinsic> = vec![];
-    let b4 = make_block(4, cp.hash(), xts);
-    let h4 = b4.header().hash();
-    rpc.put_block(b4, None);
+    #[test]
+    fn blockchain_header_and_number_are_cached() {
+        let rpc = std::sync::Arc::new(Rpc::new());
+        let cp = checkpoint(3);
+        let backend = Backend::<TestBlockT>::new(Some(rpc.clone()), Some(cp.clone()));
+        let chain = backend.blockchain();
 
-    // first header() fetches RPC and caches as Full
-    let h = chain.header(h4).unwrap().unwrap();
-    assert_eq!(h.hash(), h4);
+        // prepare one block w/ extrinsics
+        let xts: Vec<OpaqueExtrinsic> = vec![];
+        let b4 = make_block(4, cp.hash(), xts);
+        let h4 = b4.header().hash();
+        rpc.put_block(b4, None);
 
-    // number() should now return from cache (no extra RPC needed)
-    let calls_before = rpc.counters.block_calls.load(Ordering::Relaxed);
-    let number = chain.number(h4).unwrap().unwrap();
-    let calls_after = rpc.counters.block_calls.load(Ordering::Relaxed);
+        // first header() fetches RPC and caches as Full
+        let h = chain.header(h4).unwrap().unwrap();
+        assert_eq!(h.hash(), h4);
 
-    assert_eq!(number, 4);
-    assert_eq!(calls_before, calls_after, "number() should be served from cache after header()");
-}
+        // number() should now return from cache (no extra RPC needed)
+        let calls_before = rpc.counters.block_calls.load(Ordering::Relaxed);
+        let number = chain.number(h4).unwrap().unwrap();
+        let calls_after = rpc.counters.block_calls.load(Ordering::Relaxed);
 
-#[test]
-fn no_fork_mode_uses_local_db_only() {
-    let backend = Backend::<TestBlockT>::new(None, None);
-    let state = backend.state_at(Default::default(), TrieCacheContext::Trusted).unwrap();
+        assert_eq!(number, 4);
+        assert_eq!(
+            calls_before, calls_after,
+            "number() should be served from cache after header()"
+        );
+    }
 
-    assert!(!state.before_fork);
+    #[test]
+    fn no_fork_mode_uses_local_db_only() {
+        let backend = Backend::<TestBlockT>::new(None, None);
+        let state = backend.state_at(Default::default(), TrieCacheContext::Trusted).unwrap();
 
-    let key = b":test_key".to_vec();
-    let v1 = state.storage(&key).unwrap();
-    assert_eq!(v1, None);
+        assert!(!state.before_fork);
 
-    state.update_storage(&key, &Some(b"local_value".to_vec()));
+        let key = b":test_key".to_vec();
+        let v1 = state.storage(&key).unwrap();
+        assert_eq!(v1, None);
 
-    let v2 = state.storage(&key).unwrap();
-    assert_eq!(v2, Some(b"local_value".to_vec()));
-}
+        state.update_storage(&key, &Some(b"local_value".to_vec()));
 
-#[test]
-fn no_fork_mode_state_at_default() {
-    let backend = Backend::<TestBlockT>::new(None, None);
-    let state = backend.state_at(Default::default(), TrieCacheContext::Trusted).unwrap();
+        let v2 = state.storage(&key).unwrap();
+        assert_eq!(v2, Some(b"local_value".to_vec()));
+    }
 
-    assert!(!state.before_fork);
-    assert_eq!(state.fork_block, None);
-    assert!(state.rpc_client.is_none());
-}
+    #[test]
+    fn no_fork_mode_state_at_default() {
+        let backend = Backend::<TestBlockT>::new(None, None);
+        let state = backend.state_at(Default::default(), TrieCacheContext::Trusted).unwrap();
 
-#[test]
-fn no_fork_mode_storage_operations() {
-    let backend = Backend::<TestBlockT>::new(None, None);
-    let state = backend.state_at(Default::default(), TrieCacheContext::Trusted).unwrap();
+        assert!(!state.before_fork);
+        assert_eq!(state.fork_block, None);
+        assert!(state.rpc_client.is_none());
+    }
 
-    let key1 = b":key1".to_vec();
-    let key2 = b":key2".to_vec();
-    let key3 = b":key3".to_vec();
+    #[test]
+    fn no_fork_mode_storage_operations() {
+        let backend = Backend::<TestBlockT>::new(None, None);
+        let state = backend.state_at(Default::default(), TrieCacheContext::Trusted).unwrap();
 
-    state.update_storage(&key1, &Some(b"value1".to_vec()));
-    state.update_storage(&key2, &Some(b"value2".to_vec()));
+        let key1 = b":key1".to_vec();
+        let key2 = b":key2".to_vec();
+        let key3 = b":key3".to_vec();
 
-    assert_eq!(state.storage(&key1).unwrap(), Some(b"value1".to_vec()));
-    assert_eq!(state.storage(&key2).unwrap(), Some(b"value2".to_vec()));
-    assert_eq!(state.storage(&key3).unwrap(), None);
+        state.update_storage(&key1, &Some(b"value1".to_vec()));
+        state.update_storage(&key2, &Some(b"value2".to_vec()));
+
+        assert_eq!(state.storage(&key1).unwrap(), Some(b"value1".to_vec()));
+        assert_eq!(state.storage(&key2).unwrap(), Some(b"value2".to_vec()));
+        assert_eq!(state.storage(&key3).unwrap(), None);
+    }
 }
