@@ -75,25 +75,6 @@ pub struct Service {
     pub genesis_block_number: u64,
 }
 
-// async fn fetch_para_id(url: String) -> eyre::Result<u32> {
-//     // Connect to the node (adjust URL for your local foundry-polkadot/anvil-polkadot node)
-//   //  let ws_url = "ws://127.0.0.1:9944"; // or appropriate RPC/WS endpoint
-//     let api = OnlineClient::<PolkadotConfig>::from_url(url).await?;
-
-//     // Name of runtime API – check your runtime’s implementation, but typical is something like:
-//     let api_name = "ParachainInfo_parachainId";
-
-//     // Call the runtime API at the latest block (None)
-//     let para_id: u32 = api
-//         .rpc()
-//         .call_runtime_api(api_name, None, ())
-//         .await?;
-
-//     println!("Parachain ID: {}", para_id);
-//     Ok(())
-// }
-
-
 const RELAY_CHAIN_SLOT_DURATION_MILLIS: u64 = 6_000;
 
 static TIMESTAMP: AtomicU64 = AtomicU64::new(0);
@@ -164,27 +145,19 @@ fn create_manual_seal_inherent_data_providers(
 
           let para_id = client.runtime_api().parachain_id(current_para_head.hash()).unwrap();
 
-
-          print!("paraID: {}", para_id);
-
-        // // NOTE: Our runtime API doesnt seem to have collect_collation_info available
-        // let should_send_go_ahead = client
-        //     .runtime_api()
-        //     .collect_collation_info(block, &current_para_head)
-        //     .map(|info| info.new_validation_code.is_some())
-        //     .unwrap_or_default();
-
         // The API version is relevant here because the constraints in the runtime changed
         // in https://github.com/paritytech/polkadot-sdk/pull/6825. In general, the logic
         // here assumes that we are using the aura-ext consensushook in the parachain
         // runtime.
         // Note: Taken from https://github.com/paritytech/polkadot-sdk/issues/7341, but unsure fi needed or not
-        let requires_relay_progress = client
-            .runtime_api()
-            .has_api_with::<dyn AuraUnincludedSegmentApi<Block>, _>(block, |version| version > 1)
-            .ok()
-            .unwrap_or_default();
-               let current_para_block_head =
+        // let requires_relay_progress = client
+        //     .runtime_api()
+        //     .has_api_with::<dyn AuraUnincludedSegmentApi<Block>, _>(block, |version| version > 1)
+        //     .ok()
+        //     .unwrap_or_default();
+
+
+        let current_para_block_head =
             Some(polkadot_primitives::HeadData(current_para_head.hash().as_bytes().to_vec()));
 
         let current_block_number =
@@ -200,43 +173,15 @@ fn create_manual_seal_inherent_data_providers(
             para_id,
             current_para_block_head,
             relay_offset:  time as u32,
-            relay_blocks_per_para_block: requires_relay_progress.then(|| 1).unwrap_or_default(),
-            //relay_blocks_per_para_block: 1,
-            para_blocks_per_relay_epoch: 1,
-            // upgrade_go_ahead: should_send_go_ahead.then(|| {
-            //     //log::info!("Detected pending validation code, sending go-ahead signal.");
-            //     UpgradeGoAhead::GoAhead
-            // }),
+           // relay_blocks_per_para_block: requires_relay_progress.then(|| 1).unwrap_or_default(),
+            relay_blocks_per_para_block: 1,
+            para_blocks_per_relay_epoch: 10,
             ..Default::default()
         };
-
-        // let timestamp_provider = sp_timestamp::InherentDataProvider::new(
-        //     (slot_duration.as_millis() * current_block_number as u64).into(),
-        // );
-
-        // MockTimestampInherentDataProvider::advance_timestamp(RELAY_CHAIN_SLOT_DURATION_MILLIS);
 
         futures::future::ready(Ok((MockTimestampInherentDataProvider, mocked_parachain)))
 		}
 	}
-
-//     #[tokio::main]
-// async fn help( anvil_config: &AnvilNodeConfig,) -> anyhow::Result<()> {
-//     // Connect to your anvil-polkadot node
-//     let api = OnlineClient::<PolkadotConfig>::from_url(anvil_config.eth_rpc_url).await?;
-
-//     // Runtime API name
-//     let api_name = "ParachainInfo_parachainId";
-
-//     // Call with no parameters
-//     let para_id: u32 = api
-//         .rpc()
-//         .call_runtime_api(api_name, None, ())
-//         .await?;
-
-//     println!("Parachain ID: {}", para_id);
-//     Ok(())
-// }
 
 /// Builds a new service for a full client.
 pub fn new(
@@ -312,53 +257,14 @@ pub fn new(
         None,
     );
 
-    // let create_inherent_data_providers = {
-    //     move |_, ()| {
-    //         let next_timestamp = time_manager.next_timestamp();
-    //         async move { Ok(sp_timestamp::InherentDataProvider::new(next_timestamp.into())) }
-    //     }
-    // };
-
     let slot_duration= sc_consensus_aura::SlotDuration::from_millis(6000);
-  // let slot_duration = client.runtime_api().slot_duration();
+    //let slot_duration = client.runtime_api().slot_duration();
 
-    // Polkadot-sdk doesnt seem to use the latest changes here, so this function isnt available yet. Can use `new()` instead but our client 
-    // doesnt implement all the needed traits
 	let aura_digest_provider = AuraConsensusDataProvider::new_with_slot_duration(slot_duration);
  //  let aura_digest_provider = AuraConsensusDataProvider::new(client);
 
-
-   // let para_id = Id::new(anvil_config.get_chain_id().try_into().unwrap());
-
-    // might actually work okay with this chain id??
-   //let para_id = Id::new(420420421);
- //  let para_id = client.runtime_api().parachain_id();
-
-   // anvil_config.set_chain_id(Some(420420421 as u64));
-   // let id = config;
-   // print!("paraID 1: {:#?}", id);
-   // print!("paraID: {}", para_id);
-
-
- // Connect to your node
-    // let api = OnlineClient::<PolkadotConfig>::from_url(anvil_config.eth_rpc_url).await?;
-
-    // // Runtime API name
-    // let api_name = "ParachainInfo_parachainId";
-
-    // // Call with no parameters
-    // let para_id: u32 = api
-    //     .rpc()
-    //     .call_runtime_api(api_name, None, ())
-    //     .await?;
-
-    // println!("Parachain ID: {}", para_id);
-    // Ok(())
-
-
     let create_inherent_data_providers = create_manual_seal_inherent_data_providers(
 			client.clone(),
-			
             anvil_config.clone(),
 		);
 
