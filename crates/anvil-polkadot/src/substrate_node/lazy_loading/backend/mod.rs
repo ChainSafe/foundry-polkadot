@@ -311,7 +311,7 @@ impl<Block: BlockT + DeserializeOwned> backend::Backend<Block> for Backend<Block
         }
 
         let mut reverted = NumberFor::<Block>::zero();
-        let mut reverted_finalized = HashSet::new();
+        let mut reverted_up_to_finalized = HashSet::new();
 
         let mut current_hash = storage.best_hash;
 
@@ -362,7 +362,7 @@ impl<Block: BlockT + DeserializeOwned> backend::Backend<Block> for Backend<Block
             );
 
             if number <= original_finalized_number {
-                reverted_finalized.insert(hash_to_remove);
+                reverted_up_to_finalized.insert(hash_to_remove);
             }
 
             reverted = reverted.saturating_add(One::one());
@@ -396,7 +396,7 @@ impl<Block: BlockT + DeserializeOwned> backend::Backend<Block> for Backend<Block
             states.remove(&hash);
 
             if number <= original_finalized_number {
-                reverted_finalized.insert(hash);
+                reverted_up_to_finalized.insert(hash);
             }
         }
 
@@ -426,7 +426,7 @@ impl<Block: BlockT + DeserializeOwned> backend::Backend<Block> for Backend<Block
             storage.finalized_hash = storage.genesis_hash;
         }
 
-        Ok((reverted, reverted_finalized))
+        Ok((reverted, reverted_up_to_finalized))
     }
 
     fn remove_leaf_block(&self, _hash: Block::Hash) -> sp_blockchain::Result<()> {
