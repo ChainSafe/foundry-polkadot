@@ -292,6 +292,23 @@ impl<Block: BlockT + DeserializeOwned> ForkedLazyBackend<Block> {
         }
     }
 
+    pub(crate) fn update_child_storage(
+        &self,
+        child_info: &ChildInfo,
+        key: &[u8],
+        value: &Option<Vec<u8>>,
+    ) {
+        if let Some(val) = value {
+            let mut entries: HashMap<Option<ChildInfo>, StorageCollection> = Default::default();
+            entries.insert(
+                Some(child_info.clone()),
+                vec![(key.to_vec(), Some(val.clone()))],
+            );
+
+            self.db.write().insert(entries, StateVersion::V1);
+        }
+    }
+
     #[inline]
     pub(crate) fn rpc(&self) -> Option<&dyn RPCClient<Block>> {
         self.rpc_client.as_deref()
@@ -409,7 +426,46 @@ impl<Block: BlockT + DeserializeOwned> sp_state_machine::Backend<HashingFor<Bloc
         child_info: &ChildInfo,
         key: &[u8],
     ) -> Result<Option<StorageValue>, Self::Error> {
-        Ok(self.db.read().child_storage(child_info, key).ok().flatten())
+        let remote_fetch = |block: Option<Block::Hash>| -> Option<Vec<u8>> {
+            self.rpc()
+                .and_then(|rpc| {
+                    rpc.child_storage(child_info, StorageKey(key.to_vec()), block).ok()
+                })
+                .flatten()
+                .map(|v| v.0)
+        };
+
+        // When before_fork, try RPC first, then fall back to local DB
+        if self.before_fork {
+            if self.rpc().is_some() {
+                return Ok(remote_fetch(self.block_hash));
+            } else {
+                // No RPC client, try to read from local DB
+                let readable_db = self.db.read();
+                return Ok(readable_db.child_storage(child_info, key).ok().flatten());
+            }
+        }
+
+        let readable_db = self.db.read();
+        let maybe_storage = readable_db.child_storage(child_info, key);
+
+        match maybe_storage {
+            Ok(Some(value)) => Ok(Some(value)),
+            Ok(None) => {
+                if self.removed_keys.read().contains_key(key) {
+                    return Ok(None);
+                }
+
+                if let Some(remote_value) = remote_fetch(self.fork_block) {
+                    drop(readable_db);
+                    self.update_child_storage(child_info, key, &Some(remote_value.clone()));
+                    Ok(Some(remote_value))
+                } else {
+                    Ok(None)
+                }
+            }
+            Err(e) => Err(e),
+        }
     }
 
     fn child_storage_hash(
@@ -417,7 +473,38 @@ impl<Block: BlockT + DeserializeOwned> sp_state_machine::Backend<HashingFor<Bloc
         child_info: &ChildInfo,
         key: &[u8],
     ) -> Result<Option<<HashingFor<Block> as sp_core::Hasher>::Out>, Self::Error> {
-        Ok(self.db.read().child_storage_hash(child_info, key).ok().flatten())
+        let remote_fetch = |block: Option<Block::Hash>| -> Option<Block::Hash> {
+            self.rpc()
+                .and_then(|rpc| {
+                    rpc.child_storage_hash(child_info, StorageKey(key.to_vec()), block).ok()
+                })
+                .flatten()
+        };
+
+        // When before_fork, try RPC first, then fall back to local DB
+        if self.before_fork {
+            if self.rpc().is_some() {
+                return Ok(remote_fetch(self.block_hash));
+            } else {
+                let readable_db = self.db.read();
+                return Ok(readable_db.child_storage_hash(child_info, key).ok().flatten());
+            }
+        }
+
+        let readable_db = self.db.read();
+        let maybe_hash = readable_db.child_storage_hash(child_info, key);
+
+        match maybe_hash {
+            Ok(Some(hash)) => Ok(Some(hash)),
+            Ok(None) => {
+                if self.removed_keys.read().contains_key(key) {
+                    return Ok(None);
+                }
+
+                Ok(remote_fetch(self.fork_block))
+            }
+            Err(e) => Err(e),
+        }
     }
 
     fn next_storage_key(
@@ -431,20 +518,17 @@ impl<Block: BlockT + DeserializeOwned> sp_state_machine::Backend<HashingFor<Bloc
                 .and_then(|keys| keys.last().cloned())
         };
 
+        // When before_fork, try RPC first, then fall back to local DB
         let maybe_next_key = if self.before_fork {
-            // Before the fork checkpoint, try RPC first, then fall back to local DB
             if self.rpc().is_some() {
                 remote_fetch(self.block_hash)
             } else {
-                // No RPC client, try local DB
                 self.db.read().next_storage_key(key).ok().flatten()
             }
         } else {
-            // Try to get the next storage key from the local DB
             let next_storage_key = self.db.read().next_storage_key(key);
             match next_storage_key {
                 Ok(Some(next_key)) => Some(next_key),
-                // If not found locally and key is not marked as removed, fetch remotely
                 _ if !self.removed_keys.read().contains_key(key) => {
                     if self.rpc().is_some() {
                         remote_fetch(self.fork_block)
@@ -473,7 +557,48 @@ impl<Block: BlockT + DeserializeOwned> sp_state_machine::Backend<HashingFor<Bloc
         child_info: &ChildInfo,
         key: &[u8],
     ) -> Result<Option<sp_state_machine::StorageKey>, Self::Error> {
-        Ok(self.db.read().next_child_storage_key(child_info, key).ok().flatten())
+        let remote_fetch = |block: Option<Block::Hash>| {
+            let start_key = Some(StorageKey(key.to_vec()));
+            self.rpc()
+                .and_then(|rpc| {
+                    rpc.child_storage_keys_paged(child_info, None, 2, start_key.clone(), block).ok()
+                })
+                .and_then(|keys| keys.last().cloned())
+        };
+
+        // When before_fork, try RPC first, then fall back to local DB
+        let maybe_next_key = if self.before_fork {
+            if self.rpc().is_some() {
+                remote_fetch(self.block_hash)
+            } else {
+                self.db.read().next_child_storage_key(child_info, key).ok().flatten()
+            }
+        } else {
+            let next_child_key = self.db.read().next_child_storage_key(child_info, key);
+            match next_child_key {
+                Ok(Some(next_key)) => Some(next_key),
+                _ if !self.removed_keys.read().contains_key(key) => {
+                    if self.rpc().is_some() {
+                        remote_fetch(self.fork_block)
+                    } else {
+                        None
+                    }
+                }
+                // Otherwise, there's no next key
+                _ => None,
+            }
+        }
+        .filter(|next_key| next_key != key);
+
+        tracing::trace!(
+            target: LAZY_LOADING_LOG_TARGET,
+            "next_child_storage_key: (child_info: {:?}, key: {:?}, next_key: {:?})",
+            child_info,
+            hex::encode(key),
+            maybe_next_key.clone().map(hex::encode)
+        );
+
+        Ok(maybe_next_key)
     }
 
     fn storage_root<'a>(

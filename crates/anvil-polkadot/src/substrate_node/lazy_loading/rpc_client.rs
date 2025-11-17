@@ -4,7 +4,7 @@ use polkadot_sdk::{
     sp_api::__private::HeaderT,
     sp_runtime::{generic::SignedBlock, traits::Block as BlockT},
     sp_state_machine,
-    sp_storage::{StorageData, StorageKey},
+    sp_storage::{ChildInfo, StorageData, StorageKey},
 };
 use serde::de::DeserializeOwned;
 
@@ -42,6 +42,29 @@ pub trait RPCClient<Block: BlockT + DeserializeOwned>: Send + Sync + std::fmt::D
 
     fn storage_keys_paged(
         &self,
+        key: Option<StorageKey>,
+        count: u32,
+        start_key: Option<StorageKey>,
+        at: Option<Block::Hash>,
+    ) -> Result<Vec<sp_state_machine::StorageKey>, ClientError>;
+
+    fn child_storage(
+        &self,
+        child_info: &ChildInfo,
+        key: StorageKey,
+        at: Option<Block::Hash>,
+    ) -> Result<Option<StorageData>, ClientError>;
+
+    fn child_storage_hash(
+        &self,
+        child_info: &ChildInfo,
+        key: StorageKey,
+        at: Option<Block::Hash>,
+    ) -> Result<Option<Block::Hash>, ClientError>;
+
+    fn child_storage_keys_paged(
+        &self,
+        child_info: &ChildInfo,
         key: Option<StorageKey>,
         count: u32,
         start_key: Option<StorageKey>,
