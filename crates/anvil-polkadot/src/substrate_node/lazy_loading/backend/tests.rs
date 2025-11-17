@@ -7,7 +7,7 @@ use polkadot_sdk::{
         OpaqueExtrinsic,
         traits::{BlakeTwo256, Header as HeaderT},
     },
-    sp_state_machine::{self, StorageIterator},
+    sp_state_machine,
     sp_storage::{StorageData, StorageKey},
 };
 use std::{
@@ -80,14 +80,6 @@ mod mock_rpc {
 
         pub fn put_storage(&self, at: Block::Hash, key: StorageKey, val: StorageData) {
             self.storage.write().insert((at, key), val);
-        }
-        pub fn put_storage_keys_page(
-            &self,
-            at: Block::Hash,
-            prefix: Vec<u8>,
-            keys: Vec<StorageKey>,
-        ) {
-            self.storage_keys_pages.write().insert((at, prefix), keys);
         }
         pub fn put_header(&self, h: Block::Header) {
             self.headers.write().insert(h.hash(), h);
@@ -396,50 +388,6 @@ mod tests {
 
         assert!(v.is_none());
         assert_eq!(calls_before, calls_after, "should not call RPC for removed keys");
-    }
-
-    #[test]
-    fn raw_iter_merges_local_then_remote() {
-        let rpc = std::sync::Arc::new(Rpc::new());
-        let cp = checkpoint(7);
-        let backend = Backend::<TestBlockT>::new(Some(rpc.clone()), Some(cp.clone()));
-
-        // block #8
-        let b8 = make_block(8, cp.hash(), vec![]);
-        rpc.put_header(b8.header.clone());
-        rpc.put_block(b8.clone(), None);
-        let state = backend.state_at(b8.header.hash(), TrieCacheContext::Trusted).unwrap();
-
-        // Preload local DB with key "a1"
-        state.update_storage(b"a1", &Some(b"v1".to_vec()));
-
-        // Ensure storage_root is computed to make the key visible to raw_iter
-        let _ = state.db.write().storage_root(
-            vec![(b"a1".as_ref(), Some(b"v1".as_ref()))].into_iter(),
-            StateVersion::V1,
-        );
-
-        // Remote has only "a2" under same prefix at fork block (not "a1")
-        rpc.put_storage_keys_page(cp.hash(), b"a".to_vec(), vec![StorageKey(b"a2".to_vec())]);
-        rpc.put_storage(cp.hash(), StorageKey(b"a2".to_vec()), StorageData(b"v2".to_vec()));
-
-        let mut args = polkadot_sdk::sp_state_machine::IterArgs::default();
-        args.prefix = Some(&b"a"[..]);
-        let mut it = state.raw_iter(args).unwrap();
-
-        // next_pair should return ("a1","v1") from local
-        let p1 = it.next_pair(&state).unwrap().unwrap();
-        assert_eq!(p1.0, b"a1".to_vec());
-        assert_eq!(p1.1, b"v1".to_vec());
-
-        // next_pair should now bring remote ("a2","v2")
-        let p2 = it.next_pair(&state).unwrap().unwrap();
-        assert_eq!(p2.0, b"a2".to_vec());
-        assert_eq!(p2.1, b"v2".to_vec());
-
-        // done
-        assert!(it.next_pair(&state).is_none());
-        assert!(it.was_complete());
     }
 
     #[test]

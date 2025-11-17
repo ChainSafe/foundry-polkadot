@@ -177,8 +177,8 @@ impl<Block: BlockT + DeserializeOwned> backend::BlockImportOperation<Block>
 pub(crate) fn check_genesis_storage(storage: &Storage) -> sp_blockchain::Result<()> {
     if storage
         .top
-        .iter()
-        .any(|(k, _)| polkadot_sdk::sp_core::storage::well_known_keys::is_child_storage_key(k))
+        .keys()
+        .any(|k| polkadot_sdk::sp_core::storage::well_known_keys::is_child_storage_key(k))
     {
         return Err(sp_blockchain::Error::InvalidState);
     }
