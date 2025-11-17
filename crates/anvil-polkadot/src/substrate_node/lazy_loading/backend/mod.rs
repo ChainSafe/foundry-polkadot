@@ -314,10 +314,10 @@ impl<Block: BlockT + DeserializeOwned> backend::Backend<Block> for Backend<Block
         let mut reverted_finalized = HashSet::new();
 
         let mut current_hash = storage.best_hash;
-        let mut current_number = storage.best_number;
 
         while reverted < target {
-            if current_number.is_zero() {
+            // Stop if we've reached genesis or if there are no blocks in storage
+            if storage.blocks.is_empty() || current_hash == storage.genesis_hash {
                 break;
             }
 
@@ -334,9 +334,10 @@ impl<Block: BlockT + DeserializeOwned> backend::Backend<Block> for Backend<Block
             let header = block.header().clone();
             let number = *header.number();
             let parent_hash = header.parent_hash();
-            let parent_number = number.saturating_sub(One::one());
 
-            let parent_becomes_leaf = if number.is_zero() {
+            // If this is the genesis block, parent doesn't become a leaf
+            // Otherwise, check if any other block has the same parent
+            let parent_becomes_leaf = if current_hash == storage.genesis_hash {
                 false
             } else {
                 !storage.blocks.iter().any(|(other_hash, stored)| {
@@ -367,10 +368,9 @@ impl<Block: BlockT + DeserializeOwned> backend::Backend<Block> for Backend<Block
             reverted = reverted.saturating_add(One::one());
 
             current_hash = *parent_hash;
-            current_number = parent_number;
 
             storage.best_hash = current_hash;
-            storage.best_number = current_number;
+            storage.best_number = number.saturating_sub(One::one());
         }
 
         let best_hash_after = storage.best_hash;
@@ -406,7 +406,15 @@ impl<Block: BlockT + DeserializeOwned> backend::Backend<Block> for Backend<Block
             storage.finalized_number = best_number_after;
         }
 
-        while storage.finalized_number > Zero::zero()
+        // Get the genesis block number to use as lower bound
+        let genesis_number = storage
+            .blocks
+            .get(&storage.genesis_hash)
+            .map(|block| *block.header().number())
+            .unwrap_or(Zero::zero());
+
+        // Decrement finalized_number until we find a valid block, but don't go below genesis
+        while storage.finalized_number > genesis_number
             && !storage.hashes.contains_key(&storage.finalized_number)
         {
             storage.finalized_number = storage.finalized_number.saturating_sub(One::one());
