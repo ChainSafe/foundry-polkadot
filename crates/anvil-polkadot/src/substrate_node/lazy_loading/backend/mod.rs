@@ -293,7 +293,7 @@ impl<Block: BlockT + DeserializeOwned> backend::Backend<Block> for Backend<Block
     ) -> sp_blockchain::Result<(NumberFor<Block>, HashSet<Block::Hash>)> {
         let mut storage = self.blockchain.storage.write();
 
-        if storage.blocks.is_empty() {
+        if storage.blocks.is_empty() || n.is_zero() {
             return Ok((Zero::zero(), HashSet::new()));
         }
 
