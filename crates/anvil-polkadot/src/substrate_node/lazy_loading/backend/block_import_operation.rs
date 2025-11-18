@@ -6,7 +6,9 @@ use polkadot_sdk::{
         Justification, Justifications, StateVersion, Storage,
         traits::{Block as BlockT, HashingFor},
     },
-    sp_state_machine::{self, BackendTransaction, ChildStorageCollection, StorageCollection},
+    sp_state_machine::{
+        self, Backend, BackendTransaction, ChildStorageCollection, StorageCollection,
+    },
 };
 use serde::de::DeserializeOwned;
 
@@ -33,7 +35,6 @@ impl<Block: BlockT + DeserializeOwned> BlockImportOperation<Block> {
         commit: bool,
         state_version: StateVersion,
     ) -> sp_blockchain::Result<Block::Hash> {
-        use sp_state_machine::Backend;
         check_genesis_storage(&storage)?;
 
         let child_delta = storage.children_default.values().map(|child_content| {
