@@ -584,3 +584,56 @@ fn next_child_storage_key_uses_paged() {
     let next = state.next_child_storage_key(&child_info, b"key1").unwrap();
     assert_eq!(next, Some(b"key2".to_vec()));
 }
+
+#[test]
+fn blockchain_status_queries_rpc_when_not_local() {
+    use polkadot_sdk::sp_blockchain::{BlockStatus, HeaderBackend};
+
+    let rpc = std::sync::Arc::new(Rpc::new());
+    let cp = checkpoint(20);
+    let backend = super::Backend::<TestBlockT>::new(Some(rpc.clone()), Some(cp.clone()));
+
+    let parent = cp.hash();
+    let b21 = make_block(21, parent, vec![]);
+    let h21 = b21.header.hash();
+
+    // Block is not in local storage yet, but exists in RPC
+    rpc.put_header(b21.header.clone());
+
+    // status() should query RPC and return InChain
+    let status = backend.blockchain().status(h21).unwrap();
+    assert_eq!(status, BlockStatus::InChain);
+
+    // Now query for a block that doesn't exist anywhere
+    let unknown_hash = make_block(999, parent, vec![]).header.hash();
+    let status = backend.blockchain().status(unknown_hash).unwrap();
+    assert_eq!(status, BlockStatus::Unknown);
+}
+
+#[test]
+fn blockchain_justifications_queries_rpc_when_not_local() {
+    use polkadot_sdk::sp_blockchain::Backend as BlockchainBackend;
+
+    let rpc = std::sync::Arc::new(Rpc::new());
+    let cp = checkpoint(20);
+    let backend = super::Backend::<TestBlockT>::new(Some(rpc.clone()), Some(cp.clone()));
+
+    let parent = cp.hash();
+    let b21 = make_block(21, parent, vec![]);
+    let h21 = b21.header.hash();
+
+    // Create justifications
+    let justifications = polkadot_sdk::sp_runtime::Justifications::from((*b"TEST", vec![1, 2, 3, 4]));
+
+    // Block is not in local storage yet, but exists in RPC with justifications
+    rpc.put_block(b21, Some(justifications.clone()));
+
+    // justifications() should query RPC and return the justifications
+    let result = backend.blockchain().justifications(h21).unwrap();
+    assert_eq!(result, Some(justifications));
+
+    // Now query for a block that doesn't exist anywhere
+    let unknown_hash = make_block(999, parent, vec![]).header.hash();
+    let result = backend.blockchain().justifications(unknown_hash).unwrap();
+    assert_eq!(result, None);
+}

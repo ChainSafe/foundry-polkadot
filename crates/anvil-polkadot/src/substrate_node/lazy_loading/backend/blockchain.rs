@@ -310,9 +310,20 @@ impl<Block: BlockT + DeserializeOwned> HeaderBackend<Block> for Blockchain<Block
     }
 
     fn status(&self, hash: Block::Hash) -> sp_blockchain::Result<BlockStatus> {
-        match self.storage.read().blocks.contains_key(&hash) {
-            true => Ok(BlockStatus::InChain),
-            false => Ok(BlockStatus::Unknown),
+        // Check local storage first
+        if self.storage.read().blocks.contains_key(&hash) {
+            return Ok(BlockStatus::InChain);
+        }
+
+        // If not in local storage, check RPC
+        if let Some(rpc) = self.rpc() {
+            match rpc.header(Some(hash)) {
+                Ok(Some(_)) => Ok(BlockStatus::InChain),
+                Ok(None) => Ok(BlockStatus::Unknown),
+                Err(_) => Ok(BlockStatus::Unknown),
+            }
+        } else {
+            Ok(BlockStatus::Unknown)
         }
     }
 
@@ -380,7 +391,19 @@ impl<Block: BlockT + DeserializeOwned> sp_blockchain::Backend<Block> for Blockch
     }
 
     fn justifications(&self, hash: Block::Hash) -> sp_blockchain::Result<Option<Justifications>> {
-        Ok(self.storage.read().blocks.get(&hash).and_then(|b| b.justifications().cloned()))
+        // Check local storage first
+        if let Some(justifications) =
+            self.storage.read().blocks.get(&hash).and_then(|b| b.justifications().cloned())
+        {
+            return Ok(Some(justifications));
+        }
+
+        // If not in local storage, fetch from RPC
+        let justifications = self.rpc().and_then(|rpc| {
+            rpc.block(Some(hash)).ok().flatten().and_then(|full| full.justifications)
+        });
+
+        Ok(justifications)
     }
 
     fn last_finalized(&self) -> sp_blockchain::Result<Block::Hash> {
