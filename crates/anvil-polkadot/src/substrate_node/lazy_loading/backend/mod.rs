@@ -314,7 +314,7 @@ impl<Block: BlockT + DeserializeOwned> backend::Backend<Block> for Backend<Block
         let mut target = n;
         let original_finalized_number = storage.finalized_number;
 
-        if !target.is_zero() && !revert_finalized {
+        if !revert_finalized {
             let revertible = storage.best_number.saturating_sub(storage.finalized_number);
             if target > revertible {
                 target = revertible;
