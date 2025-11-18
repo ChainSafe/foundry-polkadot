@@ -373,7 +373,7 @@ fn removed_keys_prevents_remote_fetch() {
 
     // mark key as removed
     let key = b":dead".to_vec();
-    state.removed_keys.write().insert(key.clone(), ());
+    state.removed_keys.write().insert(key.clone());
 
     // Even if remote has a value, backend must not fetch it
     rpc.put_storage(cp.hash(), StorageKey(key.clone()), StorageData(b"ghost".to_vec()));

@@ -122,26 +122,26 @@ impl<Block: BlockT + DeserializeOwned> backend::Backend<Block> for Backend<Block
             let storage_updates = operation.storage_updates.clone();
             let child_storage_updates = operation.child_storage_updates.clone();
 
-            let mut removed_keys_map = old_state.removed_keys.read().clone();
+            let mut removed_keys = old_state.removed_keys.read().clone();
             for (key, value) in &storage_updates {
                 if value.is_some() {
-                    removed_keys_map.remove(key);
+                    removed_keys.remove(key);
                 } else {
-                    removed_keys_map.insert(key.clone(), ());
+                    removed_keys.insert(key.clone());
                 }
             }
 
             for (_child_key, child_data) in &child_storage_updates {
                 for (key, value) in child_data {
                     if value.is_some() {
-                        removed_keys_map.remove(key);
+                        removed_keys.remove(key);
                     } else {
-                        removed_keys_map.insert(key.clone(), ());
+                        removed_keys.insert(key.clone());
                     }
                 }
             }
 
-            let new_removed_keys = Arc::new(RwLock::new(removed_keys_map));
+            let new_removed_keys = Arc::new(RwLock::new(removed_keys));
 
             let mut db_clone = old_state.db.read().clone();
             {

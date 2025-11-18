@@ -1,5 +1,6 @@
 use crate::substrate_node::lazy_loading::{LAZY_LOADING_LOG_TARGET, rpc_client::RPCClient};
 use alloy_primitives::hex;
+use parking_lot::RwLock;
 use polkadot_sdk::{
     sc_client_api::StorageKey,
     sp_core,
@@ -15,7 +16,10 @@ use polkadot_sdk::{
     sp_trie::{self, PrefixedMemoryDB},
 };
 use serde::de::DeserializeOwned;
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
 
 /// DB-backed patricia trie state, transaction type is an overlay of changes to commit.
 pub type DbState<B> = TrieBackend<Arc<dyn sp_state_machine::Storage<HashingFor<B>>>, HashingFor<B>>;
@@ -58,8 +62,8 @@ pub struct ForkedLazyBackend<Block: BlockT + DeserializeOwned> {
     pub(crate) rpc_client: Option<Arc<dyn RPCClient<Block>>>,
     pub(crate) block_hash: Option<Block::Hash>,
     pub(crate) fork_block: Option<Block::Hash>,
-    pub(crate) db: Arc<parking_lot::RwLock<InMemoryBackend<HashingFor<Block>>>>,
-    pub(crate) removed_keys: Arc<parking_lot::RwLock<HashMap<Vec<u8>, ()>>>,
+    pub(crate) db: Arc<RwLock<InMemoryBackend<HashingFor<Block>>>>,
+    pub(crate) removed_keys: Arc<RwLock<HashSet<Vec<u8>>>>,
     pub(crate) before_fork: bool,
 }
 
@@ -123,7 +127,7 @@ impl<Block: BlockT + DeserializeOwned> sp_state_machine::Backend<HashingFor<Bloc
         let maybe_storage = readable_db.storage(key);
         let value = match maybe_storage {
             Ok(Some(data)) => Some(data),
-            _ if !self.removed_keys.read().contains_key(key) => {
+            _ if !self.removed_keys.read().contains(key) => {
                 let result =
                     if self.rpc().is_some() { remote_fetch(self.fork_block) } else { None };
 
@@ -167,7 +171,7 @@ impl<Block: BlockT + DeserializeOwned> sp_state_machine::Backend<HashingFor<Bloc
         let storage_hash = self.db.read().storage_hash(key);
         match storage_hash {
             Ok(Some(hash)) => Ok(Some(hash)),
-            _ if !self.removed_keys.read().contains_key(key) => {
+            _ if !self.removed_keys.read().contains(key) => {
                 if self.rpc().is_some() {
                     remote_fetch(self.fork_block)
                 } else {
@@ -228,7 +232,7 @@ impl<Block: BlockT + DeserializeOwned> sp_state_machine::Backend<HashingFor<Bloc
         match maybe_storage {
             Ok(Some(value)) => Ok(Some(value)),
             Ok(None) => {
-                if self.removed_keys.read().contains_key(key) {
+                if self.removed_keys.read().contains(key) {
                     return Ok(None);
                 }
 
@@ -273,7 +277,7 @@ impl<Block: BlockT + DeserializeOwned> sp_state_machine::Backend<HashingFor<Bloc
         match maybe_hash {
             Ok(Some(hash)) => Ok(Some(hash)),
             Ok(None) => {
-                if self.removed_keys.read().contains_key(key) {
+                if self.removed_keys.read().contains(key) {
                     return Ok(None);
                 }
 
@@ -305,7 +309,7 @@ impl<Block: BlockT + DeserializeOwned> sp_state_machine::Backend<HashingFor<Bloc
             let next_storage_key = self.db.read().next_storage_key(key);
             match next_storage_key {
                 Ok(Some(next_key)) => Some(next_key),
-                _ if !self.removed_keys.read().contains_key(key) => {
+                _ if !self.removed_keys.read().contains(key) => {
                     if self.rpc().is_some() {
                         remote_fetch(self.fork_block)
                     } else {
@@ -353,7 +357,7 @@ impl<Block: BlockT + DeserializeOwned> sp_state_machine::Backend<HashingFor<Bloc
             let next_child_key = self.db.read().next_child_storage_key(child_info, key);
             match next_child_key {
                 Ok(Some(next_key)) => Some(next_key),
-                _ if !self.removed_keys.read().contains_key(key) => {
+                _ if !self.removed_keys.read().contains(key) => {
                     if self.rpc().is_some() {
                         remote_fetch(self.fork_block)
                     } else {
