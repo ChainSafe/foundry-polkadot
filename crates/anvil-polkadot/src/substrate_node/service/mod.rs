@@ -5,8 +5,9 @@ use crate::{
         mining_engine::{MiningEngine, MiningMode, run_mining_engine},
         rpc::spawn_rpc_server,
         service::consensus::SameSlotConsensusDataProvider,
-        service::storage::well_known_keys,
-        service::consensus::AuraConsensusDataProvider,
+        //service::storage::well_known_keys,
+        //service::consensus::AuraConsensusDataProvider,
+        service::relay_chain::well_known_keys,
     },
 };
 use codec::Encode;
@@ -15,7 +16,7 @@ use anvil::eth::backend::time::TimeManager;
 use parking_lot::Mutex;
 use polkadot_sdk::{
     cumulus_primitives_core::GetParachainInfo,
-    sc_consensus_manual_seal::{self, ManualSealParams, run_manual_seal, ConsensusDataProvider, Error},
+    sc_consensus_manual_seal::{self, ManualSealParams, run_manual_seal, ConsensusDataProvider, Error, consensus::aura::AuraConsensusDataProvider},
     parachains_common::{SLOT_DURATION, opaque::Block, Hash},
     sc_basic_authorship, sc_consensus::{self, BlockImportParams}, sc_executor,
     sc_service::{
@@ -118,7 +119,7 @@ impl sp_inherents::InherentDataProvider for MockTimestampInherentDataProvider {
 fn create_manual_seal_inherent_data_providers(
 		client: Arc<Client>,
 		// para_id: Id,
-		// slot_duration: sc_consensus_aura::SlotDuration,
+		//slot_duration: sc_consensus_aura::SlotDuration,
         anvil_config: AnvilNodeConfig,
 	) -> impl Fn(
 		Hash,
@@ -141,15 +142,25 @@ fn create_manual_seal_inherent_data_providers(
             .expect("Header lookup should succeed")
             .expect("Header passed in as parent should be present in backend.");
 
-          let slot_duration = client.runtime_api().slot_duration(current_para_head.hash()).unwrap();
+        let slot_duration = client.runtime_api().slot_duration(current_para_head.hash()).unwrap();
 
           let para_id = client.runtime_api().parachain_id(current_para_head.hash()).unwrap();
 
-        // The API version is relevant here because the constraints in the runtime changed
-        // in https://github.com/paritytech/polkadot-sdk/pull/6825. In general, the logic
-        // here assumes that we are using the aura-ext consensushook in the parachain
-        // runtime.
-        // Note: Taken from https://github.com/paritytech/polkadot-sdk/issues/7341, but unsure fi needed or not
+      //    let timetamps =  sp_timestamp::Timestamp::current().as_millis()
+
+
+          let timetamps =  sp_timestamp::Timestamp::from(
+           sp_timestamp::Timestamp::current().as_millis()
+        );
+
+          //let slot = TIMESTAMP.saturating_div(RELAY_CHAIN_SLOT_DURATION_MILLIS);
+         let slot =  Slot::from_timestamp(timetamps, slot_duration);
+
+        // // The API version is relevant here because the constraints in the runtime changed
+        // // in https://github.com/paritytech/polkadot-sdk/pull/6825. In general, the logic
+        // // here assumes that we are using the aura-ext consensushook in the parachain
+        // // runtime.
+        // // Note: Taken from https://github.com/paritytech/polkadot-sdk/issues/7341, but unsure fi needed or not
         // let requires_relay_progress = client
         //     .runtime_api()
         //     .has_api_with::<dyn AuraUnincludedSegmentApi<Block>, _>(block, |version| version > 1)
@@ -168,6 +179,16 @@ fn create_manual_seal_inherent_data_providers(
         //let time = anvil_config.get_genesis_timestamp();
         let time = TIMESTAMP.load(Ordering::SeqCst);
 
+
+        let additional_key_values = vec![
+            // Override current slot number
+            (
+                well_known_keys::CURRENT_SLOT.to_vec(),
+                Slot::from(slot).encode(),
+            ),
+        
+        ];
+
         let mocked_parachain = MockValidationDataInherentDataProvider::<()> {
             current_para_block: current_para_head.number,
             para_id,
@@ -176,6 +197,7 @@ fn create_manual_seal_inherent_data_providers(
            // relay_blocks_per_para_block: requires_relay_progress.then(|| 1).unwrap_or_default(),
             relay_blocks_per_para_block: 1,
             para_blocks_per_relay_epoch: 10,
+            additional_key_values: Some(additional_key_values),
             ..Default::default()
         };
 
@@ -257,11 +279,12 @@ pub fn new(
         None,
     );
 
-    let slot_duration= sc_consensus_aura::SlotDuration::from_millis(6000);
-    //let slot_duration = client.runtime_api().slot_duration();
+    //   let slot_duration = client.runtime_api().slot_duration();
+    let slot_duration = sc_consensus_aura::slot_duration(&*client)
+			.expect("slot_duration is always present; qed.");
 
 	let aura_digest_provider = AuraConsensusDataProvider::new_with_slot_duration(slot_duration);
- //  let aura_digest_provider = AuraConsensusDataProvider::new(client);
+    // let aura_digest_provider = AuraConsensusDataProvider::new(client);
 
     let create_inherent_data_providers = create_manual_seal_inherent_data_providers(
 			client.clone(),
