@@ -63,7 +63,11 @@ pub struct ForkedLazyBackend<Block: BlockT + DeserializeOwned> {
     pub(crate) block_hash: Option<Block::Hash>,
     pub(crate) fork_block: Option<Block::Hash>,
     pub(crate) db: Arc<RwLock<InMemoryBackend<HashingFor<Block>>>>,
+
+    /// Keys explicitly deleted after fork. Prevents RPC fallback from returning stale values
+    /// for deleted keys (distinguishes "not cached locally" from "deleted").
     pub(crate) removed_keys: Arc<RwLock<HashSet<Vec<u8>>>>,
+
     pub(crate) before_fork: bool,
 }
 
