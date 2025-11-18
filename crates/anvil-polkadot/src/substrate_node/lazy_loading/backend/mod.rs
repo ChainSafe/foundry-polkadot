@@ -130,6 +130,17 @@ impl<Block: BlockT + DeserializeOwned> backend::Backend<Block> for Backend<Block
                     removed_keys_map.insert(key.clone(), ());
                 }
             }
+
+            for (_child_key, child_data) in &child_storage_updates {
+                for (key, value) in child_data {
+                    if value.is_some() {
+                        removed_keys_map.remove(key);
+                    } else {
+                        removed_keys_map.insert(key.clone(), ());
+                    }
+                }
+            }
+
             let new_removed_keys = Arc::new(RwLock::new(removed_keys_map));
 
             let mut db_clone = old_state.db.read().clone();
