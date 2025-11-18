@@ -386,30 +386,8 @@ impl<Block: BlockT + DeserializeOwned> backend::Backend<Block> for Backend<Block
 
         let best_hash_after = storage.best_hash;
         let best_number_after = storage.best_number;
-        let extra_leaves: Vec<_> =
-            storage.leaves.revert(best_hash_after, best_number_after).collect();
 
-        for (hash, number) in extra_leaves {
-            if let Some(count) = pinned.get(&hash) {
-                if *count > 0 {
-                    return Err(sp_blockchain::Error::Backend(format!(
-                        "Can't revert pinned block {hash:?}",
-                    )));
-                }
-            }
-
-            storage.blocks.remove(&hash);
-            if let Some(entry) = storage.hashes.get(&number) {
-                if *entry == hash {
-                    storage.hashes.remove(&number);
-                }
-            }
-            states.remove(&hash);
-
-            if number <= original_finalized_number {
-                reverted_up_to_finalized.insert(hash);
-            }
-        }
+        let _ = storage.leaves.revert(best_hash_after, best_number_after);
 
         storage.hashes.insert(best_number_after, best_hash_after);
 
