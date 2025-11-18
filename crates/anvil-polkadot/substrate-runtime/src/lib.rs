@@ -24,6 +24,7 @@ use pallet_revive::{
 };
 use pallet_transaction_payment::{FeeDetails, RuntimeDispatchInfo};
 use polkadot_sdk::{
+    cumulus_primitives_core::{ParaId},
     parachains_common::{
         AccountId, AssetHubPolkadotAuraId as AuraId, BlockNumber, Hash as CommonHash, Header,
         Nonce, Signature,
@@ -183,7 +184,12 @@ mod runtime {
     /// Provides the ability to determine AURA authorities for block building.
     #[runtime::pallet_index(5)]
     pub type Aura = pallet_aura::Pallet<Runtime>;
+
+    // #[runtime::pallet_index(7)]
+    // pub type ParachainInfo = parachain_info::Pallet<Runtime>;
 }
+
+//impl parachain_info::Config for Runtime {}
 
 impl pallet_aura::Config for Runtime {
     type AuthorityId = AuraId;
@@ -449,5 +455,11 @@ pallet_revive::impl_runtime_apis_plus_revive_traits!(
             pallet_aura::Authorities::<Runtime>::get().into_inner()
         }
     }
+
+    impl cumulus_primitives_core::GetParachainInfo<Block> for Runtime {
+		fn parachain_id() -> ParaId {
+			unimplemented!()
+		}
+	}
 
 );

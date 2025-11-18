@@ -102,6 +102,9 @@ pub struct NodeArgs {
 
     #[command(flatten)]
     pub server_config: ServerConfig,
+
+        #[command(flatten)]
+    pub fork: ForkArgs,
 }
 
 /// The default IPC endpoint
@@ -281,6 +284,22 @@ fn duration_from_secs_f64(s: &str) -> Result<Duration, String> {
         return Err("Duration must be greater than 0".to_string());
     }
     Duration::try_from_secs_f64(s).map_err(|e| e.to_string())
+}
+
+#[derive(Clone, Debug, Parser)]
+#[command(next_help_heading = "Fork options")]
+pub struct ForkArgs {
+    /// Fetch state over a remote endpoint instead of starting from an empty state.
+    #[arg(
+        long = "fork-url",
+        short = 'f',
+        value_name = "URL",
+    )]
+    pub fork_url: Option<String>,
+
+    /// Fetch state from a specific block hash over a remote endpoint.
+    #[arg(long, value_name = "BLOCK")]
+    pub fork_block_hash: Option<String>,
 }
 
 #[cfg(test)]

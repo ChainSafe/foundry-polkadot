@@ -313,6 +313,10 @@ pub struct AnvilNodeConfig {
     pub fork_request_timeout: Duration,
     /// Number of request retries for spurious networks
     pub fork_request_retries: u32,
+    /// Fetch state over a remote endpoint instead of starting from an empty state.
+    pub fork_url: Option<String>,
+    /// Fetch state from a specific block hash over a remote endpoint.
+    pub fork_block_hash: Option<String>,
 }
 
 impl AnvilNodeConfig {
@@ -500,6 +504,8 @@ impl Default for AnvilNodeConfig {
             fork_choice: None,
             fork_request_timeout: REQUEST_TIMEOUT,
             fork_request_retries: 5,
+            fork_url: None,
+            fork_block_hash: None,
         }
     }
 }
@@ -770,6 +776,20 @@ impl AnvilNodeConfig {
         if let Some(fork_request_retries) = fork_request_retries {
             self.fork_request_retries = fork_request_retries;
         }
+        self
+    }
+
+      /// Sets the fork url
+    #[must_use]
+    pub fn with_fork_url(mut self, fork_url: Option<String>) -> Self {
+        self.fork_url = fork_url;
+        self
+    }
+
+    /// Sets the fork block
+    #[must_use]
+    pub fn with_fork_block_hash(mut self, fork_block_hash: Option<String>) -> Self {
+        self.fork_block_hash = fork_block_hash;
         self
     }
 }
