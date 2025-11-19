@@ -289,14 +289,6 @@ fn duration_from_secs_f64(s: &str) -> Result<Duration, String> {
 #[derive(Clone, Debug, Parser)]
 #[command(next_help_heading = "Fork options")]
 pub struct ForkArgs {
-    /// Fetch state over a remote endpoint instead of starting from an empty state.
-    #[arg(
-        long = "fork-url",
-        short = 'f',
-        value_name = "URL",
-    )]
-    pub fork_url: Option<String>,
-
     /// Fetch state from a specific block hash over a remote endpoint.
     #[arg(long, value_name = "BLOCK")]
     pub fork_block_hash: Option<String>,
