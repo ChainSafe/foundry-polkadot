@@ -65,73 +65,73 @@ where
     }
 }
 
-// Mine /// Consensus data provider for Aura. This allows to use manual-seal driven nodes to author valid
-/// AURA blocks. It will inspect incoming [`InherentData`] and look for included timestamps. Based
-/// on these timestamps, the [`AuraConsensusDataProvider`] will emit fitting digest items.
-pub struct AuraConsensusDataProvider<B, P> {
-	// slot duration
-	slot_duration: sc_consensus_aura::SlotDuration,
-	// phantom data for required generics
-	_phantom: PhantomData<(B, P)>,
-}
+// // Mine /// Consensus data provider for Aura. This allows to use manual-seal driven nodes to author valid
+// /// AURA blocks. It will inspect incoming [`InherentData`] and look for included timestamps. Based
+// /// on these timestamps, the [`AuraConsensusDataProvider`] will emit fitting digest items.
+// pub struct AuraConsensusDataProvider<B, P> {
+// 	// slot duration
+// 	slot_duration: sc_consensus_aura::SlotDuration,
+// 	// phantom data for required generics
+// 	_phantom: PhantomData<(B, P)>,
+// }
 
-impl<B, P> AuraConsensusDataProvider<B, P>
-where
-	B: BlockT,
-{
-	/// Creates a new instance of the [`AuraConsensusDataProvider`], requires that `client`
-	/// implements [`sp_consensus_aura::AuraApi`]
-	pub fn new<C>(client: Arc<C>) -> Self
-	where
-		C: AuxStore + ProvideRuntimeApi<B> + UsageProvider<B>,
-		C::Api: AuraApi<B, AuthorityId>,
-	{
-		let slot_duration = sc_consensus_aura::slot_duration(&*client)
-			.expect("slot_duration is always present; qed.");
+// impl<B, P> AuraConsensusDataProvider<B, P>
+// where
+// 	B: BlockT,
+// {
+// 	/// Creates a new instance of the [`AuraConsensusDataProvider`], requires that `client`
+// 	/// implements [`sp_consensus_aura::AuraApi`]
+// 	pub fn new<C>(client: Arc<C>) -> Self
+// 	where
+// 		C: AuxStore + ProvideRuntimeApi<B> + UsageProvider<B>,
+// 		C::Api: AuraApi<B, AuthorityId>,
+// 	{
+// 		let slot_duration = sc_consensus_aura::slot_duration(&*client)
+// 			.expect("slot_duration is always present; qed.");
 
-		Self { slot_duration, _phantom: PhantomData }
-	}
+// 		Self { slot_duration, _phantom: PhantomData }
+// 	}
 
-	/// Creates a new instance of the [`AuraConsensusDataProvider`]
-	pub fn new_with_slot_duration(slot_duration: sc_consensus_aura::SlotDuration) -> Self {
-		Self { slot_duration, _phantom: PhantomData }
-	}
-}
+// 	/// Creates a new instance of the [`AuraConsensusDataProvider`]
+// 	pub fn new_with_slot_duration(slot_duration: sc_consensus_aura::SlotDuration) -> Self {
+// 		Self { slot_duration, _phantom: PhantomData }
+// 	}
+// }
 
-impl<B, P> ConsensusDataProvider<B> for AuraConsensusDataProvider<B, P>
-where
-	B: BlockT,
-	P: Send + Sync,
-{
-	type Proof = P;
+// impl<B, P> ConsensusDataProvider<B> for AuraConsensusDataProvider<B, P>
+// where
+// 	B: BlockT,
+// 	P: Send + Sync,
+// {
+// 	type Proof = P;
 
-	fn create_digest(
-        &self,
-        _parent: &B::Header,
-        inherents: &InherentData,
-    ) -> Result<Digest, Error> {
-        let timestamp =
-            inherents.timestamp_inherent_data()?.expect("Timestamp is always present; qed");
+// 	fn create_digest(
+//         &self,
+//         _parent: &B::Header,
+//         inherents: &InherentData,
+//     ) -> Result<Digest, Error> {
+//         let timestamp =
+//             inherents.timestamp_inherent_data()?.expect("Timestamp is always present; qed");
 
-        print!("time da {}", timestamp);
-        print!("time db {}", TIMESTAMP.load(Ordering::SeqCst));
+//         print!("time da {}", timestamp);
+//         print!("time db {}", TIMESTAMP.load(Ordering::SeqCst));
 
-        // we always calculate the new slot number based on the current time-stamp and the slot
-        // duration.
-        let digest_item = <DigestItem as CompatibleDigestItem<AuthoritySignature>>::aura_pre_digest(
-            Slot::from_timestamp(timestamp, self.slot_duration),
-        );
+//         // we always calculate the new slot number based on the current time-stamp and the slot
+//         // duration.
+//         let digest_item = <DigestItem as CompatibleDigestItem<AuthoritySignature>>::aura_pre_digest(
+//             Slot::from_timestamp(timestamp, self.slot_duration),
+//         );
 
-        Ok(Digest { logs: vec![digest_item] })
-    }
+//         Ok(Digest { logs: vec![digest_item] })
+//     }
 
-	fn append_block_import(
-		&self,
-		_parent: &B::Header,
-		_params: &mut BlockImportParams<B>,
-		_inherents: &InherentData,
-		_proof: Self::Proof,
-	) -> Result<(), Error> {
-		Ok(())
-	}
-}
+// 	fn append_block_import(
+// 		&self,
+// 		_parent: &B::Header,
+// 		_params: &mut BlockImportParams<B>,
+// 		_inherents: &InherentData,
+// 		_proof: Self::Proof,
+// 	) -> Result<(), Error> {
+// 		Ok(())
+// 	}
+// }
