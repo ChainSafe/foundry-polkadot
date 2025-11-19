@@ -131,12 +131,13 @@ impl<Block: BlockT + DeserializeOwned> backend::Backend<Block> for Backend<Block
                 }
             }
 
-            for (_child_key, child_data) in &child_storage_updates {
+            for (child_key, child_data) in &child_storage_updates {
                 for (key, value) in child_data {
+                    let composite_key = make_composite_child_key(child_key, key);
                     if value.is_some() {
-                        removed_keys.remove(key);
+                        removed_keys.remove(&composite_key);
                     } else {
-                        removed_keys.insert(key.clone());
+                        removed_keys.insert(composite_key);
                     }
                 }
             }
@@ -455,4 +456,14 @@ where
 {
     let backend = Arc::new(Backend::new(rpc_client, checkpoint));
     Ok(backend)
+}
+
+/// Creates a composite key for child storage by combining child_storage_key + key.
+/// This ensures keys from different child storages don't collide.
+#[inline]
+pub fn make_composite_child_key(child_storage_key: &[u8], key: &[u8]) -> Vec<u8> {
+    let mut composite = Vec::with_capacity(child_storage_key.len() + key.len());
+    composite.extend_from_slice(child_storage_key);
+    composite.extend_from_slice(key);
+    composite
 }

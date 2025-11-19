@@ -637,3 +637,88 @@ fn blockchain_justifications_queries_rpc_when_not_local() {
     let result = backend.blockchain().justifications(unknown_hash).unwrap();
     assert_eq!(result, None);
 }
+
+#[test]
+fn child_storage_removed_keys_uses_composite_key() {
+    use polkadot_sdk::sp_storage::ChildInfo;
+
+    let rpc = std::sync::Arc::new(Rpc::new());
+    let cp = checkpoint(5);
+    let backend = Backend::<TestBlockT>::new(Some(rpc.clone()), Some(cp.clone()));
+
+    // make block #6
+    let b6 = make_block(6, cp.hash(), vec![]);
+    rpc.put_header(b6.header.clone());
+    rpc.put_block(b6.clone(), None);
+    let state = backend.state_at(b6.header.hash(), TrieCacheContext::Trusted).unwrap();
+
+    let child_info1 = ChildInfo::new_default(b"child1");
+    let child_info2 = ChildInfo::new_default(b"child2");
+    let key = b"same_key".to_vec();
+
+    // Put values in RPC for both child storages with the same key
+    rpc.put_child_storage(
+        cp.hash(),
+        child_info1.storage_key().to_vec(),
+        StorageKey(key.clone()),
+        StorageData(b"value1".to_vec()),
+    );
+    rpc.put_child_storage(
+        cp.hash(),
+        child_info2.storage_key().to_vec(),
+        StorageKey(key.clone()),
+        StorageData(b"value2".to_vec()),
+    );
+
+    // Mark the key as removed only for child1 using composite key
+    let composite_key1 = super::make_composite_child_key(child_info1.storage_key(), &key);
+    state.removed_keys.write().insert(composite_key1);
+
+    // child1 should return None (key is removed)
+    let v1 = state.child_storage(&child_info1, &key).unwrap();
+    assert_eq!(v1, None, "child1 key should be removed");
+
+    // child2 should still fetch from RPC (different composite key)
+    let v2 = state.child_storage(&child_info2, &key).unwrap();
+    assert_eq!(v2, Some(b"value2".to_vec()), "child2 key should still be accessible");
+}
+
+#[test]
+fn child_storage_removed_keys_no_collision_with_main_storage() {
+    use polkadot_sdk::sp_storage::ChildInfo;
+
+    let rpc = std::sync::Arc::new(Rpc::new());
+    let cp = checkpoint(5);
+    let backend = Backend::<TestBlockT>::new(Some(rpc.clone()), Some(cp.clone()));
+
+    // make block #6
+    let b6 = make_block(6, cp.hash(), vec![]);
+    rpc.put_header(b6.header.clone());
+    rpc.put_block(b6.clone(), None);
+    let state = backend.state_at(b6.header.hash(), TrieCacheContext::Trusted).unwrap();
+
+    let child_info = ChildInfo::new_default(b"child1");
+    let key = b"test_key".to_vec();
+
+    // Put value in main storage
+    rpc.put_storage(cp.hash(), StorageKey(key.clone()), StorageData(b"main_value".to_vec()));
+
+    // Put value in child storage with the same key
+    rpc.put_child_storage(
+        cp.hash(),
+        child_info.storage_key().to_vec(),
+        StorageKey(key.clone()),
+        StorageData(b"child_value".to_vec()),
+    );
+
+    // Mark the key as removed in main storage (just the raw key)
+    state.removed_keys.write().insert(key.clone());
+
+    // Main storage should return None
+    let v_main = state.storage(&key).unwrap();
+    assert_eq!(v_main, None, "main storage key should be removed");
+
+    // Child storage should still work (uses composite key)
+    let v_child = state.child_storage(&child_info, &key).unwrap();
+    assert_eq!(v_child, Some(b"child_value".to_vec()), "child storage key should not be affected");
+}

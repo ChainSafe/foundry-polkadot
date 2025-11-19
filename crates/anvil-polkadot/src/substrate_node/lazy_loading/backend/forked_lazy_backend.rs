@@ -1,3 +1,4 @@
+use super::make_composite_child_key;
 use crate::substrate_node::lazy_loading::{LAZY_LOADING_LOG_TARGET, rpc_client::RPCClient};
 use alloy_primitives::hex;
 use parking_lot::RwLock;
@@ -236,7 +237,9 @@ impl<Block: BlockT + DeserializeOwned> sp_state_machine::Backend<HashingFor<Bloc
         match maybe_storage {
             Ok(Some(value)) => Ok(Some(value)),
             Ok(None) => {
-                if self.removed_keys.read().contains(key) {
+                let composite_key =
+                    make_composite_child_key(child_info.storage_key(), key);
+                if self.removed_keys.read().contains(&composite_key) {
                     return Ok(None);
                 }
 
@@ -281,7 +284,9 @@ impl<Block: BlockT + DeserializeOwned> sp_state_machine::Backend<HashingFor<Bloc
         match maybe_hash {
             Ok(Some(hash)) => Ok(Some(hash)),
             Ok(None) => {
-                if self.removed_keys.read().contains(key) {
+                let composite_key =
+                    make_composite_child_key(child_info.storage_key(), key);
+                if self.removed_keys.read().contains(&composite_key) {
                     return Ok(None);
                 }
 
@@ -361,15 +366,20 @@ impl<Block: BlockT + DeserializeOwned> sp_state_machine::Backend<HashingFor<Bloc
             let next_child_key = self.db.read().next_child_storage_key(child_info, key);
             match next_child_key {
                 Ok(Some(next_key)) => Some(next_key),
-                _ if !self.removed_keys.read().contains(key) => {
-                    if self.rpc().is_some() {
-                        remote_fetch(self.fork_block)
+                // Otherwise, check removed_keys and try remote fetch if not removed
+                _ => {
+                    let composite_key =
+                        make_composite_child_key(child_info.storage_key(), key);
+                    if !self.removed_keys.read().contains(&composite_key) {
+                        if self.rpc().is_some() {
+                            remote_fetch(self.fork_block)
+                        } else {
+                            None
+                        }
                     } else {
                         None
                     }
                 }
-                // Otherwise, there's no next key
-                _ => None,
             }
         }
         .filter(|next_key| next_key != key);
