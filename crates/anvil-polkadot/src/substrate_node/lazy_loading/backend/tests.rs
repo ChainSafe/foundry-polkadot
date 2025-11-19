@@ -598,7 +598,7 @@ fn blockchain_status_queries_rpc_when_not_local() {
     let h21 = b21.header.hash();
 
     // Block is not in local storage yet, but exists in RPC
-    rpc.put_header(b21.header.clone());
+    rpc.put_header(b21.header);
 
     // status() should query RPC and return InChain
     let status = backend.blockchain().status(h21).unwrap();
@@ -623,7 +623,8 @@ fn blockchain_justifications_queries_rpc_when_not_local() {
     let h21 = b21.header.hash();
 
     // Create justifications
-    let justifications = polkadot_sdk::sp_runtime::Justifications::from((*b"TEST", vec![1, 2, 3, 4]));
+    let justifications =
+        polkadot_sdk::sp_runtime::Justifications::from((*b"TEST", vec![1, 2, 3, 4]));
 
     // Block is not in local storage yet, but exists in RPC with justifications
     rpc.put_block(b21, Some(justifications.clone()));

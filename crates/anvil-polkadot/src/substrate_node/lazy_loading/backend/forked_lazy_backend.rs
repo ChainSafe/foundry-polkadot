@@ -237,8 +237,7 @@ impl<Block: BlockT + DeserializeOwned> sp_state_machine::Backend<HashingFor<Bloc
         match maybe_storage {
             Ok(Some(value)) => Ok(Some(value)),
             Ok(None) => {
-                let composite_key =
-                    make_composite_child_key(child_info.storage_key(), key);
+                let composite_key = make_composite_child_key(child_info.storage_key(), key);
                 if self.removed_keys.read().contains(&composite_key) {
                     return Ok(None);
                 }
@@ -284,8 +283,7 @@ impl<Block: BlockT + DeserializeOwned> sp_state_machine::Backend<HashingFor<Bloc
         match maybe_hash {
             Ok(Some(hash)) => Ok(Some(hash)),
             Ok(None) => {
-                let composite_key =
-                    make_composite_child_key(child_info.storage_key(), key);
+                let composite_key = make_composite_child_key(child_info.storage_key(), key);
                 if self.removed_keys.read().contains(&composite_key) {
                     return Ok(None);
                 }
@@ -368,14 +366,9 @@ impl<Block: BlockT + DeserializeOwned> sp_state_machine::Backend<HashingFor<Bloc
                 Ok(Some(next_key)) => Some(next_key),
                 // Otherwise, check removed_keys and try remote fetch if not removed
                 _ => {
-                    let composite_key =
-                        make_composite_child_key(child_info.storage_key(), key);
+                    let composite_key = make_composite_child_key(child_info.storage_key(), key);
                     if !self.removed_keys.read().contains(&composite_key) {
-                        if self.rpc().is_some() {
-                            remote_fetch(self.fork_block)
-                        } else {
-                            None
-                        }
+                        if self.rpc().is_some() { remote_fetch(self.fork_block) } else { None }
                     } else {
                         None
                     }
