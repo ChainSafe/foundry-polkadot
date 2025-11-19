@@ -371,16 +371,16 @@ pub fn new(
         None,
     );
 
-    let slot_duration= sc_consensus_aura::SlotDuration::from_millis(6000);
+   // let slot_duration= sc_consensus_aura::SlotDuration::from_millis(6000);
     //let slot_duration = client.runtime_api().slot_duration();
 
-	let aura_digest_provider = AuraConsensusDataProvider::new_with_slot_duration(slot_duration);
- //  let aura_digest_provider = AuraConsensusDataProvider::new(client);
+	//let aura_digest_provider = AuraConsensusDataProvider::new_with_slot_duration(slot_duration);
+    let aura_digest_provider = AuraConsensusDataProvider::new(client.clone());
 
     let create_inherent_data_providers = create_manual_seal_inherent_data_providers(
-			client.clone(),
-            anvil_config.clone(),
-		);
+        client.clone(),
+        anvil_config.clone(),
+    );
 
     let params = sc_consensus_manual_seal::ManualSealParams {
         block_import: client.clone(),

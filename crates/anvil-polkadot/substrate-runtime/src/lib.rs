@@ -26,7 +26,7 @@ use pallet_transaction_payment::{FeeDetails, RuntimeDispatchInfo};
 use polkadot_sdk::{
     cumulus_primitives_core::{ParaId},
     parachains_common::{
-        AccountId, AssetHubPolkadotAuraId as AuraId, BlockNumber, Hash as CommonHash, Header,
+        AccountId, AuraId, BlockNumber, Hash as CommonHash, Header,
         Nonce, Signature,
     },
     polkadot_runtime_common::SlowAdjustingFeeUpdate,
