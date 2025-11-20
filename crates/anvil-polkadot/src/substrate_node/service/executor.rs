@@ -4,19 +4,19 @@ use crate::substrate_node::{
 };
 use parking_lot::Mutex;
 use polkadot_sdk::{
+    cumulus_client_service::ParachainHostFunctions,
     parachains_common::{Hash, opaque::Block},
     sc_client_api::{Backend as _, CallExecutor, execution_extensions::ExecutionExtensions},
     sc_executor::{self, RuntimeVersion, RuntimeVersionOf},
     sc_service,
     sp_api::{CallContext, ProofRecorder},
     sp_blockchain::{self, HeaderBackend},
-    sp_core, sp_externalities, sp_io,
+    sp_core, sp_externalities,
     sp_runtime::{generic::BlockId, traits::HashingFor},
     sp_state_machine::{OverlayedChanges, StorageProof},
     sp_storage::ChildInfo,
     sp_version,
     sp_wasm_interface::ExtendedHostFunctions,
-    cumulus_client_service::ParachainHostFunctions, 
 };
 use std::{cell::RefCell, sync::Arc};
 

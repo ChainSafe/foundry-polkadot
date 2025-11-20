@@ -24,10 +24,9 @@ use pallet_revive::{
 };
 use pallet_transaction_payment::{FeeDetails, RuntimeDispatchInfo};
 use polkadot_sdk::{
-    cumulus_primitives_core::{ParaId},
+    cumulus_primitives_core::ParaId,
     parachains_common::{
-        AccountId, AuraId, BlockNumber, Hash as CommonHash, Header,
-        Nonce, Signature,
+        AccountId, AuraId, BlockNumber, Hash as CommonHash, Header, Nonce, Signature,
     },
     polkadot_runtime_common::SlowAdjustingFeeUpdate,
     polkadot_sdk_frame::{
@@ -457,9 +456,9 @@ pallet_revive::impl_runtime_apis_plus_revive_traits!(
     }
 
     impl cumulus_primitives_core::GetParachainInfo<Block> for Runtime {
-		fn parachain_id() -> ParaId {
-			unimplemented!()
-		}
-	}
+        fn parachain_id() -> ParaId {
+            unimplemented!()
+        }
+    }
 
 );
