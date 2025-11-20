@@ -27,14 +27,10 @@ use polkadot_sdk::{
     sp_api::ProvideRuntimeApi,
     sp_arithmetic::traits::UniqueSaturatedInto,
     sp_consensus_aura::AuraApi,
-    sp_inherents::{self, InherentData},
     sp_timestamp,
-    sp_timestamp::TimestampInherentData,
 };
 use std::sync::Arc;
 use tokio_stream::wrappers::ReceiverStream;
-
-use std::sync::atomic::{AtomicU64, Ordering};
 
 use tokio::runtime::Builder as TokioRtBuilder;
 
@@ -191,61 +187,20 @@ fn build_forked_chainspec_from_raw_top(
     Ok(Box::new(new_spec))
 }
 
-const RELAY_CHAIN_SLOT_DURATION_MILLIS: u64 = 6_000;
-
-static TIMESTAMP: AtomicU64 = AtomicU64::new(0);
-
-/// Provide a mock duration starting at 0 in millisecond for timestamp inherent.
-/// Each call will increment timestamp by slot_duration making Aura think time has passed.
-struct MockTimestampInherentDataProvider;
-
-impl MockTimestampInherentDataProvider {
-    fn advance_timestamp(slot_duration: u64) {
-        if TIMESTAMP.load(Ordering::SeqCst) == 0 {
-            // Initialize timestamp inherent provider
-            //TIMESTAMP.store()
-            TIMESTAMP.store(sp_timestamp::Timestamp::current().as_millis(), Ordering::SeqCst);
-        } else {
-            TIMESTAMP.fetch_add(slot_duration, Ordering::SeqCst);
-        }
-    }
-}
-
-#[async_trait::async_trait]
-impl sp_inherents::InherentDataProvider for MockTimestampInherentDataProvider {
-    async fn provide_inherent_data(
-        &self,
-        inherent_data: &mut InherentData,
-    ) -> Result<(), sp_inherents::Error> {
-        inherent_data.put_data(sp_timestamp::INHERENT_IDENTIFIER, &TIMESTAMP.load(Ordering::SeqCst))
-    }
-
-    async fn try_handle_error(
-        &self,
-        _identifier: &sp_inherents::InherentIdentifier,
-        _error: &[u8],
-    ) -> Option<Result<(), sp_inherents::Error>> {
-        // The pallet never reports error.
-        None
-    }
-}
-
 fn create_manual_seal_inherent_data_providers(
     client: Arc<Client>,
-    anvil_config: AnvilNodeConfig,
+    time_manager: Arc<TimeManager>,
 ) -> impl Fn(
     Hash,
     (),
 ) -> futures::future::Ready<
     Result<
-        (MockTimestampInherentDataProvider, MockValidationDataInherentDataProvider<()>),
+        (sp_timestamp::InherentDataProvider, MockValidationDataInherentDataProvider<()>),
         Box<dyn std::error::Error + Send + Sync>,
     >,
 > + Send
 + Sync {
     move |block: Hash, ()| {
-        MockTimestampInherentDataProvider::advance_timestamp(RELAY_CHAIN_SLOT_DURATION_MILLIS);
-
         let current_para_head = client
             .header(block)
             .expect("Header lookup should succeed")
@@ -261,9 +216,9 @@ fn create_manual_seal_inherent_data_providers(
         let next_block_number =
             UniqueSaturatedInto::<u32>::unique_saturated_into(current_para_head.number) + 1;
 
-        let time = TIMESTAMP.load(Ordering::SeqCst);
+        let next_time = time_manager.current_call_timestamp().checked_mul(1000).unwrap();
 
-        let slot = time.saturating_div(RELAY_CHAIN_SLOT_DURATION_MILLIS);
+        let slot = next_time.saturating_div(slot_duration.as_millis());
 
         let additional_key_values =
             vec![(relay_chain::well_known_keys::CURRENT_SLOT.to_vec(), Slot::from(slot).encode())];
@@ -272,18 +227,18 @@ fn create_manual_seal_inherent_data_providers(
             current_para_block: next_block_number,
             para_id,
             current_para_block_head,
-            relay_offset: time as u32,
+            relay_offset: next_time as u32,
             relay_blocks_per_para_block: 1,
             para_blocks_per_relay_epoch: 10,
             additional_key_values: Some(additional_key_values),
             ..Default::default()
         };
 
-        // let timestamp_provider = sp_timestamp::InherentDataProvider::new(
-        //     (slot_duration.as_millis() * current_block_number as u64).into(),
-        // );
+        let timestamp_provider = sp_timestamp::InherentDataProvider::new(
+            next_time.into(),
+        );
 
-        futures::future::ready(Ok((MockTimestampInherentDataProvider, mocked_parachain)))
+        futures::future::ready(Ok((timestamp_provider, mocked_parachain)))
     }
 }
 
@@ -365,7 +320,7 @@ pub fn new(
     let aura_digest_provider = AuraConsensusDataProvider::new(client.clone());
 
     let create_inherent_data_providers =
-        create_manual_seal_inherent_data_providers(client.clone(), anvil_config.clone());
+        create_manual_seal_inherent_data_providers(client.clone(), time_manager.clone());
 
     let params = ManualSealParams {
         block_import: client.clone(),
