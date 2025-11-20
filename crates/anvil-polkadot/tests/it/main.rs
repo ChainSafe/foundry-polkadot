@@ -1,4 +1,5 @@
 mod abi;
+mod contract_isolation;
 mod genesis;
 mod impersonation;
 mod mining;
