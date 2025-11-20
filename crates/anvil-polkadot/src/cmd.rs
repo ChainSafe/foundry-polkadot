@@ -99,7 +99,7 @@ pub struct NodeArgs {
     #[command(flatten)]
     pub server_config: ServerConfig,
 
-        #[command(flatten)]
+    #[command(flatten)]
     pub fork: ForkArgs,
 }
 
