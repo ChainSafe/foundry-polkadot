@@ -171,8 +171,7 @@ pub struct DevelopmentGenesisBlockBuilder<Block: BlockT, B, E> {
     commit_genesis_state: bool,
     backend: Arc<B>,
     executor: E,
-    checkpoint: Option<Block::Header>,
-    checkpoint_extrinsics: Option<Vec<Block::Extrinsic>>,
+    checkpoint: Option<Block>,
     _phantom: PhantomData<Block>,
 }
 
@@ -220,7 +219,6 @@ impl<Block: BlockT, B: Backend<Block>, E: RuntimeVersionOf>
             backend,
             executor,
             checkpoint: None,
-            checkpoint_extrinsics: None,
             _phantom: PhantomData::<Block>,
         })
     }
@@ -230,18 +228,17 @@ impl<Block: BlockT, B: Backend<Block>, E: RuntimeVersionOf>
         commit_genesis_state: bool,
         backend: Arc<B>,
         executor: E,
-        checkpoint: Block::Header,
-        checkpoint_extrinsics: Vec<Block::Extrinsic>,
+        checkpoint: Block,
     ) -> sp_blockchain::Result<Self> {
         let genesis_storage =
             build_genesis_storage.build_storage().map_err(sp_blockchain::Error::Storage)?;
 
         // Extract genesis number from checkpoint header
-        let genesis_number: u32 = (*checkpoint.number()).try_into().map_err(|_| {
+        let genesis_number: u32 = (*checkpoint.header().number()).try_into().map_err(|_| {
             sp_blockchain::Error::Application(
                 format!(
                     "Checkpoint block number {} is too large for u32 (max: {})",
-                    checkpoint.number(),
+                    checkpoint.header().number(),
                     u32::MAX
                 )
                 .into(),
@@ -255,7 +252,6 @@ impl<Block: BlockT, B: Backend<Block>, E: RuntimeVersionOf>
             backend,
             executor,
             checkpoint: Some(checkpoint),
-            checkpoint_extrinsics: Some(checkpoint_extrinsics),
             _phantom: PhantomData::<Block>,
         })
     }
@@ -274,22 +270,19 @@ impl<Block: BlockT, B: Backend<Block>, E: RuntimeVersionOf> BuildGenesisBlock<Bl
             backend,
             executor,
             checkpoint,
-            checkpoint_extrinsics,
             _phantom,
         } = self;
 
         // If we have a checkpoint (fork mode), use it as the genesis block
-        if let Some(checkpoint_header) = checkpoint {
+        if let Some(checkpoint) = checkpoint {
             tracing::info!(
                 "Using checkpoint block as genesis: number={}, hash={:?}",
-                checkpoint_header.number(),
-                checkpoint_header.hash()
+                checkpoint.header().number(),
+                checkpoint.header().hash()
             );
 
             let op = backend.begin_operation()?;
-            let extrinsics = checkpoint_extrinsics.unwrap_or_default();
-            let genesis_block = Block::new(checkpoint_header, extrinsics);
-            Ok((genesis_block, op))
+            Ok((checkpoint, op))
         } else {
             // Normal mode: create new genesis block
             let genesis_state_version = resolve_state_version_from_wasm::<_, HashingFor<Block>>(
