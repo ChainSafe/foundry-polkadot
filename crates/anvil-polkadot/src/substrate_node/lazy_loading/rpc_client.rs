@@ -193,7 +193,7 @@ impl<Block: BlockT + DeserializeOwned> RPCClient<Block> for Rpc<Block> {
             .await
         })
         .map(|ok| match ok {
-            ListOrValue::List(v) => v.get(0).map_or(None, |some| *some),
+            ListOrValue::List(v) => v.first().and_then(|some| *some),
             ListOrValue::Value(v) => v,
         })
     }
@@ -382,9 +382,7 @@ mod tests {
 
         assert!(
             elapsed >= Duration::from_millis(delay_ms as u64),
-            "elapsed {:?} should be >= configured initial delay {:?}ms",
-            elapsed,
-            delay_ms
+            "elapsed {elapsed:?} should be >= configured initial delay {delay_ms:?}ms"
         );
     }
 
@@ -447,7 +445,7 @@ mod tests {
     // Return RPC plus the ServerHandle so tests keep the server alive.
     async fn rpc_against_mock() -> (Rpc<BlockType>, ServerHandle) {
         let (addr, handle) = start_mock_server_ok().await;
-        let url = format!("http://{}", addr);
+        let url = format!("http://{addr}");
         let client = HttpClientBuilder::default().build(&url).unwrap();
         (Rpc::<BlockType>::new(client, 0), handle)
     }

@@ -448,13 +448,14 @@ impl<Block: BlockT + DeserializeOwned> backend::LocalBackend<Block> for Backend<
 
 pub fn new_backend<Block>(
     rpc_client: Option<Arc<dyn RPCClient<Block>>>,
-    checkpoint: Option<Block::Header>,
+    checkpoint: Option<Block>,
 ) -> Result<Arc<Backend<Block>>, polkadot_sdk::sc_service::Error>
 where
     Block: BlockT + DeserializeOwned,
     Block::Hash: From<H256>,
 {
-    let backend = Arc::new(Backend::new(rpc_client, checkpoint));
+    let fork_checkpoint = checkpoint.map(|block| block.header().clone());
+    let backend = Arc::new(Backend::new(rpc_client, fork_checkpoint));
     Ok(backend)
 }
 
