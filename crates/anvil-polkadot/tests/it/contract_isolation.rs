@@ -9,7 +9,8 @@ use alloy_rpc_types::{TransactionInput, TransactionRequest};
 use alloy_sol_types::SolCall;
 use anvil_core::eth::EthRequest;
 use anvil_polkadot::{
-    api_server::revive_conversions::ReviveAddress, config::{AnvilNodeConfig, SubstrateNodeConfig},
+    api_server::revive_conversions::ReviveAddress,
+    config::{AnvilNodeConfig, SubstrateNodeConfig},
 };
 use polkadot_sdk::pallet_revive::evm::Account;
 

@@ -22,10 +22,10 @@ use polkadot_sdk::{
         self, ChainType, GenericChainSpec, KeystoreContainer, LocalCallExecutor, TaskManager,
     },
     sp_blockchain,
+    sp_core::storage::well_known_keys::CODE,
     sp_keystore::KeystorePtr,
     sp_runtime::{generic::SignedBlock, traits::Block as BlockT, traits::Header as HeaderT},
     sp_storage::StorageKey,
-    sp_core::storage::well_known_keys::CODE,
 };
 use std::{collections::HashMap, sync::Arc, time::Duration};
 use substrate_runtime::RuntimeApi;
@@ -43,74 +43,74 @@ pub fn new_client(
         <Block as BlockT>::Header,
         Vec<<Block as BlockT>::Extrinsic>,
     ) = if let Some(fork_url) = &anvil_config.eth_rpc_url {
-            let http_client = jsonrpsee::http_client::HttpClientBuilder::default()
-                .max_request_size(u32::MAX)
-                .max_response_size(u32::MAX)
-                .request_timeout(Duration::from_secs(10))
-                .build(fork_url)
-                .map_err(|e| {
-                    sp_blockchain::Error::Backend(format!("failed to build http client: {e}"))
-                })?;
-
-            let rpc_client = Rpc::<Block>::new(http_client, 0);
-
-            // Create new chainspec for the forked chain
-            let chain_name = rpc_client.system_chain().map_err(|e| {
-                sp_blockchain::Error::Backend(format!("failed to fetch system_chain: {e}"))
+        let http_client = jsonrpsee::http_client::HttpClientBuilder::default()
+            .max_request_size(u32::MAX)
+            .max_response_size(u32::MAX)
+            .request_timeout(Duration::from_secs(10))
+            .build(fork_url)
+            .map_err(|e| {
+                sp_blockchain::Error::Backend(format!("failed to build http client: {e}"))
             })?;
 
-            let chain_properties = rpc_client.system_properties().map_err(|e| {
-                sp_blockchain::Error::Backend(format!("failed to fetch system_properties: {e}"))
-            })?;
+        let rpc_client = Rpc::<Block>::new(http_client, 0);
 
-            // TODO: get block hash using block number from config
-            let block_hash: Option<<Block as BlockT>::Hash> = None;
+        // Create new chainspec for the forked chain
+        let chain_name = rpc_client.system_chain().map_err(|e| {
+            sp_blockchain::Error::Backend(format!("failed to fetch system_chain: {e}"))
+        })?;
 
-            let wasm_binary = rpc_client
-                .storage(StorageKey(CODE.to_vec()), block_hash)
-                .map_err(|e| {
-                    sp_blockchain::Error::Backend(format!("failed to fetch runtime code: {e}"))
-                })?
-                .map(|data| data.0)
-                .expect("WASM binary not found in forked chain");
+        let chain_properties = rpc_client.system_properties().map_err(|e| {
+            sp_blockchain::Error::Backend(format!("failed to fetch system_properties: {e}"))
+        })?;
 
-            let chain_spec = GenericChainSpec::<NoExtension, ()>::builder(&wasm_binary, None)
-                .with_name(chain_name.as_str())
-                .with_id("lazy_loading")
-                .with_properties(chain_properties)
-                .with_chain_type(ChainType::Development)
-                .build();
+        // TODO: get block hash using block number from config
+        let block_hash: Option<<Block as BlockT>::Hash> = None;
 
-            config.chain_spec = Box::new(chain_spec);
+        let wasm_binary = rpc_client
+            .storage(StorageKey(CODE.to_vec()), block_hash)
+            .map_err(|e| {
+                sp_blockchain::Error::Backend(format!("failed to fetch runtime code: {e}"))
+            })?
+            .map(|data| data.0)
+            .expect("WASM binary not found in forked chain");
 
-            let checkpoint: SignedBlock<Block> = rpc_client
-                .block(block_hash)
-                .map_err(|e| {
-                    sp_blockchain::Error::Backend(format!("failed to fetch checkpoint block: {e}"))
-                })?
-                .ok_or_else(|| sp_blockchain::Error::Backend("fork checkpoint not found".into()))?;
+        let chain_spec = GenericChainSpec::<NoExtension, ()>::builder(&wasm_binary, None)
+            .with_name(chain_name.as_str())
+            .with_id("lazy_loading")
+            .with_properties(chain_properties)
+            .with_chain_type(ChainType::Development)
+            .build();
 
-            let checkpoint_header = checkpoint.block.header().clone();
-            let checkpoint_extrinsics = checkpoint.block.extrinsics().to_vec();
+        config.chain_spec = Box::new(chain_spec);
 
-            tracing::info!(
-                "🔗 Forking from block #{} (hash: {:?})",
-                checkpoint_header.number(),
-                checkpoint_header.hash()
-            );
+        let checkpoint: SignedBlock<Block> = rpc_client
+            .block(block_hash)
+            .map_err(|e| {
+                sp_blockchain::Error::Backend(format!("failed to fetch checkpoint block: {e}"))
+            })?
+            .ok_or_else(|| sp_blockchain::Error::Backend("fork checkpoint not found".into()))?;
 
-            (Some(Arc::new(rpc_client)), checkpoint_header, checkpoint_extrinsics)
-        } else {
-            let checkpoint = Header::new(
-                anvil_config.get_genesis_number().try_into().expect("genesis number too large"),
-                Default::default(),
-                Default::default(),
-                Default::default(),
-                Default::default(),
-            );
+        let checkpoint_header = checkpoint.block.header().clone();
+        let checkpoint_extrinsics = checkpoint.block.extrinsics().to_vec();
 
-            (None, checkpoint, Vec::new())
-        };
+        tracing::info!(
+            "🔗 Forking from block #{} (hash: {:?})",
+            checkpoint_header.number(),
+            checkpoint_header.hash()
+        );
+
+        (Some(Arc::new(rpc_client)), checkpoint_header, checkpoint_extrinsics)
+    } else {
+        let checkpoint = Header::new(
+            anvil_config.get_genesis_number().try_into().expect("genesis number too large"),
+            Default::default(),
+            Default::default(),
+            Default::default(),
+            Default::default(),
+        );
+
+        (None, checkpoint, Vec::new())
+    };
 
     let backend = new_lazy_loading_backend(rpc_client.clone(), Some(checkpoint.clone()))?;
 

@@ -5,7 +5,8 @@ use alloy_primitives::{Address, U256};
 use alloy_rpc_types::TransactionRequest;
 use anvil_core::eth::EthRequest;
 use anvil_polkadot::{
-    api_server::revive_conversions::ReviveAddress, config::{AnvilNodeConfig, SubstrateNodeConfig},
+    api_server::revive_conversions::ReviveAddress,
+    config::{AnvilNodeConfig, SubstrateNodeConfig},
 };
 use polkadot_sdk::pallet_revive::evm::Account;
 
@@ -59,9 +60,8 @@ async fn test_fork_preserves_state_and_allows_modifications() {
     // Step 3: Create a forked node pointing to the source node's Substrate RPC
     let source_rpc_url = format!("http://127.0.0.1:{}", source_substrate_rpc_port);
 
-    let fork_config = AnvilNodeConfig::test_config()
-        .with_port(0)
-        .with_eth_rpc_url(Some(source_rpc_url));
+    let fork_config =
+        AnvilNodeConfig::test_config().with_port(0).with_eth_rpc_url(Some(source_rpc_url));
 
     let fork_substrate_config = SubstrateNodeConfig::new(&fork_config);
     let mut fork_node = TestNode::new(fork_config.clone(), fork_substrate_config).await.unwrap();
@@ -154,19 +154,16 @@ async fn test_fork_from_latest_finalized_block() {
 
     // Get the current block number from source (this will be the fork point)
     let source_best_block = source_node.best_block_number().await;
-    let source_best_block_hash = source_node.eth_block_hash_by_number(source_best_block).await.unwrap();
+    let source_best_block_hash =
+        source_node.eth_block_hash_by_number(source_best_block).await.unwrap();
 
     // Verify the source node has mined the correct number of blocks
-    assert_eq!(
-        source_best_block, BLOCKS_TO_MINE,
-        "Source node should have mined 5 blocks"
-    );
+    assert_eq!(source_best_block, BLOCKS_TO_MINE, "Source node should have mined 5 blocks");
 
     // Step 3: Create a forked node from the latest finalized block of the source chain
     let source_rpc_url = format!("http://127.0.0.1:{}", source_substrate_rpc_port);
 
-    let fork_config = AnvilNodeConfig::test_config()
-        .with_eth_rpc_url(Some(source_rpc_url));
+    let fork_config = AnvilNodeConfig::test_config().with_eth_rpc_url(Some(source_rpc_url));
 
     let fork_substrate_config = SubstrateNodeConfig::new(&fork_config);
     let mut fork_node = TestNode::new(fork_config.clone(), fork_substrate_config).await.unwrap();
@@ -182,7 +179,8 @@ async fn test_fork_from_latest_finalized_block() {
     );
 
     // Step 5: Verify the genesis block hash of the fork matches the source
-    let fork_genesis_hash = fork_node.eth_block_hash_by_number(fork_initial_block_number).await.unwrap();
+    let fork_genesis_hash =
+        fork_node.eth_block_hash_by_number(fork_initial_block_number).await.unwrap();
     assert_eq!(
         fork_genesis_hash, source_best_block_hash,
         "Forked node's initial block hash should match source block hash"
@@ -221,11 +219,13 @@ async fn test_fork_from_latest_finalized_block() {
         .from(Address::from(alith_address))
         .to(Address::from(baltathar_address));
     source_node.send_transaction(source_transaction, None).await.unwrap();
-    unwrap_response::<()>(source_node.eth_rpc(EthRequest::Mine(None, None)).await.unwrap()).unwrap();
+    unwrap_response::<()>(source_node.eth_rpc(EthRequest::Mine(None, None)).await.unwrap())
+        .unwrap();
     tokio::time::sleep(Duration::from_millis(500)).await;
 
     let source_new_block = source_node.best_block_number().await;
-    let source_new_block_hash = source_node.eth_block_hash_by_number(source_new_block).await.unwrap();
+    let source_new_block_hash =
+        source_node.eth_block_hash_by_number(source_new_block).await.unwrap();
 
     // Both chains should be at the same height now
     assert_eq!(source_new_block, fork_current_block, "Both chains should be at the same height");
