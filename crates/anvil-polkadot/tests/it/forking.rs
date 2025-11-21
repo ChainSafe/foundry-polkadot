@@ -444,8 +444,10 @@ async fn test_fork_with_contract_deployment() {
 
     // Step 2: Deploy SimpleStorage contract on source node
     let contract_code = get_contract_code("SimpleStorage");
-    let deploy_tx_hash = source_node.deploy_contract(&contract_code.init, alith.address(), None).await;
-    unwrap_response::<()>(source_node.eth_rpc(EthRequest::Mine(None, None)).await.unwrap()).unwrap();
+    let deploy_tx_hash =
+        source_node.deploy_contract(&contract_code.init, alith.address(), None).await;
+    unwrap_response::<()>(source_node.eth_rpc(EthRequest::Mine(None, None)).await.unwrap())
+        .unwrap();
     tokio::time::sleep(Duration::from_millis(250)).await;
 
     let receipt = source_node.get_transaction_receipt(deploy_tx_hash).await;
@@ -459,11 +461,13 @@ async fn test_fork_with_contract_deployment() {
         .input(TransactionInput::both(Bytes::from(set_value_data)));
 
     source_node.send_transaction(call_tx, None).await.unwrap();
-    unwrap_response::<()>(source_node.eth_rpc(EthRequest::Mine(None, None)).await.unwrap()).unwrap();
+    unwrap_response::<()>(source_node.eth_rpc(EthRequest::Mine(None, None)).await.unwrap())
+        .unwrap();
     tokio::time::sleep(Duration::from_millis(250)).await;
 
     // Verify the value is 300 on source by calling getValue()
-    let source_value = call_get_value(&mut source_node, contract_address, Address::from(alith_address)).await;
+    let source_value =
+        call_get_value(&mut source_node, contract_address, Address::from(alith_address)).await;
     assert_eq!(source_value, U256::from(300), "Source should have value 300");
 
     // Wait a bit to ensure the source node has finalized the block
@@ -471,20 +475,30 @@ async fn test_fork_with_contract_deployment() {
 
     // Step 4: Fork from the source node
     let source_rpc_url = format!("http://127.0.0.1:{}", source_substrate_rpc_port);
-    let fork_config = AnvilNodeConfig::test_config()
-        .with_port(0)
-        .with_eth_rpc_url(Some(source_rpc_url));
+    let fork_config =
+        AnvilNodeConfig::test_config().with_port(0).with_eth_rpc_url(Some(source_rpc_url));
 
     let fork_substrate_config = SubstrateNodeConfig::new(&fork_config);
     let mut fork_node = TestNode::new(fork_config.clone(), fork_substrate_config).await.unwrap();
 
     // Step 5: Check that the contract exists in forked node
     let fork_code = unwrap_response::<Bytes>(
-        fork_node.eth_rpc(EthRequest::EthGetCodeAt(Address::from(ReviveAddress::new(contract_address)), None)).await.unwrap()
-    ).unwrap();
+        fork_node
+            .eth_rpc(EthRequest::EthGetCodeAt(
+                Address::from(ReviveAddress::new(contract_address)),
+                None,
+            ))
+            .await
+            .unwrap(),
+    )
+    .unwrap();
     assert!(!fork_code.is_empty(), "Contract code should exist in fork");
 
     // Step 6: Check that the storage data is the same by calling getValue()
-    let fork_value = call_get_value(&mut fork_node, contract_address, Address::from(alith_address)).await;
-    assert_eq!(fork_value, source_value, "Fork should have the same contract state (300) as source");
+    let fork_value =
+        call_get_value(&mut fork_node, contract_address, Address::from(alith_address)).await;
+    assert_eq!(
+        fork_value, source_value,
+        "Fork should have the same contract state (300) as source"
+    );
 }
