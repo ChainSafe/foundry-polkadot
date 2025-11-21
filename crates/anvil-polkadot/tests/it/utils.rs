@@ -256,7 +256,8 @@ impl TestNode {
             .first()
             .and_then(|addr| {
                 addr.iter().find_map(|protocol| {
-                    if let polkadot_sdk::sc_network_types::multiaddr::Protocol::Tcp(port) = protocol {
+                    if let polkadot_sdk::sc_network_types::multiaddr::Protocol::Tcp(port) = protocol
+                    {
                         Some(port)
                     } else {
                         None

@@ -3,6 +3,7 @@ mod contract_isolation;
 mod filters;
 mod gas;
 mod forking;
+mod gas;
 mod genesis;
 mod impersonation;
 mod mining;
