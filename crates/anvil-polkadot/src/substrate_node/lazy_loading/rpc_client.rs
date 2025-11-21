@@ -2,7 +2,7 @@ use jsonrpsee::{core::ClientError, http_client::HttpClient};
 use polkadot_sdk::{
     sc_chain_spec,
     sp_api::__private::HeaderT,
-    sp_core::{H256, storage::PrefixedStorageKey},
+    sp_core::H256,
     sp_rpc::{list::ListOrValue, number::NumberOrHex},
     sp_runtime::{generic::SignedBlock, traits::Block as BlockT},
     sp_state_machine,
@@ -264,7 +264,7 @@ impl<Block: BlockT + DeserializeOwned> RPCClient<Block> for Rpc<Block> {
         at: Option<Block::Hash>,
     ) -> Result<Option<StorageData>, ClientError> {
         let client = self.http_client.clone();
-        let child_storage_key = PrefixedStorageKey::new(child_info.storage_key().to_vec());
+        let child_storage_key = child_info.prefixed_storage_key();
         self.block_on(async move {
             substrate_rpc_client::ChildStateApi::<Block::Hash>::storage(
                 &client,
@@ -283,7 +283,7 @@ impl<Block: BlockT + DeserializeOwned> RPCClient<Block> for Rpc<Block> {
         at: Option<Block::Hash>,
     ) -> Result<Option<Block::Hash>, ClientError> {
         let client = self.http_client.clone();
-        let child_storage_key = PrefixedStorageKey::new(child_info.storage_key().to_vec());
+        let child_storage_key = child_info.prefixed_storage_key();
         self.block_on(async move {
             substrate_rpc_client::ChildStateApi::<Block::Hash>::storage_hash(
                 &client,
@@ -304,7 +304,7 @@ impl<Block: BlockT + DeserializeOwned> RPCClient<Block> for Rpc<Block> {
         at: Option<Block::Hash>,
     ) -> Result<Vec<sp_state_machine::StorageKey>, ClientError> {
         let client = self.http_client.clone();
-        let child_storage_key = PrefixedStorageKey::new(child_info.storage_key().to_vec());
+        let child_storage_key = child_info.prefixed_storage_key();
         let result = self.block_on(async move {
             substrate_rpc_client::ChildStateApi::<Block::Hash>::storage_keys_paged(
                 &client,

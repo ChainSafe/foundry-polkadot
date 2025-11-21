@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use crate::{
     abi::SimpleStorage,
-    utils::{TestNode, get_contract_code, unwrap_response},
+    utils::{TestNode, call_get_value, get_contract_code, unwrap_response},
 };
 use alloy_primitives::{Address, U256};
 use alloy_rpc_types::{TransactionInput, TransactionRequest};
@@ -78,14 +78,14 @@ async fn test_multiple_contract_instances_independent_storage() {
     unwrap_response::<()>(node.eth_rpc(EthRequest::Mine(None, None)).await.unwrap()).unwrap();
     tokio::time::sleep(Duration::from_millis(500)).await;
 
-    // Verify each contract maintains its own independent storage
-    let value1 = node.get_storage_at(U256::from(0), contract1_address).await;
-    let value2 = node.get_storage_at(U256::from(0), contract2_address).await;
-    let value3 = node.get_storage_at(U256::from(0), contract3_address).await;
+    // Verify each contract maintains its own independent storage by calling getValue()
+    let value1 = call_get_value(&mut node, contract1_address, Address::from(alith_address)).await;
+    let value2 = call_get_value(&mut node, contract2_address, Address::from(alith_address)).await;
+    let value3 = call_get_value(&mut node, contract3_address, Address::from(alith_address)).await;
 
-    assert_eq!(value1, 100, "Contract 1 should have value 100");
-    assert_eq!(value2, 200, "Contract 2 should have value 200");
-    assert_eq!(value3, 300, "Contract 3 should have value 300");
+    assert_eq!(value1, U256::from(100), "Contract 1 should have value 100");
+    assert_eq!(value2, U256::from(200), "Contract 2 should have value 200");
+    assert_eq!(value3, U256::from(300), "Contract 3 should have value 300");
 
     // Update contract 2's value to 999 and verify others are unaffected
     let update_value2 = SimpleStorage::setValueCall::new((U256::from(999),)).abi_encode();
@@ -98,11 +98,11 @@ async fn test_multiple_contract_instances_independent_storage() {
     tokio::time::sleep(Duration::from_millis(500)).await;
 
     // Verify only contract 2 changed
-    let value1_after = node.get_storage_at(U256::from(0), contract1_address).await;
-    let value2_after = node.get_storage_at(U256::from(0), contract2_address).await;
-    let value3_after = node.get_storage_at(U256::from(0), contract3_address).await;
+    let value1_after = call_get_value(&mut node, contract1_address, Address::from(alith_address)).await;
+    let value2_after = call_get_value(&mut node, contract2_address, Address::from(alith_address)).await;
+    let value3_after = call_get_value(&mut node, contract3_address, Address::from(alith_address)).await;
 
-    assert_eq!(value1_after, 100, "Contract 1 value should remain 100");
-    assert_eq!(value2_after, 999, "Contract 2 value should be updated to 999");
-    assert_eq!(value3_after, 300, "Contract 3 value should remain 300");
+    assert_eq!(value1_after, U256::from(100), "Contract 1 value should remain 100");
+    assert_eq!(value2_after, U256::from(999), "Contract 2 value should be updated to 999");
+    assert_eq!(value3_after, U256::from(300), "Contract 3 value should remain 300");
 }
