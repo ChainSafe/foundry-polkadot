@@ -225,6 +225,23 @@ impl TestNode {
         .unwrap()
     }
 
+    pub fn substrate_rpc_port(&self) -> u16 {
+        self.service
+            .rpc_handlers
+            .listen_addresses()
+            .first()
+            .and_then(|addr| {
+                addr.iter().find_map(|protocol| {
+                    if let polkadot_sdk::sc_network_types::multiaddr::Protocol::Tcp(port) = protocol {
+                        Some(port)
+                    } else {
+                        None
+                    }
+                })
+            })
+            .expect("Failed to get Substrate RPC port")
+    }
+
     pub async fn wait_for_block_with_timeout(
         &self,
         n: u32,
