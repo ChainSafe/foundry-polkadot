@@ -1,6 +1,7 @@
 use crate::{
     AnvilNodeConfig,
     substrate_node::{
+        lazy_loading::backend::Backend as LazyLoadingBackend,
         mining_engine::{MiningEngine, MiningMode, run_mining_engine},
         rpc::spawn_rpc_server,
         service::consensus::SameSlotConsensusDataProvider,
@@ -30,7 +31,7 @@ mod consensus;
 mod executor;
 pub mod storage;
 
-pub type Backend = sc_service::TFullBackend<Block>;
+pub type Backend = LazyLoadingBackend<Block>;
 
 pub type TransactionPoolHandle = sc_transaction_pool::TransactionPoolHandle<Block, Client>;
 

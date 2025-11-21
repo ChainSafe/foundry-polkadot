@@ -1,6 +1,9 @@
-use crate::substrate_node::service::{
-    Backend,
-    storage::{CodeInfo, ReviveAccountInfo, SystemAccountInfo, well_known_keys},
+use crate::substrate_node::{
+    lazy_loading::backend::Blockchain,
+    service::{
+        Backend,
+        storage::{CodeInfo, ReviveAccountInfo, SystemAccountInfo, well_known_keys},
+    },
 };
 use alloy_primitives::{Address, Bytes};
 use codec::{Decode, Encode};
@@ -9,7 +12,6 @@ use parking_lot::Mutex;
 use polkadot_sdk::{
     parachains_common::{AccountId, Hash, opaque::Block},
     sc_client_api::{Backend as BackendT, StateBackend, TrieCacheContext},
-    sc_client_db::BlockchainDb,
     sp_blockchain,
     sp_core::{H160, H256},
     sp_io::hashing::blake2_256,
@@ -69,7 +71,7 @@ impl BackendWithOverlay {
         Self { backend, overrides }
     }
 
-    pub fn blockchain(&self) -> &BlockchainDb<Block> {
+    pub fn blockchain(&self) -> &Blockchain<Block> {
         self.backend.blockchain()
     }
 
