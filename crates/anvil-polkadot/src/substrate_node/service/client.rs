@@ -10,7 +10,6 @@ use crate::{
             Backend,
             backend::StorageOverrides,
             executor::{Executor, WasmExecutor},
-            storage::well_known_keys,
         },
     },
 };
@@ -26,6 +25,7 @@ use polkadot_sdk::{
     sp_keystore::KeystorePtr,
     sp_runtime::{generic::SignedBlock, traits::Block as BlockT, traits::Header as HeaderT},
     sp_storage::StorageKey,
+    sp_core::storage::well_known_keys::CODE,
 };
 use std::{collections::HashMap, sync::Arc, time::Duration};
 use substrate_runtime::RuntimeApi;
@@ -67,7 +67,7 @@ pub fn new_client(
             let block_hash: Option<<Block as BlockT>::Hash> = None;
 
             let wasm_binary = rpc_client
-                .storage(StorageKey(well_known_keys::CODE.to_vec()), block_hash)
+                .storage(StorageKey(CODE.to_vec()), block_hash)
                 .map_err(|e| {
                     sp_blockchain::Error::Backend(format!("failed to fetch runtime code: {e}"))
                 })?
