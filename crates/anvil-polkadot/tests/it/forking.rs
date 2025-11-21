@@ -6,7 +6,7 @@ use alloy_rpc_types::TransactionRequest;
 use anvil_core::eth::EthRequest;
 use anvil_polkadot::{
     api_server::revive_conversions::ReviveAddress,
-    config::{AnvilNodeConfig, SubstrateNodeConfig},
+    config::{AnvilNodeConfig, ForkChoice, SubstrateNodeConfig},
 };
 use polkadot_sdk::pallet_revive::evm::Account;
 
@@ -21,7 +21,7 @@ async fn test_fork_preserves_state_and_allows_modifications() {
 
     let source_substrate_rpc_port = source_node.substrate_rpc_port();
 
-    tokio::time::sleep(Duration::from_millis(1000)).await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
 
     let alith = Account::from(subxt_signer::eth::dev::alith());
     let baltathar = Account::from(subxt_signer::eth::dev::baltathar());
@@ -130,7 +130,7 @@ async fn test_fork_from_latest_finalized_block() {
 
     let source_substrate_rpc_port = source_node.substrate_rpc_port();
 
-    tokio::time::sleep(Duration::from_millis(1000)).await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
 
     let alith = Account::from(subxt_signer::eth::dev::alith());
     let baltathar = Account::from(subxt_signer::eth::dev::baltathar());
@@ -149,7 +149,7 @@ async fn test_fork_from_latest_finalized_block() {
         source_node.send_transaction(transaction, None).await.unwrap();
         unwrap_response::<()>(source_node.eth_rpc(EthRequest::Mine(None, None)).await.unwrap())
             .unwrap();
-        tokio::time::sleep(Duration::from_millis(500)).await;
+        tokio::time::sleep(Duration::from_millis(250)).await;
     }
 
     // Get the current block number from source (this will be the fork point)
@@ -163,13 +163,14 @@ async fn test_fork_from_latest_finalized_block() {
     // Step 3: Create a forked node from the latest finalized block of the source chain
     let source_rpc_url = format!("http://127.0.0.1:{}", source_substrate_rpc_port);
 
-    let fork_config = AnvilNodeConfig::test_config().with_eth_rpc_url(Some(source_rpc_url));
+    let fork_config =
+        AnvilNodeConfig::test_config().with_port(0).with_eth_rpc_url(Some(source_rpc_url));
 
     let fork_substrate_config = SubstrateNodeConfig::new(&fork_config);
     let mut fork_node = TestNode::new(fork_config.clone(), fork_substrate_config).await.unwrap();
 
     // Wait for fork node to be ready
-    tokio::time::sleep(Duration::from_millis(1000)).await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
 
     // Step 4: Verify the forked node starts from the same block as source best block
     let fork_initial_block_number = fork_node.best_block_number().await;
@@ -193,7 +194,7 @@ async fn test_fork_from_latest_finalized_block() {
         .to(Address::from(baltathar_address));
     fork_node.send_transaction(fork_transaction, None).await.unwrap();
     unwrap_response::<()>(fork_node.eth_rpc(EthRequest::Mine(None, None)).await.unwrap()).unwrap();
-    tokio::time::sleep(Duration::from_millis(500)).await;
+    tokio::time::sleep(Duration::from_millis(510)).await;
 
     // Step 7: Verify the forked node advanced by 1 block
     let fork_current_block = fork_node.best_block_number().await;
@@ -221,7 +222,7 @@ async fn test_fork_from_latest_finalized_block() {
     source_node.send_transaction(source_transaction, None).await.unwrap();
     unwrap_response::<()>(source_node.eth_rpc(EthRequest::Mine(None, None)).await.unwrap())
         .unwrap();
-    tokio::time::sleep(Duration::from_millis(500)).await;
+    tokio::time::sleep(Duration::from_millis(510)).await;
 
     let source_new_block = source_node.best_block_number().await;
     let source_new_block_hash =
@@ -235,4 +236,189 @@ async fn test_fork_from_latest_finalized_block() {
         fork_new_block_hash, source_new_block_hash,
         "Block hashes should be different (chains diverged after fork point)"
     );
+}
+
+/// Tests forking from a specific block number using fork_choice configuration
+#[tokio::test(flavor = "multi_thread")]
+async fn test_fork_from_specific_block_number() {
+    // Step 1: Create the "source" node
+    let source_config = AnvilNodeConfig::test_config();
+    let source_substrate_config = SubstrateNodeConfig::new(&source_config);
+    let mut source_node =
+        TestNode::new(source_config.clone(), source_substrate_config).await.unwrap();
+
+    let source_substrate_rpc_port = source_node.substrate_rpc_port();
+
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let alith = Account::from(subxt_signer::eth::dev::alith());
+    let baltathar = Account::from(subxt_signer::eth::dev::baltathar());
+    let alith_address = ReviveAddress::new(alith.address());
+    let baltathar_address = ReviveAddress::new(baltathar.address());
+
+    // Step 2: Mine 5 blocks on the source node
+    let transfer_amount = U256::from_str_radix("1000000000000000000", 10).unwrap(); // 1 ether
+
+    for _ in 0..5 {
+        let transaction = TransactionRequest::default()
+            .value(transfer_amount)
+            .from(Address::from(alith_address))
+            .to(Address::from(baltathar_address));
+        source_node.send_transaction(transaction, None).await.unwrap();
+        unwrap_response::<()>(source_node.eth_rpc(EthRequest::Mine(None, None)).await.unwrap())
+            .unwrap();
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
+
+    // Verify source node is at block 5
+    let source_block_5 = source_node.best_block_number().await;
+    assert_eq!(source_block_5, 5, "Source node should be at block 5");
+
+    // Get balances at block 3
+    let baltathar_balance_at_block_3 =
+        source_node.get_balance(baltathar.address(), Some(3.into())).await;
+    let alith_balance_at_block_3 = source_node.get_balance(alith.address(), Some(3.into())).await;
+
+    // Step 3: Create a forked node from block 3
+    let source_rpc_url = format!("http://127.0.0.1:{}", source_substrate_rpc_port);
+
+    let fork_config = AnvilNodeConfig::test_config()
+        .with_port(0)
+        .with_eth_rpc_url(Some(source_rpc_url))
+        .with_fork_block_number(Some(3u64));
+
+    let fork_substrate_config = SubstrateNodeConfig::new(&fork_config);
+    let mut fork_node = TestNode::new(fork_config.clone(), fork_substrate_config).await.unwrap();
+
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    // Step 4: Verify the forked node starts from block 3
+    let fork_initial_block = fork_node.best_block_number().await;
+    assert_eq!(fork_initial_block, 3, "Forked node should start from block 3");
+
+    // Step 5: Verify balances match block 3 state
+    let fork_baltathar_balance = fork_node.get_balance(baltathar.address(), None).await;
+    let fork_alith_balance = fork_node.get_balance(alith.address(), None).await;
+
+    assert_eq!(
+        fork_baltathar_balance, baltathar_balance_at_block_3,
+        "Baltathar balance should match block 3 state"
+    );
+    assert_eq!(
+        fork_alith_balance, alith_balance_at_block_3,
+        "Alith balance should match block 3 state"
+    );
+
+    // Step 6: Mine a new block on the forked node
+    let fork_transaction = TransactionRequest::default()
+        .value(transfer_amount)
+        .from(Address::from(alith_address))
+        .to(Address::from(baltathar_address));
+    fork_node.send_transaction(fork_transaction, None).await.unwrap();
+    unwrap_response::<()>(fork_node.eth_rpc(EthRequest::Mine(None, None)).await.unwrap()).unwrap();
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    // Step 7: Verify fork advanced to block 4
+    let fork_new_block = fork_node.best_block_number().await;
+    assert_eq!(fork_new_block, 4, "Forked node should be at block 4");
+
+    // Step 8: Verify the balances changed on fork but not on source
+    let fork_baltathar_balance_after = fork_node.get_balance(baltathar.address(), None).await;
+    assert_eq!(
+        fork_baltathar_balance_after,
+        fork_baltathar_balance + transfer_amount,
+        "Baltathar balance should have increased on fork"
+    );
+
+    // Source should still be at block 5
+    let source_final_block = source_node.best_block_number().await;
+    assert_eq!(source_final_block, 5, "Source node should still be at block 5");
+}
+
+/// Tests forking from a negative block number (offset from latest)
+#[tokio::test(flavor = "multi_thread")]
+async fn test_fork_from_negative_block_number() {
+    // Step 1: Create the "source" node
+    let source_config = AnvilNodeConfig::test_config();
+    let source_substrate_config = SubstrateNodeConfig::new(&source_config);
+    let mut source_node =
+        TestNode::new(source_config.clone(), source_substrate_config).await.unwrap();
+
+    let source_substrate_rpc_port = source_node.substrate_rpc_port();
+
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let alith = Account::from(subxt_signer::eth::dev::alith());
+    let baltathar = Account::from(subxt_signer::eth::dev::baltathar());
+    let alith_address = ReviveAddress::new(alith.address());
+    let baltathar_address = ReviveAddress::new(baltathar.address());
+
+    // Step 2: Mine 5 blocks on the source node
+    let transfer_amount = U256::from_str_radix("1000000000000000000", 10).unwrap(); // 1 ether
+
+    for _ in 0..5 {
+        let transaction = TransactionRequest::default()
+            .value(transfer_amount)
+            .from(Address::from(alith_address))
+            .to(Address::from(baltathar_address));
+        source_node.send_transaction(transaction, None).await.unwrap();
+        unwrap_response::<()>(source_node.eth_rpc(EthRequest::Mine(None, None)).await.unwrap())
+            .unwrap();
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
+
+    // Verify source node is at block 5
+    let source_block_5 = source_node.best_block_number().await;
+    assert_eq!(source_block_5, 5, "Source node should be at block 5");
+
+    // Get balances at block 3 (which is 5 - 2 = block 3)
+    let baltathar_balance_at_block_3 =
+        source_node.get_balance(baltathar.address(), Some(3.into())).await;
+    let alith_balance_at_block_3 = source_node.get_balance(alith.address(), Some(3.into())).await;
+
+    // Step 3: Create a forked node from block -2
+    let source_rpc_url = format!("http://127.0.0.1:{}", source_substrate_rpc_port);
+
+    let fork_config = AnvilNodeConfig::test_config()
+        .with_port(0)
+        .with_eth_rpc_url(Some(source_rpc_url))
+        .with_fork_choice(Some(ForkChoice::Block(-2)));
+
+    let fork_substrate_config = SubstrateNodeConfig::new(&fork_config);
+    let mut fork_node = TestNode::new(fork_config.clone(), fork_substrate_config).await.unwrap();
+
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    // Step 4: Verify the forked node starts from block 3 (5 - 2)
+    let fork_initial_block = fork_node.best_block_number().await;
+    assert_eq!(
+        fork_initial_block, 3,
+        "Forked node should start from block 3 (latest 5 - offset 2)"
+    );
+
+    // Step 5: Verify balances match block 3 state
+    let fork_baltathar_balance = fork_node.get_balance(baltathar.address(), None).await;
+    let fork_alith_balance = fork_node.get_balance(alith.address(), None).await;
+
+    assert_eq!(
+        fork_baltathar_balance, baltathar_balance_at_block_3,
+        "Baltathar balance should match block 3 state"
+    );
+    assert_eq!(
+        fork_alith_balance, alith_balance_at_block_3,
+        "Alith balance should match block 3 state"
+    );
+
+    // Step 6: Mine a new block on the forked node
+    let fork_transaction = TransactionRequest::default()
+        .value(transfer_amount)
+        .from(Address::from(alith_address))
+        .to(Address::from(baltathar_address));
+    fork_node.send_transaction(fork_transaction, None).await.unwrap();
+    unwrap_response::<()>(fork_node.eth_rpc(EthRequest::Mine(None, None)).await.unwrap()).unwrap();
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    // Step 7: Verify fork advanced to block 4
+    let fork_new_block = fork_node.best_block_number().await;
+    assert_eq!(fork_new_block, 4, "Forked node should be at block 4");
 }
