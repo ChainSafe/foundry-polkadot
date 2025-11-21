@@ -98,9 +98,12 @@ async fn test_multiple_contract_instances_independent_storage() {
     tokio::time::sleep(Duration::from_millis(500)).await;
 
     // Verify only contract 2 changed
-    let value1_after = call_get_value(&mut node, contract1_address, Address::from(alith_address)).await;
-    let value2_after = call_get_value(&mut node, contract2_address, Address::from(alith_address)).await;
-    let value3_after = call_get_value(&mut node, contract3_address, Address::from(alith_address)).await;
+    let value1_after =
+        call_get_value(&mut node, contract1_address, Address::from(alith_address)).await;
+    let value2_after =
+        call_get_value(&mut node, contract2_address, Address::from(alith_address)).await;
+    let value3_after =
+        call_get_value(&mut node, contract3_address, Address::from(alith_address)).await;
 
     assert_eq!(value1_after, U256::from(100), "Contract 1 value should remain 100");
     assert_eq!(value2_after, U256::from(999), "Contract 2 value should be updated to 999");
