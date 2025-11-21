@@ -45,7 +45,7 @@ use std::{fmt::Debug, time::Duration};
 use subxt::utils::H160;
 use tempfile::TempDir;
 
-use crate::abi::Multicall;
+use crate::abi::{Multicall, SimpleStorage};
 
 pub struct BlockWaitTimeout {
     pub block_number: u32,
@@ -494,6 +494,28 @@ pub fn to_hex_string(value: u64) -> String {
     let trimmed = hex.trim_start_matches('0');
     let result = if trimmed.is_empty() { "0" } else { trimmed };
     format!("0x{result}")
+}
+
+/// Helper function to call getValue() on a SimpleStorage contract
+pub async fn call_get_value(
+    node: &mut TestNode,
+    contract_address: polkadot_sdk::pallet_revive::H160,
+    from: Address,
+) -> U256 {
+    let get_value_data = SimpleStorage::getValueCall::new(()).abi_encode();
+    let call_tx = TransactionRequest::default()
+        .from(from)
+        .to(Address::from(ReviveAddress::new(contract_address)))
+        .input(TransactionInput::both(Bytes::from(get_value_data)));
+
+    let res: Bytes = unwrap_response(
+        node.eth_rpc(EthRequest::EthCall(WithOtherFields::new(call_tx), None, None, None))
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+
+    SimpleStorage::getValueCall::abi_decode_returns(&res.0).unwrap()
 }
 
 pub async fn multicall_get_coinbase(

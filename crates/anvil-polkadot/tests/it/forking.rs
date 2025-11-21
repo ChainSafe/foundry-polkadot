@@ -1,8 +1,12 @@
 use std::time::Duration;
 
-use crate::utils::{TestNode, unwrap_response};
-use alloy_primitives::{Address, U256};
-use alloy_rpc_types::TransactionRequest;
+use crate::{
+    abi::SimpleStorage,
+    utils::{TestNode, call_get_value, get_contract_code, unwrap_response},
+};
+use alloy_primitives::{Address, Bytes, U256};
+use alloy_rpc_types::{TransactionInput, TransactionRequest};
+use alloy_sol_types::SolCall;
 use anvil_core::eth::EthRequest;
 use anvil_polkadot::{
     api_server::revive_conversions::ReviveAddress,
@@ -130,8 +134,6 @@ async fn test_fork_from_latest_finalized_block() {
 
     let source_substrate_rpc_port = source_node.substrate_rpc_port();
 
-    tokio::time::sleep(Duration::from_millis(500)).await;
-
     let alith = Account::from(subxt_signer::eth::dev::alith());
     let baltathar = Account::from(subxt_signer::eth::dev::baltathar());
     let alith_address = ReviveAddress::new(alith.address());
@@ -140,8 +142,8 @@ async fn test_fork_from_latest_finalized_block() {
     // Step 2: Mine several blocks on the source node to create history
     let transfer_amount = U256::from_str_radix("1000000000000000000", 10).unwrap(); // 1 ether
 
-    // Mine 3 blocks with transfers
-    for _ in 0..BLOCKS_TO_MINE {
+    // Mine blocks with transfers
+    for i in 1..=BLOCKS_TO_MINE {
         let transaction = TransactionRequest::default()
             .value(transfer_amount)
             .from(Address::from(alith_address))
@@ -149,7 +151,7 @@ async fn test_fork_from_latest_finalized_block() {
         source_node.send_transaction(transaction, None).await.unwrap();
         unwrap_response::<()>(source_node.eth_rpc(EthRequest::Mine(None, None)).await.unwrap())
             .unwrap();
-        tokio::time::sleep(Duration::from_millis(250)).await;
+        source_node.wait_for_block_with_timeout(i, Duration::from_secs(1)).await.unwrap();
     }
 
     // Get the current block number from source (this will be the fork point)
@@ -169,8 +171,7 @@ async fn test_fork_from_latest_finalized_block() {
     let fork_substrate_config = SubstrateNodeConfig::new(&fork_config);
     let mut fork_node = TestNode::new(fork_config.clone(), fork_substrate_config).await.unwrap();
 
-    // Wait for fork node to be ready
-    tokio::time::sleep(Duration::from_millis(500)).await;
+    fork_node.wait_for_block_with_timeout(source_best_block, Duration::from_secs(1)).await.unwrap();
 
     // Step 4: Verify the forked node starts from the same block as source best block
     let fork_initial_block_number = fork_node.best_block_number().await;
@@ -194,7 +195,10 @@ async fn test_fork_from_latest_finalized_block() {
         .to(Address::from(baltathar_address));
     fork_node.send_transaction(fork_transaction, None).await.unwrap();
     unwrap_response::<()>(fork_node.eth_rpc(EthRequest::Mine(None, None)).await.unwrap()).unwrap();
-    tokio::time::sleep(Duration::from_millis(510)).await;
+
+    // Wait for the next block to be produced
+    let expected_block = fork_initial_block_number + 1;
+    fork_node.wait_for_block_with_timeout(expected_block, Duration::from_secs(1)).await.unwrap();
 
     // Step 7: Verify the forked node advanced by 1 block
     let fork_current_block = fork_node.best_block_number().await;
@@ -421,4 +425,66 @@ async fn test_fork_from_negative_block_number() {
     // Step 7: Verify fork advanced to block 4
     let fork_new_block = fork_node.best_block_number().await;
     assert_eq!(fork_new_block, 4, "Forked node should be at block 4");
+}
+
+/// Tests that forking preserves contract state from source chain
+#[tokio::test(flavor = "multi_thread")]
+async fn test_fork_with_contract_deployment() {
+    // Step 1: Create the "source" node
+    let source_config = AnvilNodeConfig::test_config().with_port(0);
+    let source_substrate_config = SubstrateNodeConfig::new(&source_config);
+    let mut source_node =
+        TestNode::new(source_config.clone(), source_substrate_config).await.unwrap();
+
+    let source_substrate_rpc_port = source_node.substrate_rpc_port();
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let alith = Account::from(subxt_signer::eth::dev::alith());
+    let alith_address = ReviveAddress::new(alith.address());
+
+    // Step 2: Deploy SimpleStorage contract on source node
+    let contract_code = get_contract_code("SimpleStorage");
+    let deploy_tx_hash = source_node.deploy_contract(&contract_code.init, alith.address(), None).await;
+    unwrap_response::<()>(source_node.eth_rpc(EthRequest::Mine(None, None)).await.unwrap()).unwrap();
+    tokio::time::sleep(Duration::from_millis(250)).await;
+
+    let receipt = source_node.get_transaction_receipt(deploy_tx_hash).await;
+    let contract_address = receipt.contract_address.unwrap();
+
+    // Step 3: Set a storage value in the contract
+    let set_value_data = SimpleStorage::setValueCall::new((U256::from(300),)).abi_encode();
+    let call_tx = TransactionRequest::default()
+        .from(Address::from(alith_address))
+        .to(Address::from(ReviveAddress::new(contract_address)))
+        .input(TransactionInput::both(Bytes::from(set_value_data)));
+
+    source_node.send_transaction(call_tx, None).await.unwrap();
+    unwrap_response::<()>(source_node.eth_rpc(EthRequest::Mine(None, None)).await.unwrap()).unwrap();
+    tokio::time::sleep(Duration::from_millis(250)).await;
+
+    // Verify the value is 300 on source by calling getValue()
+    let source_value = call_get_value(&mut source_node, contract_address, Address::from(alith_address)).await;
+    assert_eq!(source_value, U256::from(300), "Source should have value 300");
+
+    // Wait a bit to ensure the source node has finalized the block
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    // Step 4: Fork from the source node
+    let source_rpc_url = format!("http://127.0.0.1:{}", source_substrate_rpc_port);
+    let fork_config = AnvilNodeConfig::test_config()
+        .with_port(0)
+        .with_eth_rpc_url(Some(source_rpc_url));
+
+    let fork_substrate_config = SubstrateNodeConfig::new(&fork_config);
+    let mut fork_node = TestNode::new(fork_config.clone(), fork_substrate_config).await.unwrap();
+
+    // Step 5: Check that the contract exists in forked node
+    let fork_code = unwrap_response::<Bytes>(
+        fork_node.eth_rpc(EthRequest::EthGetCodeAt(Address::from(ReviveAddress::new(contract_address)), None)).await.unwrap()
+    ).unwrap();
+    assert!(!fork_code.is_empty(), "Contract code should exist in fork");
+
+    // Step 6: Check that the storage data is the same by calling getValue()
+    let fork_value = call_get_value(&mut fork_node, contract_address, Address::from(alith_address)).await;
+    assert_eq!(fork_value, source_value, "Fork should have the same contract state (300) as source");
 }

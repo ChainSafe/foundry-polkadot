@@ -1,6 +1,5 @@
 use super::make_composite_child_key;
-use crate::substrate_node::lazy_loading::{LAZY_LOADING_LOG_TARGET, rpc_client::RPCClient};
-use alloy_primitives::hex;
+use crate::substrate_node::lazy_loading::rpc_client::RPCClient;
 use parking_lot::RwLock;
 use polkadot_sdk::{
     sc_client_api::StorageKey,
@@ -329,13 +328,6 @@ impl<Block: BlockT + DeserializeOwned> sp_state_machine::Backend<HashingFor<Bloc
         }
         .filter(|next_key| next_key != key);
 
-        tracing::trace!(
-            target: LAZY_LOADING_LOG_TARGET,
-            "next_storage_key: (key: {:?}, next_key: {:?})",
-            hex::encode(key),
-            maybe_next_key.clone().map(hex::encode)
-        );
-
         Ok(maybe_next_key)
     }
 
@@ -376,14 +368,6 @@ impl<Block: BlockT + DeserializeOwned> sp_state_machine::Backend<HashingFor<Bloc
             }
         }
         .filter(|next_key| next_key != key);
-
-        tracing::trace!(
-            target: LAZY_LOADING_LOG_TARGET,
-            "next_child_storage_key: (child_info: {:?}, key: {:?}, next_key: {:?})",
-            child_info,
-            hex::encode(key),
-            maybe_next_key.clone().map(hex::encode)
-        );
 
         Ok(maybe_next_key)
     }
