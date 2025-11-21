@@ -13,11 +13,12 @@ use serde::de::DeserializeOwned;
 use std::{
     marker::PhantomData,
     sync::{
-        Arc, OnceLock,
+        Arc,
         atomic::{AtomicU64, Ordering},
     },
     time::Duration,
 };
+use tokio::runtime::Handle;
 
 type BlockNumber = u64;
 
@@ -93,25 +94,6 @@ pub struct Rpc<Block: BlockT + DeserializeOwned> {
     block_type: PhantomData<Block>,
 }
 
-// Global dedicated runtime for RPC calls, created lazily
-static RPC_RUNTIME: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
-
-fn get_rpc_runtime() -> &'static tokio::runtime::Runtime {
-    RPC_RUNTIME.get_or_init(|| {
-        // Create runtime in a separate thread to avoid "Cannot start runtime from within runtime"
-        std::thread::spawn(|| {
-            tokio::runtime::Builder::new_multi_thread()
-                .worker_threads(2)
-                .thread_name("rpc-worker")
-                .enable_all()
-                .build()
-                .expect("Failed to create RPC runtime")
-        })
-        .join()
-        .expect("Failed to create runtime thread")
-    })
-}
-
 impl<Block: BlockT + DeserializeOwned> Rpc<Block> {
     pub fn new(http_client: HttpClient, delay_between_requests_ms: u32) -> Self {
         Self {
@@ -124,18 +106,16 @@ impl<Block: BlockT + DeserializeOwned> Rpc<Block> {
 
     fn block_on<F, T, E>(&self, future: F) -> Result<T, E>
     where
-        F: Future<Output = Result<T, E>> + Send + 'static,
-        T: Send + 'static,
-        E: Send + 'static,
+        F: std::future::Future<Output = Result<T, E>> + Send,
+        T: Send,
+        E: Send,
     {
         let id = self.counter.fetch_add(1, Ordering::SeqCst);
         let start = std::time::Instant::now();
         let delay_between_requests = Duration::from_millis(self.delay_between_requests_ms.into());
 
-        // Execute in a separate OS thread with dedicated runtime
-        // This completely isolates from any other Tokio runtime
-        std::thread::spawn(move || {
-            get_rpc_runtime().block_on(async move {
+        tokio::task::block_in_place(move || {
+            Handle::current().block_on(async move {
                 let start_req = std::time::Instant::now();
                 tracing::debug!(
                     target: super::LAZY_LOADING_LOG_TARGET,
@@ -161,8 +141,6 @@ impl<Block: BlockT + DeserializeOwned> Rpc<Block> {
                 result
             })
         })
-        .join()
-        .expect("RPC thread panicked")
     }
 }
 
