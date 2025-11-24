@@ -47,7 +47,10 @@ pub fn new_client(
             (None, None)
         };
 
-    let backend = new_lazy_loading_backend(rpc_client.clone(), checkpoint.clone())?;
+    let backend = new_lazy_loading_backend(
+        rpc_client.clone(),
+        checkpoint.as_ref().map(|block| block.header().clone()),
+    )?;
 
     // In fork mode, use the checkpoint block as genesis
     // In normal mode, create a new genesis block
