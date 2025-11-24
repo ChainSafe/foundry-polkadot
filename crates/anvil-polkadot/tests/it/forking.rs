@@ -122,7 +122,8 @@ async fn test_fork_preserves_state_and_allows_modifications() {
     );
 }
 
-/// Tests that forking creates a new chain starting from the latest finalized block of the source chain
+/// Tests that forking creates a new chain starting from the latest finalized block of the source
+/// chain
 #[tokio::test(flavor = "multi_thread")]
 async fn test_fork_from_latest_finalized_block() {
     const BLOCKS_TO_MINE: u32 = 5;
