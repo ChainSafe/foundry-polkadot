@@ -5,6 +5,6 @@ pub mod impersonation;
 pub mod in_mem_rpc;
 mod lazy_loading;
 pub mod mining_engine;
+pub mod revert;
 pub mod rpc;
 pub mod service;
-pub mod snapshot;
