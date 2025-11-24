@@ -31,8 +31,7 @@ use std::{
 use crate::substrate_node::lazy_loading::rpc_client::RPCClient;
 
 pub struct Backend<Block: BlockT + DeserializeOwned> {
-    pub(crate) rpc_client: Option<Arc<dyn RPCClient<Block>>>,
-    pub(crate) fork_checkpoint: Option<Block::Header>,
+    fork_config: Option<(Arc<dyn RPCClient<Block>>, Block::Header)>,
     states: RwLock<HashMap<Block::Hash, ForkedLazyBackend<Block>>>,
     pub(crate) blockchain: Blockchain<Block>,
     import_lock: RwLock<()>,
@@ -40,23 +39,25 @@ pub struct Backend<Block: BlockT + DeserializeOwned> {
 }
 
 impl<Block: BlockT + DeserializeOwned> Backend<Block> {
-    fn new(
-        rpc_client: Option<Arc<dyn RPCClient<Block>>>,
-        fork_checkpoint: Option<Block::Header>,
-    ) -> Self {
+    fn new(fork_config: Option<(Arc<dyn RPCClient<Block>>, Block::Header)>) -> Self {
+        let rpc_client = fork_config.as_ref().map(|(rpc, _)| rpc.clone());
         Self {
-            rpc_client: rpc_client.clone(),
+            fork_config,
             states: Default::default(),
             blockchain: Blockchain::new(rpc_client),
             import_lock: Default::default(),
             pinned_blocks: Default::default(),
-            fork_checkpoint,
         }
     }
 
     #[inline]
     pub fn rpc(&self) -> Option<&dyn RPCClient<Block>> {
-        self.rpc_client.as_deref()
+        self.fork_config.as_ref().map(|(rpc, _)| rpc.as_ref())
+    }
+
+    #[inline]
+    fn fork_checkpoint(&self) -> Option<&Block::Header> {
+        self.fork_config.as_ref().map(|(_, checkpoint)| checkpoint)
     }
 }
 
@@ -155,9 +156,10 @@ impl<Block: BlockT + DeserializeOwned> backend::Backend<Block> for Backend<Block
                 db_clone.insert(entries, StateVersion::V1);
             }
             let new_db = Arc::new(RwLock::new(db_clone));
-            let fork_block = self.fork_checkpoint.as_ref().map(|checkpoint| checkpoint.hash());
+            let fork_block = self.fork_checkpoint().map(|checkpoint| checkpoint.hash());
+            let rpc_client = self.fork_config.as_ref().map(|(rpc, _)| rpc.clone());
             let new_state = ForkedLazyBackend {
-                rpc_client: self.rpc_client.clone(),
+                rpc_client,
                 block_hash: Some(hash),
                 fork_block,
                 db: new_db,
@@ -214,13 +216,14 @@ impl<Block: BlockT + DeserializeOwned> backend::Backend<Block> for Backend<Block
         _trie_cache_context: TrieCacheContext,
     ) -> sp_blockchain::Result<Self::State> {
         if hash == Default::default() {
-            let (fork_block, before_fork) = match &self.fork_checkpoint {
+            let (fork_block, before_fork) = match self.fork_checkpoint() {
                 Some(checkpoint) => (Some(checkpoint.hash()), true),
                 None => (None, false),
             };
 
+            let rpc_client = self.fork_config.as_ref().map(|(rpc, _)| rpc.clone());
             return Ok(ForkedLazyBackend::<Block> {
-                rpc_client: self.rpc_client.clone(),
+                rpc_client,
                 block_hash: Some(hash),
                 fork_block,
                 db: Default::default(),
@@ -243,7 +246,8 @@ impl<Block: BlockT + DeserializeOwned> backend::Backend<Block> for Backend<Block
                         "Failed to fetch block header: {hash:?}"
                     )))
                     .map(|header| {
-                        let state = match &self.fork_checkpoint {
+                        let rpc_client = self.fork_config.as_ref().map(|(rpc, _)| rpc.clone());
+                        let state = match self.fork_checkpoint() {
                             Some(checkpoint) => {
                                 if header.number().gt(checkpoint.number()) {
                                     let parent = self
@@ -251,7 +255,7 @@ impl<Block: BlockT + DeserializeOwned> backend::Backend<Block> for Backend<Block
                                         .ok();
 
                                     ForkedLazyBackend::<Block> {
-                                        rpc_client: self.rpc_client.clone(),
+                                        rpc_client: rpc_client.clone(),
                                         block_hash: Some(hash),
                                         fork_block: Some(checkpoint.hash()),
                                         db: parent.clone().map_or(Default::default(), |p| p.db),
@@ -261,7 +265,7 @@ impl<Block: BlockT + DeserializeOwned> backend::Backend<Block> for Backend<Block
                                     }
                                 } else {
                                     ForkedLazyBackend::<Block> {
-                                        rpc_client: self.rpc_client.clone(),
+                                        rpc_client: rpc_client.clone(),
                                         block_hash: Some(hash),
                                         fork_block: Some(checkpoint.hash()),
                                         db: Default::default(),
@@ -276,7 +280,7 @@ impl<Block: BlockT + DeserializeOwned> backend::Backend<Block> for Backend<Block
                                     .ok();
 
                                 ForkedLazyBackend::<Block> {
-                                    rpc_client: self.rpc_client.clone(),
+                                    rpc_client: rpc_client.clone(),
                                     block_hash: Some(hash),
                                     fork_block: None,
                                     db: parent.clone().map_or(Default::default(), |p| p.db),
@@ -447,14 +451,14 @@ impl<Block: BlockT + DeserializeOwned> backend::Backend<Block> for Backend<Block
 impl<Block: BlockT + DeserializeOwned> backend::LocalBackend<Block> for Backend<Block> {}
 
 pub fn new_backend<Block>(
-    rpc_client: Option<Arc<dyn RPCClient<Block>>>,
-    checkpoint: Option<Block::Header>,
+    fork_config: Option<(Arc<dyn RPCClient<Block>>, Block)>,
 ) -> Result<Arc<Backend<Block>>, polkadot_sdk::sc_service::Error>
 where
     Block: BlockT + DeserializeOwned,
     Block::Hash: From<H256>,
 {
-    let backend = Arc::new(Backend::new(rpc_client, checkpoint));
+    let fork_config = fork_config.map(|(rpc, block)| (rpc, block.header().clone()));
+    let backend = Arc::new(Backend::new(fork_config));
     Ok(backend)
 }
 

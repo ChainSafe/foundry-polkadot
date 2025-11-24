@@ -39,22 +39,19 @@ pub fn new_client(
     executor: WasmExecutor,
     storage_overrides: Arc<Mutex<StorageOverrides>>,
 ) -> Result<(Arc<Client>, Arc<Backend>, KeystorePtr, TaskManager), sc_service::error::Error> {
-    let (rpc_client, checkpoint): (Option<Arc<dyn RPCClient<Block>>>, Option<Block>) =
+    let fork_config: Option<(Arc<dyn RPCClient<Block>>, Block)> =
         if let Some(fork_url) = &anvil_config.eth_rpc_url {
             let (rpc_client, checkpoint_block) = setup_fork(anvil_config, config, fork_url)?;
-            (Some(rpc_client), Some(checkpoint_block))
+            Some((rpc_client, checkpoint_block))
         } else {
-            (None, None)
+            None
         };
 
-    let backend = new_lazy_loading_backend(
-        rpc_client.clone(),
-        checkpoint.as_ref().map(|block| block.header().clone()),
-    )?;
+    let backend = new_lazy_loading_backend(fork_config.clone())?;
 
     // In fork mode, use the checkpoint block as genesis
     // In normal mode, create a new genesis block
-    let genesis_block_builder = if let Some(checkpoint) = checkpoint {
+    let genesis_block_builder = if let Some((_, checkpoint)) = &fork_config {
         // Fork mode: use checkpoint block as genesis
         DevelopmentGenesisBlockBuilder::new_with_checkpoint(
             config.chain_spec.as_storage_builder(),
