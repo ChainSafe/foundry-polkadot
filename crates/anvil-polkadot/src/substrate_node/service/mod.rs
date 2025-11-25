@@ -216,7 +216,8 @@ fn create_manual_seal_inherent_data_providers(
         let next_block_number =
             UniqueSaturatedInto::<u32>::unique_saturated_into(current_para_head.number) + 1;
 
-        let next_time = time_manager.current_call_timestamp().checked_mul(1000).unwrap();
+        //let next_time = time_manager.current_call_timestamp().checked_mul(1000).unwrap();
+        let next_time = time_manager.next_timestamp().unwrap();
 
         let slot = next_time.saturating_div(slot_duration.as_millis());
 
