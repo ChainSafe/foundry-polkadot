@@ -452,7 +452,8 @@ pallet_revive::impl_runtime_apis_plus_revive_traits!(
 
     impl cumulus_primitives_core::GetParachainInfo<Block> for Runtime {
         fn parachain_id() -> ParaId {
-            unimplemented!()
+            // The usual paraId for assethub
+            ParaId::new(1000)
         }
     }
 
