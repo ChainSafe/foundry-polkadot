@@ -6,14 +6,15 @@ use crate::{
     },
 };
 use anvil::eth::backend::time::TimeManager;
-use codec::Encode;
+use codec::{Decode, Encode};
 use parking_lot::Mutex;
 use polkadot_sdk::{
     cumulus_client_parachain_inherent::MockValidationDataInherentDataProvider,
     cumulus_primitives_core::{GetParachainInfo, relay_chain},
     parachains_common::{Hash, opaque::Block},
-    polkadot_primitives::{self, Slot},
+    polkadot_primitives::{self},
     sc_basic_authorship, sc_chain_spec,
+    sc_client_api::{Backend as BackendT, StateBackend, TrieCacheContext},
     sc_consensus::{self},
     sc_consensus_manual_seal::{
         ManualSealParams, consensus::aura::AuraConsensusDataProvider, run_manual_seal,
@@ -25,10 +26,13 @@ use polkadot_sdk::{
     sc_transaction_pool::{self},
     sp_api::ProvideRuntimeApi,
     sp_arithmetic::traits::UniqueSaturatedInto,
-    sp_consensus_aura::AuraApi,
+    sp_blockchain,
+    sp_consensus_aura::{AuraApi, Slot},
+    sp_core::hexdisplay::AsBytesRef,
     sp_timestamp,
 };
 use std::sync::Arc;
+use subxt::{PolkadotConfig, backend::rpc::RpcClient, ext::subxt_rpcs::rpc_params, utils::H256};
 use tokio_stream::wrappers::ReceiverStream;
 
 use tokio::runtime::Builder as TokioRtBuilder;
@@ -36,11 +40,6 @@ use tokio::runtime::Builder as TokioRtBuilder;
 use serde_json::{Map, Value, json};
 
 use indicatif::{ProgressBar, ProgressStyle};
-use jsonrpsee::{
-    core::client::ClientT as JsonClientT,
-    http_client::{HeaderMap, HeaderValue, HttpClient, HttpClientBuilder},
-    rpc_params,
-};
 
 pub use backend::{BackendError, BackendWithOverlay, StorageOverrides};
 pub use client::Client;
@@ -69,38 +68,44 @@ pub struct Service {
     pub genesis_block_number: u64,
 }
 
-async fn resolve_fork_hash_http(
-    client: &HttpClient,
-    fork_block_hash: Option<String>,
-) -> eyre::Result<String> {
-    if let Some(h) = fork_block_hash {
-        return Ok(h);
-    }
-    let res: String = client.request("chain_getBlockHash", rpc_params![]).await?;
-    Ok(res)
-}
-
-async fn fetch_sync_spec_http(
-    client: &HttpClient,
-    at_hex_opt: Option<String>,
-) -> eyre::Result<Vec<u8>> {
-    let pb = ProgressBar::new_spinner();
-    pb.set_style(
-        ProgressStyle::with_template("{spinner:.green} {msg}").unwrap().tick_chars("/|\\- "),
-    );
-    pb.enable_steady_tick(std::time::Duration::from_millis(120));
-    pb.set_message("Downloading sync state spec...");
-
-    let raw = true;
-    let spec_json: serde_json::Value =
-        client.request("sync_state_genSyncSpec", rpc_params![raw, at_hex_opt]).await?;
-
-    pb.finish_with_message("Sync state spec downloaded ✔");
-
-    Ok(serde_json::to_vec(&spec_json)?)
-}
-
-async fn fetch_all_keys_paged(client: &HttpClient, at_hex: &str) -> eyre::Result<Vec<String>> {
+// async fn fork_finalized_head(
+//     client: &HttpClient,
+//     fork_block_hash: Option<String>,
+// ) -> eyre::Result<String> {
+//     if let Some(h) = fork_block_hash {
+//         return Ok(h);
+//     }
+//     let res: String = client.request("chain_getFinalizedHead", rpc_params![]).await?;
+//     Ok(res)
+// }
+//
+// async fn fork_finalized_head_header(
+//     client: &HttpClient,
+//     fork_block_hash: String,
+// ) -> eyre::Result<String> {
+//     let res: String = client.request("chain_getHeader", rpc_params![fork_block_hash]).await?;
+//     println!("{}", res);
+//     Ok(res)
+// }
+//
+// async fn fork_sync_spec(client: &HttpClient, hash: Option<String>) -> eyre::Result<Vec<u8>> {
+//     let pb = ProgressBar::new_spinner();
+//     pb.set_style(
+//         ProgressStyle::with_template("{spinner:.green} {msg}").unwrap().tick_chars("/|\\- "),
+//     );
+//     pb.enable_steady_tick(std::time::Duration::from_millis(120));
+//     pb.set_message("Downloading sync state spec...");
+//
+//     let raw = true;
+//     let spec_json: serde_json::Value =
+//         client.request("sync_state_genSyncSpec", rpc_params![raw, hash]).await?;
+//
+//     pb.finish_with_message("Sync state spec downloaded ✔");
+//
+//     Ok(serde_json::to_vec(&spec_json)?)
+// }
+//
+async fn fork_get_all_keys_paged(client: &RpcClient, hash: H256) -> eyre::Result<Vec<String>> {
     let pb = ProgressBar::new_spinner();
     pb.set_style(
         ProgressStyle::with_template(
@@ -116,7 +121,7 @@ async fn fetch_all_keys_paged(client: &HttpClient, at_hex: &str) -> eyre::Result
     let mut page_count: u64 = 0;
     loop {
         let page: Vec<String> = client
-            .request("state_getKeysPaged", rpc_params!["0x", 1000u32, start_key.clone(), at_hex])
+            .request("state_getKeysPaged", rpc_params!["0x", 1000u32, start_key.clone(), hash])
             .await?;
         if page.is_empty() {
             break;
@@ -131,11 +136,8 @@ async fn fetch_all_keys_paged(client: &HttpClient, at_hex: &str) -> eyre::Result
     Ok(keys)
 }
 
-async fn fetch_top_state_map_http(
-    client: &HttpClient,
-    at_hex: &str,
-) -> eyre::Result<Map<String, Value>> {
-    let keys = fetch_all_keys_paged(client, at_hex).await?;
+async fn fork_storage_map(client: &RpcClient, hash: H256) -> eyre::Result<Map<String, Value>> {
+    let keys = fork_get_all_keys_paged(client, hash).await?;
 
     let pb = ProgressBar::new(keys.len() as u64);
     pb.set_style(
@@ -145,22 +147,22 @@ async fn fetch_top_state_map_http(
     );
     pb.set_message("Downloading values...");
 
-    let mut top_map: Map<String, Value> = Map::new();
-    for k in keys.iter() {
+    let mut storage: Map<String, Value> = Map::new();
+    for k in &keys {
         let v: Option<String> =
-            client.request("state_getStorage", rpc_params![k.clone(), at_hex]).await?;
+            client.request("state_getStorage", rpc_params![k.clone(), hash]).await?;
         if let Some(val_hex) = v {
-            top_map.insert(k.clone(), Value::String(val_hex));
+            storage.insert(k.clone(), Value::String(val_hex));
         }
         pb.inc(1);
     }
 
     pb.finish_with_message("All values downloaded ✔");
-    Ok(top_map)
+    Ok(storage)
 }
 
-fn build_forked_chainspec_from_raw_top(
-    top_map: Map<String, Value>,
+fn fork_chainspec_from_raw_storage_map(
+    storage_map: Map<String, Value>,
 ) -> sc_service::error::Result<Box<dyn sc_chain_spec::ChainSpec>> {
     let children_default = serde_json::Map::<String, Value>::new();
 
@@ -174,7 +176,7 @@ fn build_forked_chainspec_from_raw_top(
         "properties": null,
         "codeSubstitutes": {},
         "consensusEngine": null,
-        "genesis": { "raw": { "top": top_map, "childrenDefault": children_default }}
+        "genesis": { "raw": { "top": storage_map, "childrenDefault": children_default }}
     });
 
     let bytes = serde_json::to_vec(&spec_json)
@@ -186,60 +188,77 @@ fn build_forked_chainspec_from_raw_top(
     Ok(Box::new(new_spec))
 }
 
+type CreateInherentDataProviders = Box<
+    dyn Fn(
+            Hash,
+            (),
+        ) -> futures::future::Ready<
+            Result<
+                (sp_timestamp::InherentDataProvider, MockValidationDataInherentDataProvider<()>),
+                Box<dyn std::error::Error + Send + Sync>,
+            >,
+        > + Send
+        + Sync,
+>;
+
 fn create_manual_seal_inherent_data_providers(
+    backend: BackendWithOverlay,
     client: Arc<Client>,
     time_manager: Arc<TimeManager>,
-) -> impl Fn(
-    Hash,
-    (),
-) -> futures::future::Ready<
-    Result<
-        (sp_timestamp::InherentDataProvider, MockValidationDataInherentDataProvider<()>),
-        Box<dyn std::error::Error + Send + Sync>,
-    >,
-> + Send
-+ Sync {
-    move |block: Hash, ()| {
+) -> CreateInherentDataProviders {
+    Box::new(move |block: Hash, ()| {
         let current_para_head = client
             .header(block)
             .expect("Header lookup should succeed")
             .expect("Header passed in as parent should be present in backend.");
-
-        let slot_duration = client.runtime_api().slot_duration(current_para_head.hash()).unwrap();
-
-        let para_id = client.runtime_api().parachain_id(current_para_head.hash()).unwrap();
 
         let current_para_block_head =
             Some(polkadot_primitives::HeadData(current_para_head.encode()));
 
         let next_block_number =
             UniqueSaturatedInto::<u32>::unique_saturated_into(current_para_head.number) + 1;
+        let slot_duration = client.runtime_api().slot_duration(current_para_head.hash()).unwrap();
+        let para_id = client.runtime_api().parachain_id(current_para_head.hash()).unwrap();
+        let next_time = time_manager.next_timestamp();
+        let parachain_slot = next_time.saturating_div(slot_duration.as_millis());
 
-        //let next_time = time_manager.current_call_timestamp().checked_mul(1000).unwrap();
-        let next_time = time_manager.next_timestamp().unwrap();
+        let (slot_in_state, _) = backend.read_relay_slot_info(current_para_head.hash()).unwrap();
+        let last_rc_block_number =
+            backend.read_last_relay_chain_block_number(current_para_head.hash()).unwrap();
 
-        let slot = next_time.saturating_div(slot_duration.as_millis());
+        // Used to set the relay chain slot provided via the proof (which is represented
+        // by a set of relay chain state keys). The slot is read from the proof at the moment
+        // we call consensus hook to perform validations of the relay chain state. We will
+        // check:
+        // - Ensures blocks are not produced faster than the specified velocity `V` (however, given
+        // the nature of the anvil-polkadot mining strategies, we'll hack the check to never fail)
+        // - Verifies parachain slot alignment with relay chain slot (meaning time passes similarly
+        // on both chains, and the additional key values set below ensures it)
+        let additional_key_values = vec![(
+            relay_chain::well_known_keys::CURRENT_SLOT.to_vec(),
+            Slot::from(parachain_slot).encode(),
+        )];
 
-        let additional_key_values =
-            vec![(relay_chain::well_known_keys::CURRENT_SLOT.to_vec(), Slot::from(slot).encode())];
+        // This helps with allowing greater block production velocity per relay chain slot.
+        backend.inject_relay_slot_info(current_para_head.hash(), (slot_in_state, 0));
 
         let mocked_parachain = MockValidationDataInherentDataProvider::<()> {
             current_para_block: next_block_number,
             para_id,
+            // This is used behind the scenes to set the relay parent number
+            // on top of which we build this block. The new last rc block number
+            // known by the parachain will be set to the value bellow when the parachain
+            // block is finalized.
+            relay_offset: last_rc_block_number + 1,
             current_para_block_head,
-            relay_offset: next_time as u32,
-            relay_blocks_per_para_block: 1,
-            para_blocks_per_relay_epoch: 10,
             additional_key_values: Some(additional_key_values),
             ..Default::default()
         };
 
-        let timestamp_provider = sp_timestamp::InherentDataProvider::new(
-            next_time.into(),
-        );
+        let timestamp_provider = sp_timestamp::InherentDataProvider::new(next_time.into());
 
         futures::future::ready(Ok((timestamp_provider, mocked_parachain)))
-    }
+    })
 }
 
 /// Builds a new service for a full client.
@@ -247,47 +266,58 @@ pub fn new(
     anvil_config: &AnvilNodeConfig,
     mut config: Configuration,
 ) -> Result<(Service, TaskManager), ServiceError> {
+    let mut genesis_block_number = anvil_config.get_genesis_number();
     if let Some(ref fork_url) = anvil_config.eth_rpc_url {
         let http_url = fork_url.clone();
-        let spec_or_top =
-            std::thread::spawn(move || -> eyre::Result<Result<Vec<u8>, Map<String, Value>>> {
+        let storage_map =
+            std::thread::spawn(move || -> eyre::Result<Result<(u64, Map<String, Value>), ()>> {
                 let rt = TokioRtBuilder::new_current_thread()
                     .enable_all()
                     .build()
                     .map_err(|e| eyre::eyre!("tokio rt build error: {e}"))?;
                 rt.block_on(async move {
-                    let mut headers = HeaderMap::new();
-                    headers
-                        .insert("Accept-Encoding", HeaderValue::from_static("gzip, deflate, br"));
-                    let http = HttpClientBuilder::default()
-                        .set_headers(headers)
-                        .build(http_url)
-                        .map_err(|e| eyre::eyre!("http client build error: {e}"))?;
-                    let at_hex = resolve_fork_hash_http(&http, None).await?;
-                    let try_sync = fetch_sync_spec_http(&http, Some(at_hex.clone())).await;
-                    match try_sync {
-                        Ok(spec_bytes) => Ok(Ok(spec_bytes)),
-                        Err(_) => {
-                            let top = fetch_top_state_map_http(&http, &at_hex).await?;
-                            Ok(Err(top))
-                        }
-                    }
+                    let client =
+                        subxt::client::OnlineClient::<PolkadotConfig>::from_url(http_url.clone())
+                            .await
+                            .unwrap();
+                    // let mut headers = HeaderMap::new();
+                    // headers
+                    //     .insert("Accept-Encoding", HeaderValue::from_static("gzip, deflate,
+                    // br")); let http = HttpClientBuilder::default()
+                    //     .set_headers(headers)
+                    //     .build(http_url)
+                    //     .map_err(|e| eyre::eyre!("http client build error: {e}"))?;
+                    let finalized_block_ref =
+                        client.backend().latest_finalized_block_ref().await.unwrap();
+                    let finalized_head_header = client
+                        .backend()
+                        .block_header(finalized_block_ref.hash())
+                        .await
+                        .unwrap()
+                        .unwrap();
+                    println!("fork finalized block number {}", finalized_head_header.number);
+                    // let try_sync = fork_sync_spec(&http,
+                    // Some(finalized_head_hash.clone())).await;
+                    // let storage = client.storage().at(finalized_block_ref.clone());
+                    let rpc_client = RpcClient::from_url(http_url).await.unwrap();
+                    let storage_map =
+                        fork_storage_map(&rpc_client, finalized_block_ref.hash()).await.unwrap();
+                    // let spec_bytes = fork_chainspec_from_raw_storage_map(storage_map)
+
+                    Ok(Ok((finalized_head_header.number.into(), storage_map)))
                 })
             })
             .join()
             .map_err(|_| ServiceError::Other("tokio thread panicked".into()))?
             .map_err(|e| ServiceError::Other(format!("fork fetch failed: {e}")))?;
 
-        match spec_or_top {
-            Ok(spec_bytes) => {
-                type EmptyExt = Option<()>;
-                let new_spec: sc_chain_spec::GenericChainSpec<EmptyExt> =
-                    sc_chain_spec::GenericChainSpec::from_json_bytes(spec_bytes)
-                        .map_err(|e| ServiceError::Other(format!("from_json_bytes failed: {e}")))?;
-                config.chain_spec = Box::new(new_spec);
+        match storage_map {
+            Ok((genesis_number, storage_map)) => {
+                config.chain_spec = fork_chainspec_from_raw_storage_map(storage_map)?;
+                genesis_block_number = genesis_number;
             }
-            Err(top_map) => {
-                config.chain_spec = build_forked_chainspec_from_raw_top(top_map)?;
+            _ => {
+                panic!("shouldn't happen")
             }
         }
     }
@@ -295,7 +325,7 @@ pub fn new(
     let storage_overrides = Arc::new(Mutex::new(StorageOverrides::default()));
 
     let (client, backend, keystore, mut task_manager) = client::new_client(
-        anvil_config.get_genesis_number(),
+        genesis_block_number,
         &config,
         sc_service::new_wasm_executor(&config.executor),
         storage_overrides.clone(),
@@ -341,7 +371,7 @@ pub fn new(
     ));
 
     let rpc_handlers = spawn_rpc_server(
-        anvil_config.get_genesis_number(),
+        genesis_block_number,
         &mut task_manager,
         client.clone(),
         config,
@@ -365,9 +395,12 @@ pub fn new(
     );
 
     let aura_digest_provider = AuraConsensusDataProvider::new(client.clone());
-
-    let create_inherent_data_providers =
-        create_manual_seal_inherent_data_providers(client.clone(), time_manager.clone());
+    let backend_with_overlay = BackendWithOverlay::new(backend.clone(), storage_overrides.clone());
+    let create_inherent_data_providers = create_manual_seal_inherent_data_providers(
+        backend_with_overlay,
+        client.clone(),
+        time_manager,
+    );
 
     let params = ManualSealParams {
         block_import: client.clone(),
@@ -396,7 +429,7 @@ pub fn new(
             rpc_handlers,
             mining_engine,
             storage_overrides,
-            genesis_block_number: anvil_config.get_genesis_number(),
+            genesis_block_number,
         },
         task_manager,
     ))
