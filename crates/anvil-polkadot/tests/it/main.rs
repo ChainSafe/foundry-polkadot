@@ -1,8 +1,6 @@
 mod abi;
-mod contract_isolation;
 mod filters;
 mod forking;
-mod gas;
 mod gas;
 mod genesis;
 mod impersonation;

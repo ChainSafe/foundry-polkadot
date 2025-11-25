@@ -497,7 +497,7 @@ pub fn to_hex_string(value: u64) -> String {
 }
 
 /// Helper function to call getValue() on a SimpleStorage contract
-pub async fn call_get_value(
+pub async fn simplestorage_get_value(
     node: &mut TestNode,
     contract_address: polkadot_sdk::pallet_revive::H160,
     from: Address,
