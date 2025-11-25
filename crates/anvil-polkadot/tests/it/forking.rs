@@ -25,8 +25,6 @@ async fn test_fork_preserves_state_and_allows_modifications() {
 
     let source_substrate_rpc_port = source_node.substrate_rpc_port();
 
-    tokio::time::sleep(Duration::from_millis(500)).await;
-
     let alith = Account::from(subxt_signer::eth::dev::alith());
     let baltathar = Account::from(subxt_signer::eth::dev::baltathar());
     let alith_address = ReviveAddress::new(alith.address());
@@ -45,7 +43,6 @@ async fn test_fork_preserves_state_and_allows_modifications() {
     source_node.send_transaction(transaction).await.unwrap();
     unwrap_response::<()>(source_node.eth_rpc(EthRequest::Mine(None, None)).await.unwrap())
         .unwrap();
-    tokio::time::sleep(Duration::from_millis(500)).await;
 
     // Verify the transfer happened on source node
     let source_alith_balance = source_node.get_balance(alith.address(), None).await;
@@ -92,7 +89,6 @@ async fn test_fork_preserves_state_and_allows_modifications() {
 
     fork_node.send_transaction(fork_transaction).await.unwrap();
     unwrap_response::<()>(fork_node.eth_rpc(EthRequest::Mine(None, None)).await.unwrap()).unwrap();
-    tokio::time::sleep(Duration::from_millis(500)).await;
 
     // Step 6: Verify the transaction affected only the forked node
     let fork_alith_balance_after = fork_node.get_balance(alith.address(), None).await;
@@ -229,7 +225,6 @@ async fn test_fork_from_latest_finalized_block() {
     source_node.send_transaction(source_transaction).await.unwrap();
     unwrap_response::<()>(source_node.eth_rpc(EthRequest::Mine(None, None)).await.unwrap())
         .unwrap();
-    tokio::time::sleep(Duration::from_millis(510)).await;
 
     let source_new_block = source_node.best_block_number().await;
     let source_new_block_hash =
@@ -256,8 +251,6 @@ async fn test_fork_from_specific_block_number() {
 
     let source_substrate_rpc_port = source_node.substrate_rpc_port();
 
-    tokio::time::sleep(Duration::from_millis(500)).await;
-
     let alith = Account::from(subxt_signer::eth::dev::alith());
     let baltathar = Account::from(subxt_signer::eth::dev::baltathar());
     let alith_address = ReviveAddress::new(alith.address());
@@ -274,7 +267,6 @@ async fn test_fork_from_specific_block_number() {
         source_node.send_transaction(transaction).await.unwrap();
         unwrap_response::<()>(source_node.eth_rpc(EthRequest::Mine(None, None)).await.unwrap())
             .unwrap();
-        tokio::time::sleep(Duration::from_millis(250)).await;
     }
 
     // Verify source node is at block 5
@@ -296,8 +288,6 @@ async fn test_fork_from_specific_block_number() {
 
     let fork_substrate_config = SubstrateNodeConfig::new(&fork_config);
     let mut fork_node = TestNode::new(fork_config.clone(), fork_substrate_config).await.unwrap();
-
-    tokio::time::sleep(Duration::from_millis(500)).await;
 
     // Step 4: Verify the forked node starts from block 3
     let fork_initial_block = fork_node.best_block_number().await;
@@ -323,7 +313,6 @@ async fn test_fork_from_specific_block_number() {
         .to(Address::from(baltathar_address));
     fork_node.send_transaction(fork_transaction).await.unwrap();
     unwrap_response::<()>(fork_node.eth_rpc(EthRequest::Mine(None, None)).await.unwrap()).unwrap();
-    tokio::time::sleep(Duration::from_millis(500)).await;
 
     // Step 7: Verify fork advanced to block 4
     let fork_new_block = fork_node.best_block_number().await;
@@ -353,8 +342,6 @@ async fn test_fork_from_negative_block_number() {
 
     let source_substrate_rpc_port = source_node.substrate_rpc_port();
 
-    tokio::time::sleep(Duration::from_millis(500)).await;
-
     let alith = Account::from(subxt_signer::eth::dev::alith());
     let baltathar = Account::from(subxt_signer::eth::dev::baltathar());
     let alith_address = ReviveAddress::new(alith.address());
@@ -371,7 +358,6 @@ async fn test_fork_from_negative_block_number() {
         source_node.send_transaction(transaction).await.unwrap();
         unwrap_response::<()>(source_node.eth_rpc(EthRequest::Mine(None, None)).await.unwrap())
             .unwrap();
-        tokio::time::sleep(Duration::from_millis(250)).await;
     }
 
     // Verify source node is at block 5
@@ -393,8 +379,6 @@ async fn test_fork_from_negative_block_number() {
 
     let fork_substrate_config = SubstrateNodeConfig::new(&fork_config);
     let mut fork_node = TestNode::new(fork_config.clone(), fork_substrate_config).await.unwrap();
-
-    tokio::time::sleep(Duration::from_millis(500)).await;
 
     // Step 4: Verify the forked node starts from block 3 (5 - 2)
     let fork_initial_block = fork_node.best_block_number().await;
@@ -423,7 +407,6 @@ async fn test_fork_from_negative_block_number() {
         .to(Address::from(baltathar_address));
     fork_node.send_transaction(fork_transaction).await.unwrap();
     unwrap_response::<()>(fork_node.eth_rpc(EthRequest::Mine(None, None)).await.unwrap()).unwrap();
-    tokio::time::sleep(Duration::from_millis(500)).await;
 
     // Step 7: Verify fork advanced to block 4
     let fork_new_block = fork_node.best_block_number().await;
@@ -441,7 +424,6 @@ async fn test_fork_with_contract_deployment() {
         TestNode::new(source_config.clone(), source_substrate_config).await.unwrap();
 
     let source_substrate_rpc_port = source_node.substrate_rpc_port();
-    tokio::time::sleep(Duration::from_millis(500)).await;
 
     let alith = Account::from(subxt_signer::eth::dev::alith());
     let alith_address = ReviveAddress::new(alith.address());
@@ -451,17 +433,14 @@ async fn test_fork_with_contract_deployment() {
     let contract1_tx = source_node.deploy_contract(&contract_code.init, alith.address()).await;
     unwrap_response::<()>(source_node.eth_rpc(EthRequest::Mine(None, None)).await.unwrap())
         .unwrap();
-    tokio::time::sleep(Duration::from_millis(250)).await;
 
     let contract2_tx = source_node.deploy_contract(&contract_code.init, alith.address()).await;
     unwrap_response::<()>(source_node.eth_rpc(EthRequest::Mine(None, None)).await.unwrap())
         .unwrap();
-    tokio::time::sleep(Duration::from_millis(250)).await;
 
     let contract3_tx = source_node.deploy_contract(&contract_code.init, alith.address()).await;
     unwrap_response::<()>(source_node.eth_rpc(EthRequest::Mine(None, None)).await.unwrap())
         .unwrap();
-    tokio::time::sleep(Duration::from_millis(250)).await;
 
     let receipt1 = source_node.get_transaction_receipt(contract1_tx).await;
     let contract1_address = receipt1.contract_address.unwrap();
@@ -485,7 +464,6 @@ async fn test_fork_with_contract_deployment() {
     source_node.send_transaction(call_tx1).await.unwrap();
     unwrap_response::<()>(source_node.eth_rpc(EthRequest::Mine(None, None)).await.unwrap())
         .unwrap();
-    tokio::time::sleep(Duration::from_millis(250)).await;
 
     let set_value2 = SimpleStorage::setValueCall::new((U256::from(200),)).abi_encode();
     let call_tx2 = TransactionRequest::default()
@@ -495,7 +473,6 @@ async fn test_fork_with_contract_deployment() {
     source_node.send_transaction(call_tx2).await.unwrap();
     unwrap_response::<()>(source_node.eth_rpc(EthRequest::Mine(None, None)).await.unwrap())
         .unwrap();
-    tokio::time::sleep(Duration::from_millis(250)).await;
 
     let set_value3 = SimpleStorage::setValueCall::new((U256::from(300),)).abi_encode();
     let call_tx3 = TransactionRequest::default()
@@ -505,7 +482,6 @@ async fn test_fork_with_contract_deployment() {
     source_node.send_transaction(call_tx3).await.unwrap();
     unwrap_response::<()>(source_node.eth_rpc(EthRequest::Mine(None, None)).await.unwrap())
         .unwrap();
-    tokio::time::sleep(Duration::from_millis(250)).await;
 
     // Step 4: Verify each contract maintains its own independent storage on source node
     let value1 =
@@ -531,7 +507,6 @@ async fn test_fork_with_contract_deployment() {
     source_node.send_transaction(update_tx2).await.unwrap();
     unwrap_response::<()>(source_node.eth_rpc(EthRequest::Mine(None, None)).await.unwrap())
         .unwrap();
-    tokio::time::sleep(Duration::from_millis(250)).await;
 
     // Verify only contract 2 changed on source node
     let value1_after =
@@ -547,9 +522,6 @@ async fn test_fork_with_contract_deployment() {
     assert_eq!(value1_after, U256::from(100), "Contract 1 value should remain 100");
     assert_eq!(value2_after, U256::from(999), "Contract 2 value should be updated to 999");
     assert_eq!(value3_after, U256::from(300), "Contract 3 value should remain 300");
-
-    // Wait a bit to ensure the source node has finalized the block
-    tokio::time::sleep(Duration::from_millis(500)).await;
 
     // Step 5: Fork from the source node
     let source_rpc_url = format!("http://127.0.0.1:{}", source_substrate_rpc_port);
