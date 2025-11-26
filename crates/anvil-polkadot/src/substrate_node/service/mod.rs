@@ -33,9 +33,9 @@ use std::sync::Arc;
 use subxt::{PolkadotConfig, backend::rpc::RpcClient, ext::subxt_rpcs::rpc_params, utils::H256};
 use tokio_stream::wrappers::ReceiverStream;
 
-use tokio::runtime::Builder as TokioRtBuilder;
-use serde_json::{Map, Value, json};
 use indicatif::{ProgressBar, ProgressStyle};
+use serde_json::{Map, Value, json};
+use tokio::runtime::Builder as TokioRtBuilder;
 
 pub use backend::{BackendError, BackendWithOverlay, StorageOverrides};
 pub use client::Client;
