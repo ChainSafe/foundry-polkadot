@@ -44,7 +44,6 @@ pub use client::Client;
 
 mod backend;
 mod client;
-mod consensus;
 mod executor;
 pub mod storage;
 
@@ -66,43 +65,6 @@ pub struct Service {
     pub genesis_block_number: u64,
 }
 
-// async fn fork_finalized_head(
-//     client: &HttpClient,
-//     fork_block_hash: Option<String>,
-// ) -> eyre::Result<String> {
-//     if let Some(h) = fork_block_hash {
-//         return Ok(h);
-//     }
-//     let res: String = client.request("chain_getFinalizedHead", rpc_params![]).await?;
-//     Ok(res)
-// }
-//
-// async fn fork_finalized_head_header(
-//     client: &HttpClient,
-//     fork_block_hash: String,
-// ) -> eyre::Result<String> {
-//     let res: String = client.request("chain_getHeader", rpc_params![fork_block_hash]).await?;
-//     println!("{}", res);
-//     Ok(res)
-// }
-//
-// async fn fork_sync_spec(client: &HttpClient, hash: Option<String>) -> eyre::Result<Vec<u8>> {
-//     let pb = ProgressBar::new_spinner();
-//     pb.set_style(
-//         ProgressStyle::with_template("{spinner:.green} {msg}").unwrap().tick_chars("/|\\- "),
-//     );
-//     pb.enable_steady_tick(std::time::Duration::from_millis(120));
-//     pb.set_message("Downloading sync state spec...");
-//
-//     let raw = true;
-//     let spec_json: serde_json::Value =
-//         client.request("sync_state_genSyncSpec", rpc_params![raw, hash]).await?;
-//
-//     pb.finish_with_message("Sync state spec downloaded ✔");
-//
-//     Ok(serde_json::to_vec(&spec_json)?)
-// }
-//
 async fn fork_get_all_keys_paged(client: &RpcClient, hash: H256) -> eyre::Result<Vec<String>> {
     let pb = ProgressBar::new_spinner();
     pb.set_style(
