@@ -77,6 +77,8 @@ use polkadot_sdk::{
     sc_service::{InPoolTransaction, SpawnTaskHandle, TransactionPool},
     sp_api::{Metadata as _, ProvideRuntimeApi},
     sp_blockchain::Info,
+    sp_consensus_aura::AuraApi,
+    sp_consensus_babe::Slot,
     sp_core::{self, Hasher, keccak_256},
     sp_runtime::{FixedU128, traits::BlakeTwo256},
 };
@@ -584,6 +586,14 @@ impl ApiServer {
         // Inject the new time if the timestamp precedes last block time
         if time_ms < last_block_timestamp {
             self.backend.inject_timestamp(latest_block, time_ms);
+            let current_aura_slot = self.backend.read_aura_current_slot(latest_block)?;
+           let updated_aura_slot = time_ms
+               .saturating_div(self.client.runtime_api().slot_duration(latest_block)?.as_millis());
+           if current_aura_slot > updated_aura_slot {
+               self.backend.inject_aura_current_slot(latest_block, Slot::from(updated_aura_slot));
+               self.backend
+                   .inject_relay_slot_info(latest_block, (Slot::from(updated_aura_slot), 0));
+           }
         }
         Ok(self.mining_engine.set_time(Duration::from_secs(time)))
     }

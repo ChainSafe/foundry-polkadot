@@ -54,7 +54,7 @@ pub mod well_known_keys {
         223, 56, 29, 235, 227, 49, 171, 116, 70, 173, 223, 220,
     ];
 
-    //twox_128(b"AuraExt" + b"RelaySlotInfo")
+    //twox_128(b"AuraExt") + twox_128(b"RelaySlotInfo")
     pub const RELAY_SLOT_INFO: [u8; 32] = [
         60, 49, 29, 87, 212, 218, 245, 41, 4, 97, 108, 246, 150, 72, 8, 30, 75, 249, 42, 122, 69,
         229, 192, 87, 48, 249, 93, 62, 96, 159, 163, 11,

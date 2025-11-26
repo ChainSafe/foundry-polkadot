@@ -34,9 +34,7 @@ use subxt::{PolkadotConfig, backend::rpc::RpcClient, ext::subxt_rpcs::rpc_params
 use tokio_stream::wrappers::ReceiverStream;
 
 use tokio::runtime::Builder as TokioRtBuilder;
-
 use serde_json::{Map, Value, json};
-
 use indicatif::{ProgressBar, ProgressStyle};
 
 pub use backend::{BackendError, BackendWithOverlay, StorageOverrides};
@@ -180,7 +178,7 @@ fn create_manual_seal_inherent_data_providers(
         let slot_duration = client.runtime_api().slot_duration(current_para_head.hash()).unwrap();
         let para_id = client.runtime_api().parachain_id(current_para_head.hash()).unwrap();
         let next_time = time_manager.next_timestamp();
-        let parachain_slot = next_time / slot_duration.as_millis();
+        let parachain_slot = next_time.saturating_div(slot_duration.as_millis());
 
         let (slot_in_state, _) = backend.read_relay_slot_info(current_para_head.hash()).unwrap();
         let last_rc_block_number =
