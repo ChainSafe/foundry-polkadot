@@ -881,7 +881,6 @@ impl AnvilNodeConfig {
         self.with_fork_choice(fork_block_number.map(Into::into))
     }
 
-
     /// Sets the `fork_choice` to use to fork off from
     #[must_use]
     pub fn with_fork_choice<U: Into<ForkChoice>>(mut self, fork_choice: Option<U>) -> Self {

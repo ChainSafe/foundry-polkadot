@@ -139,18 +139,13 @@ impl NodeArgs {
             .disable_code_size_limit(self.evm.disable_code_size_limit)
             .with_disable_default_create2_deployer(self.evm.disable_default_create2_deployer)
             .with_memory_limit(self.evm.memory_limit)
-            .with_fork_choice(
+            .with_fork_choice(self.evm.fork_block_number.map(ForkChoice::Block).or_else(|| {
                 self.evm
-                    .fork_block_number
-                    .map(ForkChoice::Block)
-                    .or_else(|| {
-                        self.evm
-                            .fork_url
-                            .as_ref()
-                            .and_then(|f| f.block)
-                            .map(|num| ForkChoice::Block(num as i128))
-                    }),
-            )
+                    .fork_url
+                    .as_ref()
+                    .and_then(|f| f.block)
+                    .map(|num| ForkChoice::Block(num as i128))
+            }))
             .with_eth_rpc_url(self.evm.fork_url.map(|fork| fork.url))
             .fork_request_timeout(self.evm.fork_request_timeout.map(Duration::from_millis))
             .fork_request_retries(self.evm.fork_request_retries);
