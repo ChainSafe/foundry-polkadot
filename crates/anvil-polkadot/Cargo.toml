@@ -73,14 +73,11 @@ polkadot-sdk = { git = "https://github.com/paritytech/polkadot-sdk.git", branch 
 	"sp-arithmetic",
 	"cumulus-client-service",
 	"cumulus-primitives-aura",
-
 	"cumulus-primitives-core",
 	"sp-inherents",
 ] }
 hex = "0.4"
 indicatif.workspace = true
-
-
 anvil.workspace = true
 anvil-core.workspace = true
 anvil-server = { workspace = true, features = ["clap"] }
