@@ -32,9 +32,9 @@ use std::sync::Arc;
 use subxt::{PolkadotConfig, backend::rpc::RpcClient, ext::subxt_rpcs::rpc_params, utils::H256};
 use tokio_stream::wrappers::ReceiverStream;
 
-use tokio::runtime::Builder as TokioRtBuilder;
-use serde_json::{Map, Value, json};
 use indicatif::{ProgressBar, ProgressStyle};
+use serde_json::{Map, Value, json};
+use tokio::runtime::Builder as TokioRtBuilder;
 
 pub use backend::{BackendError, BackendWithOverlay, StorageOverrides};
 pub use client::Client;
@@ -237,13 +237,6 @@ pub fn new(
                         subxt::client::OnlineClient::<PolkadotConfig>::from_url(http_url.clone())
                             .await
                             .unwrap();
-                    // let mut headers = HeaderMap::new();
-                    // headers
-                    //     .insert("Accept-Encoding", HeaderValue::from_static("gzip, deflate,
-                    // br")); let http = HttpClientBuilder::default()
-                    //     .set_headers(headers)
-                    //     .build(http_url)
-                    //     .map_err(|e| eyre::eyre!("http client build error: {e}"))?;
                     let finalized_block_ref =
                         client.backend().latest_finalized_block_ref().await.unwrap();
                     let finalized_head_header = client
@@ -252,14 +245,9 @@ pub fn new(
                         .await
                         .unwrap()
                         .unwrap();
-                    println!("fork finalized block number {}", finalized_head_header.number);
-                    // let try_sync = fork_sync_spec(&http,
-                    // Some(finalized_head_hash.clone())).await;
-                    // let storage = client.storage().at(finalized_block_ref.clone());
                     let rpc_client = RpcClient::from_url(http_url).await.unwrap();
                     let storage_map =
                         fork_storage_map(&rpc_client, finalized_block_ref.hash()).await.unwrap();
-                    // let spec_bytes = fork_chainspec_from_raw_storage_map(storage_map)
 
                     Ok(Ok((finalized_head_header.number.into(), storage_map)))
                 })
