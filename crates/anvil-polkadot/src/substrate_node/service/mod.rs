@@ -7,7 +7,7 @@ use crate::{
     },
 };
 use anvil::eth::backend::time::TimeManager;
-use codec::{Decode, Encode};
+use codec::Encode;
 use parking_lot::Mutex;
 use polkadot_sdk::{
     cumulus_client_parachain_inherent::MockValidationDataInherentDataProvider,
@@ -15,7 +15,6 @@ use polkadot_sdk::{
     parachains_common::{Hash, opaque::Block},
     polkadot_primitives::{self},
     sc_basic_authorship, sc_chain_spec,
-    sc_client_api::{Backend as BackendT, StateBackend, TrieCacheContext},
     sc_consensus::{self},
     sc_consensus_manual_seal::{
         ManualSealParams, consensus::aura::AuraConsensusDataProvider, run_manual_seal,
@@ -27,9 +26,7 @@ use polkadot_sdk::{
     sc_transaction_pool::{self},
     sp_api::ProvideRuntimeApi,
     sp_arithmetic::traits::UniqueSaturatedInto,
-    sp_blockchain,
     sp_consensus_aura::{AuraApi, Slot},
-    sp_core::hexdisplay::AsBytesRef,
     sp_timestamp,
 };
 use std::sync::Arc;
@@ -221,7 +218,7 @@ fn create_manual_seal_inherent_data_providers(
         let slot_duration = client.runtime_api().slot_duration(current_para_head.hash()).unwrap();
         let para_id = client.runtime_api().parachain_id(current_para_head.hash()).unwrap();
         let next_time = time_manager.next_timestamp();
-        let parachain_slot = next_time.saturating_div(slot_duration.as_millis());
+        let parachain_slot = next_time / slot_duration.as_millis();
 
         let (slot_in_state, _) = backend.read_relay_slot_info(current_para_head.hash()).unwrap();
         let last_rc_block_number =
