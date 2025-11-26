@@ -144,9 +144,7 @@ fn resolve_fork_block_number(
                         sp_blockchain::Error::Backend("latest header not found".into())
                     })?;
 
-                let latest_number: u32 = (*latest_header.number()).try_into().map_err(|_| {
-                    sp_blockchain::Error::Backend("Latest block number too large for u32".into())
-                })?;
+                let latest_number: u32 = *latest_header.number();
 
                 let offset: u32 = block_number.abs().try_into().map_err(|_| {
                     sp_blockchain::Error::Backend(format!(
@@ -194,7 +192,7 @@ fn setup_fork(
     let block_hash: Option<<Block as BlockT>::Hash> =
         if let Some(fork_choice) = &anvil_config.fork_choice {
             let block_num = resolve_fork_block_number(&rpc_client, fork_choice)?;
-            Some(rpc_client.block_hash(Some(block_num.into())).map_err(|e| {
+            Some(rpc_client.block_hash(Some(block_num)).map_err(|e| {
                 sp_blockchain::Error::Backend(format!(
                     "failed to fetch block hash for block {block_num}: {e}"
                 ))

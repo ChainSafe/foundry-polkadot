@@ -59,7 +59,7 @@ async fn test_fork_preserves_state_and_allows_modifications() {
     );
 
     // Step 3: Create a forked node pointing to the source node's Substrate RPC
-    let source_rpc_url = format!("http://127.0.0.1:{}", source_substrate_rpc_port);
+    let source_rpc_url = format!("http://127.0.0.1:{source_substrate_rpc_port}");
 
     let fork_config =
         AnvilNodeConfig::test_config().with_port(0).with_eth_rpc_url(Some(source_rpc_url));
@@ -160,7 +160,7 @@ async fn test_fork_from_latest_finalized_block() {
     assert_eq!(source_best_block, BLOCKS_TO_MINE, "Source node should have mined 5 blocks");
 
     // Step 3: Create a forked node from the latest finalized block of the source chain
-    let source_rpc_url = format!("http://127.0.0.1:{}", source_substrate_rpc_port);
+    let source_rpc_url = format!("http://127.0.0.1:{source_substrate_rpc_port}");
 
     let fork_config =
         AnvilNodeConfig::test_config().with_port(0).with_eth_rpc_url(Some(source_rpc_url));
@@ -279,7 +279,7 @@ async fn test_fork_from_specific_block_number() {
     let alith_balance_at_block_3 = source_node.get_balance(alith.address(), Some(3.into())).await;
 
     // Step 3: Create a forked node from block 3
-    let source_rpc_url = format!("http://127.0.0.1:{}", source_substrate_rpc_port);
+    let source_rpc_url = format!("http://127.0.0.1:{source_substrate_rpc_port}");
 
     let fork_config = AnvilNodeConfig::test_config()
         .with_port(0)
@@ -370,7 +370,7 @@ async fn test_fork_from_negative_block_number() {
     let alith_balance_at_block_3 = source_node.get_balance(alith.address(), Some(3.into())).await;
 
     // Step 3: Create a forked node from block -2
-    let source_rpc_url = format!("http://127.0.0.1:{}", source_substrate_rpc_port);
+    let source_rpc_url = format!("http://127.0.0.1:{source_substrate_rpc_port}");
 
     let fork_config = AnvilNodeConfig::test_config()
         .with_port(0)
@@ -524,7 +524,7 @@ async fn test_fork_with_contract_deployment() {
     assert_eq!(value3_after, U256::from(300), "Contract 3 value should remain 300");
 
     // Step 5: Fork from the source node
-    let source_rpc_url = format!("http://127.0.0.1:{}", source_substrate_rpc_port);
+    let source_rpc_url = format!("http://127.0.0.1:{source_substrate_rpc_port}");
     let fork_config =
         AnvilNodeConfig::test_config().with_port(0).with_eth_rpc_url(Some(source_rpc_url));
 
