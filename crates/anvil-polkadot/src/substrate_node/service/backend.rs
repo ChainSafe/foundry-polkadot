@@ -40,6 +40,8 @@ pub enum BackendError {
     MissingNextFeeMultiplier,
     #[error("Could not find block number in the state")]
     MissingBlockNumber,
+    #[error("Could not find slot info in the state")]
+    MissingSlotInfo,
     #[error("Unable to decode total issuance {0}")]
     DecodeTotalIssuance(codec::Error),
     #[error("Unable to decode chain id {0}")]
@@ -60,6 +62,8 @@ pub enum BackendError {
     DecodeAuraAuthorities(codec::Error),
     #[error("Unable to decode the next fee multiplier: {0}")]
     DecodeNextFeeMultiplier(codec::Error),
+    #[error("Unable to decode slot info: {0}")]
+    DecodeSlotInfo(codec::Error),
 }
 
 type Result<T> = std::result::Result<T, BackendError>;
@@ -90,24 +94,24 @@ impl BackendWithOverlay {
         let key = well_known_keys::RELAY_SLOT_INFO;
 
         let value =
-            self.read_top_state(hash, key.to_vec())?.ok_or(BackendError::MissingTimestamp)?;
-        <(Slot, u32)>::decode(&mut &value[..]).map_err(BackendError::DecodeTimestamp)
+            self.read_top_state(hash, key.to_vec())?.ok_or(BackendError::MissingSlotInfo)?;
+        <(Slot, u32)>::decode(&mut &value[..]).map_err(BackendError::DecodeSlotInfo)
     }
 
     pub fn read_last_relay_chain_block_number(&self, hash: Hash) -> Result<u32> {
         let key = well_known_keys::LAST_RELAY_CHAIN_BLOCK_NUMBER;
 
         let value =
-            self.read_top_state(hash, key.to_vec())?.ok_or(BackendError::MissingTimestamp)?;
-        u32::decode(&mut &value[..]).map_err(BackendError::DecodeTimestamp)
+            self.read_top_state(hash, key.to_vec())?.ok_or(BackendError::MissingBlockNumber)?;
+        u32::decode(&mut &value[..]).map_err(BackendError::DecodeBlockNumber)
     }
 
     pub fn read_aura_current_slot(&self, hash: Hash) -> Result<Slot> {
         let key = well_known_keys::CURRENT_SLOT;
 
         let value =
-            self.read_top_state(hash, key.to_vec())?.ok_or(BackendError::MissingTimestamp)?;
-        Slot::decode(&mut &value[..]).map_err(BackendError::DecodeTimestamp)
+            self.read_top_state(hash, key.to_vec())?.ok_or(BackendError::MissingSlotInfo)?;
+        Slot::decode(&mut &value[..]).map_err(BackendError::DecodeSlotInfo)
     }
 
     pub fn read_block_number(&self, hash: Hash) -> Result<u32> {
