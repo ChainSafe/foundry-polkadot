@@ -2,7 +2,7 @@ use crate::config::{
     AccountGenerator, AnvilNodeConfig, CHAIN_ID, DEFAULT_MNEMONIC, ForkChoice, SubstrateNodeConfig,
 };
 use alloy_genesis::Genesis;
-use alloy_primitives::{B256, U256, utils::Unit};
+use alloy_primitives::{U256, utils::Unit};
 use alloy_signer_local::coins_bip39::{English, Mnemonic};
 use anvil_server::ServerConfig;
 use clap::Parser;
@@ -139,16 +139,18 @@ impl NodeArgs {
             .disable_code_size_limit(self.evm.disable_code_size_limit)
             .with_disable_default_create2_deployer(self.evm.disable_default_create2_deployer)
             .with_memory_limit(self.evm.memory_limit)
-            .with_fork_choice(match (self.evm.fork_block_number, self.evm.fork_transaction_hash) {
-                (Some(block), None) => Some(ForkChoice::Block(block)),
-                (None, Some(hash)) => Some(ForkChoice::Transaction(hash)),
-                _ => self
-                    .evm
-                    .fork_url
-                    .as_ref()
-                    .and_then(|f| f.block)
-                    .map(|num| ForkChoice::Block(num as i128)),
-            })
+            .with_fork_choice(
+                self.evm
+                    .fork_block_number
+                    .map(ForkChoice::Block)
+                    .or_else(|| {
+                        self.evm
+                            .fork_url
+                            .as_ref()
+                            .and_then(|f| f.block)
+                            .map(|num| ForkChoice::Block(num as i128))
+                    }),
+            )
             .with_eth_rpc_url(self.evm.fork_url.map(|fork| fork.url))
             .fork_request_timeout(self.evm.fork_request_timeout.map(Duration::from_millis))
             .fork_request_retries(self.evm.fork_request_retries);
@@ -212,18 +214,6 @@ pub struct AnvilEvmArgs {
         allow_hyphen_values = true
     )]
     pub fork_block_number: Option<i128>,
-
-    /// Fetch state from a specific transaction hash over a remote endpoint.
-    ///
-    /// See --fork-url.
-    #[arg(
-        long,
-        requires = "fork_url",
-        value_name = "TRANSACTION",
-        help_heading = "Fork config",
-        conflicts_with = "fork_block_number"
-    )]
-    pub fork_transaction_hash: Option<B256>,
 
     /// Timeout in ms for requests sent to remote JSON-RPC server in forking mode.
     ///

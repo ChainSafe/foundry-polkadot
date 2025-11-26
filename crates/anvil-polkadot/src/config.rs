@@ -1,6 +1,6 @@
 use crate::api_server::revive_conversions::ReviveAddress;
 use alloy_genesis::Genesis;
-use alloy_primitives::{Address, TxHash, U256, hex, map::HashMap, utils::Unit};
+use alloy_primitives::{Address, U256, hex, map::HashMap, utils::Unit};
 use alloy_signer::Signer;
 use alloy_signer_local::{
     MnemonicBuilder, PrivateKeySigner,
@@ -881,14 +881,6 @@ impl AnvilNodeConfig {
         self.with_fork_choice(fork_block_number.map(Into::into))
     }
 
-    /// Sets the `fork_choice` to use to fork off from based on a transaction hash
-    #[must_use]
-    pub fn with_fork_transaction_hash<U: Into<TxHash>>(
-        self,
-        fork_transaction_hash: Option<U>,
-    ) -> Self {
-        self.with_fork_choice(fork_transaction_hash.map(Into::into))
-    }
 
     /// Sets the `fork_choice` to use to fork off from
     #[must_use]
@@ -916,15 +908,13 @@ impl AnvilNodeConfig {
     }
 }
 
-/// Fork delimiter used to specify which block or transaction to fork from.
+/// Fork delimiter used to specify which block to fork from.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ForkChoice {
     /// Block number to fork from.
     ///
     /// If negative, the given value is subtracted from the `latest` block number.
     Block(i128),
-    /// Transaction hash to fork from.
-    Transaction(TxHash),
 }
 
 impl ForkChoice {
@@ -932,23 +922,7 @@ impl ForkChoice {
     pub fn block_number(&self) -> Option<i128> {
         match self {
             Self::Block(block_number) => Some(*block_number),
-            Self::Transaction(_) => None,
         }
-    }
-
-    /// Returns the transaction hash to fork from
-    pub fn transaction_hash(&self) -> Option<TxHash> {
-        match self {
-            Self::Block(_) => None,
-            Self::Transaction(transaction_hash) => Some(*transaction_hash),
-        }
-    }
-}
-
-/// Convert a transaction hash into a ForkChoice
-impl From<TxHash> for ForkChoice {
-    fn from(tx_hash: TxHash) -> Self {
-        Self::Transaction(tx_hash)
     }
 }
 

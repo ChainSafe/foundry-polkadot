@@ -163,9 +163,6 @@ fn resolve_fork_block_number(
                 })
             }
         }
-        ForkChoice::Transaction(_tx_hash) => Err(sp_blockchain::Error::Backend(
-            "Forking by transaction hash is not yet supported".into(),
-        )),
     }
 }
 
