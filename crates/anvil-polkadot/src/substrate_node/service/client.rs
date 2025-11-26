@@ -189,21 +189,37 @@ fn setup_fork(
     })?;
 
     // Get block hash from fork_choice config
-    let block_hash: Option<<Block as BlockT>::Hash> =
-        if let Some(fork_choice) = &anvil_config.fork_choice {
-            let block_num = resolve_fork_block_number(&rpc_client, fork_choice)?;
-            Some(rpc_client.block_hash(Some(block_num)).map_err(|e| {
+    // If no fork_choice is specified, we need to fetch the latest block and use its hash
+    // for all subsequent requests to avoid inconsistencies if a new block is mined between calls.
+    let block_hash: <Block as BlockT>::Hash = if let Some(fork_choice) = &anvil_config.fork_choice {
+        let block_num = resolve_fork_block_number(&rpc_client, fork_choice)?;
+        rpc_client
+            .block_hash(Some(block_num))
+            .map_err(|e| {
                 sp_blockchain::Error::Backend(format!(
                     "failed to fetch block hash for block {block_num}: {e}"
                 ))
-            })?)
-        } else {
-            None
-        }
-        .flatten();
+            })?
+            .ok_or_else(|| {
+                sp_blockchain::Error::Backend(format!("block hash not found for block {block_num}"))
+            })?
+    } else {
+        // No fork_choice specified, fetch the latest block header and use its hash
+        let latest_header = rpc_client
+            .header(None)
+            .map_err(|e| {
+                sp_blockchain::Error::Backend(format!(
+                    "failed to fetch latest header for fork: {e}"
+                ))
+            })?
+            .ok_or_else(|| {
+                sp_blockchain::Error::Backend("latest header not found for fork".into())
+            })?;
+        latest_header.hash()
+    };
 
     let wasm_binary = rpc_client
-        .storage(StorageKey(CODE.to_vec()), block_hash)
+        .storage(StorageKey(CODE.to_vec()), Some(block_hash))
         .map_err(|e| sp_blockchain::Error::Backend(format!("failed to fetch runtime code: {e}")))?
         .map(|data| data.0)
         .expect("WASM binary not found in forked chain");
@@ -218,7 +234,7 @@ fn setup_fork(
     config.chain_spec = Box::new(chain_spec);
 
     let checkpoint: SignedBlock<Block> = rpc_client
-        .block(block_hash)
+        .block(Some(block_hash))
         .map_err(|e| {
             sp_blockchain::Error::Backend(format!("failed to fetch checkpoint block: {e}"))
         })?
