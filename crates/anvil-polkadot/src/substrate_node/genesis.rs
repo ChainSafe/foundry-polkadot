@@ -171,6 +171,7 @@ pub struct DevelopmentGenesisBlockBuilder<Block: BlockT, B, E> {
     commit_genesis_state: bool,
     backend: Arc<B>,
     executor: E,
+    checkpoint: Option<Block>,
     _phantom: PhantomData<Block>,
 }
 
@@ -217,6 +218,40 @@ impl<Block: BlockT, B: Backend<Block>, E: RuntimeVersionOf>
             commit_genesis_state,
             backend,
             executor,
+            checkpoint: None,
+            _phantom: PhantomData::<Block>,
+        })
+    }
+
+    pub fn new_with_checkpoint(
+        build_genesis_storage: &dyn BuildStorage,
+        commit_genesis_state: bool,
+        backend: Arc<B>,
+        executor: E,
+        checkpoint: Block,
+    ) -> sp_blockchain::Result<Self> {
+        let genesis_storage =
+            build_genesis_storage.build_storage().map_err(sp_blockchain::Error::Storage)?;
+
+        // Extract genesis number from checkpoint header
+        let genesis_number: u32 = (*checkpoint.header().number()).try_into().map_err(|_| {
+            sp_blockchain::Error::Application(
+                format!(
+                    "Checkpoint block number {} is too large for u32 (max: {})",
+                    checkpoint.header().number(),
+                    u32::MAX
+                )
+                .into(),
+            )
+        })?;
+
+        Ok(Self {
+            genesis_number,
+            genesis_storage,
+            commit_genesis_state,
+            backend,
+            executor,
+            checkpoint: Some(checkpoint),
             _phantom: PhantomData::<Block>,
         })
     }
@@ -234,30 +269,47 @@ impl<Block: BlockT, B: Backend<Block>, E: RuntimeVersionOf> BuildGenesisBlock<Bl
             commit_genesis_state,
             backend,
             executor,
+            checkpoint,
             _phantom,
         } = self;
 
-        let genesis_state_version =
-            resolve_state_version_from_wasm::<_, HashingFor<Block>>(&genesis_storage, &executor)?;
-        let mut op = backend.begin_operation()?;
-        let state_root =
-            op.set_genesis_state(genesis_storage, commit_genesis_state, genesis_state_version)?;
-        let extrinsics_root = <<<Block as BlockT>::Header as HeaderT>::Hashing as HashT>::trie_root(
-            Vec::new(),
-            genesis_state_version,
-        );
-        let genesis_block = Block::new(
-            <<Block as BlockT>::Header as HeaderT>::new(
-                genesis_number.into(),
-                extrinsics_root,
-                state_root,
-                Default::default(),
-                Default::default(),
-            ),
-            Default::default(),
-        );
+        // If we have a checkpoint (fork mode), use it as the genesis block
+        if let Some(checkpoint) = checkpoint {
+            tracing::info!(
+                "Using checkpoint block as genesis: number={}, hash={:?}",
+                checkpoint.header().number(),
+                checkpoint.header().hash()
+            );
 
-        Ok((genesis_block, op))
+            let op = backend.begin_operation()?;
+            Ok((checkpoint, op))
+        } else {
+            // Normal mode: create new genesis block
+            let genesis_state_version = resolve_state_version_from_wasm::<_, HashingFor<Block>>(
+                &genesis_storage,
+                &executor,
+            )?;
+            let mut op = backend.begin_operation()?;
+            let state_root =
+                op.set_genesis_state(genesis_storage, commit_genesis_state, genesis_state_version)?;
+            let extrinsics_root =
+                <<<Block as BlockT>::Header as HeaderT>::Hashing as HashT>::trie_root(
+                    Vec::new(),
+                    genesis_state_version,
+                );
+            let genesis_block = Block::new(
+                <<Block as BlockT>::Header as HeaderT>::new(
+                    genesis_number.into(),
+                    extrinsics_root,
+                    state_root,
+                    Default::default(),
+                    Default::default(),
+                ),
+                Default::default(),
+            );
+
+            Ok((genesis_block, op))
+        }
     }
 }
 

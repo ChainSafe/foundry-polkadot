@@ -304,7 +304,7 @@ fn before_fork_reads_remote_only() {
     let rpc = std::sync::Arc::new(Rpc::new());
     // fork checkpoint at #100
     let cp = checkpoint(100);
-    let backend = Backend::<TestBlockT>::new(Some(rpc.clone()), Some(cp));
+    let backend = Backend::<TestBlockT>::new(Some((rpc.clone(), cp)));
 
     // state_at(Default::default()) => before_fork=true
     let state = backend.state_at(Default::default(), TrieCacheContext::Trusted).unwrap();
@@ -328,7 +328,7 @@ fn before_fork_reads_remote_only() {
 fn after_fork_first_fetch_caches_subsequent_hits_local() {
     let rpc = std::sync::Arc::new(Rpc::new());
     let cp = checkpoint(10);
-    let backend = Backend::<TestBlockT>::new(Some(rpc.clone()), Some(cp.clone()));
+    let backend = Backend::<TestBlockT>::new(Some((rpc.clone(), cp.clone())));
 
     // Build a block #11 > checkpoint (#10), with parent #10
     let parent = cp.hash();
@@ -363,7 +363,7 @@ fn after_fork_first_fetch_caches_subsequent_hits_local() {
 fn removed_keys_prevents_remote_fetch() {
     let rpc = std::sync::Arc::new(Rpc::new());
     let cp = checkpoint(5);
-    let backend = Backend::<TestBlockT>::new(Some(rpc.clone()), Some(cp.clone()));
+    let backend = Backend::<TestBlockT>::new(Some((rpc.clone(), cp.clone())));
 
     // make block #6
     let b6 = make_block(6, cp.hash(), vec![]);
@@ -389,7 +389,7 @@ fn removed_keys_prevents_remote_fetch() {
 fn blockchain_header_and_number_are_cached() {
     let rpc = std::sync::Arc::new(Rpc::new());
     let cp = checkpoint(3);
-    let backend = Backend::<TestBlockT>::new(Some(rpc.clone()), Some(cp.clone()));
+    let backend = Backend::<TestBlockT>::new(Some((rpc.clone(), cp.clone())));
     let chain = backend.blockchain();
 
     // prepare one block w/ extrinsics
@@ -413,7 +413,7 @@ fn blockchain_header_and_number_are_cached() {
 
 #[test]
 fn no_fork_mode_uses_local_db_only() {
-    let backend = Backend::<TestBlockT>::new(None, None);
+    let backend = Backend::<TestBlockT>::new(None);
     let state = backend.state_at(Default::default(), TrieCacheContext::Trusted).unwrap();
 
     assert!(!state.before_fork);
@@ -430,7 +430,7 @@ fn no_fork_mode_uses_local_db_only() {
 
 #[test]
 fn no_fork_mode_state_at_default() {
-    let backend = Backend::<TestBlockT>::new(None, None);
+    let backend = Backend::<TestBlockT>::new(None);
     let state = backend.state_at(Default::default(), TrieCacheContext::Trusted).unwrap();
 
     assert!(!state.before_fork);
@@ -440,7 +440,7 @@ fn no_fork_mode_state_at_default() {
 
 #[test]
 fn no_fork_mode_storage_operations() {
-    let backend = Backend::<TestBlockT>::new(None, None);
+    let backend = Backend::<TestBlockT>::new(None);
     let state = backend.state_at(Default::default(), TrieCacheContext::Trusted).unwrap();
 
     let key1 = b":key1".to_vec();
@@ -461,7 +461,7 @@ fn child_storage_before_fork_reads_remote() {
 
     let rpc = std::sync::Arc::new(Rpc::new());
     let cp = checkpoint(100);
-    let backend = super::Backend::<TestBlockT>::new(Some(rpc.clone()), Some(cp));
+    let backend = super::Backend::<TestBlockT>::new(Some((rpc.clone(), cp)));
 
     let state = backend.state_at(Default::default(), TrieCacheContext::Trusted).unwrap();
 
@@ -488,7 +488,7 @@ fn child_storage_after_fork_caches() {
 
     let rpc = std::sync::Arc::new(Rpc::new());
     let cp = checkpoint(10);
-    let backend = super::Backend::<TestBlockT>::new(Some(rpc.clone()), Some(cp.clone()));
+    let backend = super::Backend::<TestBlockT>::new(Some((rpc.clone(), cp.clone())));
 
     let parent = cp.hash();
     let b11 = make_block(11, parent, vec![]);
@@ -525,7 +525,7 @@ fn child_storage_hash_reads_from_rpc() {
 
     let rpc = std::sync::Arc::new(Rpc::new());
     let cp = checkpoint(50);
-    let backend = super::Backend::<TestBlockT>::new(Some(rpc.clone()), Some(cp.clone()));
+    let backend = super::Backend::<TestBlockT>::new(Some((rpc.clone(), cp.clone())));
 
     let parent = cp.hash();
     let b51 = make_block(51, parent, vec![]);
@@ -558,7 +558,7 @@ fn next_child_storage_key_uses_paged() {
 
     let rpc = std::sync::Arc::new(Rpc::new());
     let cp = checkpoint(20);
-    let backend = super::Backend::<TestBlockT>::new(Some(rpc.clone()), Some(cp.clone()));
+    let backend = super::Backend::<TestBlockT>::new(Some((rpc.clone(), cp.clone())));
 
     let parent = cp.hash();
     let b21 = make_block(21, parent, vec![]);
@@ -591,7 +591,7 @@ fn blockchain_status_queries_rpc_when_not_local() {
 
     let rpc = std::sync::Arc::new(Rpc::new());
     let cp = checkpoint(20);
-    let backend = super::Backend::<TestBlockT>::new(Some(rpc.clone()), Some(cp.clone()));
+    let backend = super::Backend::<TestBlockT>::new(Some((rpc.clone(), cp.clone())));
 
     let parent = cp.hash();
     let b21 = make_block(21, parent, vec![]);
@@ -616,7 +616,7 @@ fn blockchain_justifications_queries_rpc_when_not_local() {
 
     let rpc = std::sync::Arc::new(Rpc::new());
     let cp = checkpoint(20);
-    let backend = super::Backend::<TestBlockT>::new(Some(rpc.clone()), Some(cp.clone()));
+    let backend = super::Backend::<TestBlockT>::new(Some((rpc.clone(), cp.clone())));
 
     let parent = cp.hash();
     let b21 = make_block(21, parent, vec![]);
@@ -645,7 +645,7 @@ fn child_storage_removed_keys_uses_composite_key() {
 
     let rpc = std::sync::Arc::new(Rpc::new());
     let cp = checkpoint(5);
-    let backend = Backend::<TestBlockT>::new(Some(rpc.clone()), Some(cp.clone()));
+    let backend = Backend::<TestBlockT>::new(Some((rpc.clone(), cp.clone())));
 
     // make block #6
     let b6 = make_block(6, cp.hash(), vec![]);
@@ -690,7 +690,7 @@ fn child_storage_removed_keys_no_collision_with_main_storage() {
 
     let rpc = std::sync::Arc::new(Rpc::new());
     let cp = checkpoint(5);
-    let backend = Backend::<TestBlockT>::new(Some(rpc.clone()), Some(cp.clone()));
+    let backend = Backend::<TestBlockT>::new(Some((rpc.clone(), cp.clone())));
 
     // make block #6
     let b6 = make_block(6, cp.hash(), vec![]);
