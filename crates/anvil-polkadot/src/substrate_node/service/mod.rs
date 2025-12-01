@@ -33,9 +33,9 @@ use std::sync::Arc;
 use subxt::{PolkadotConfig, backend::rpc::RpcClient, ext::subxt_rpcs::rpc_params, utils::H256};
 use tokio_stream::wrappers::ReceiverStream;
 
-use indicatif::{ProgressBar, ProgressStyle};
-use serde_json::{Map, Value, json};
 use tokio::runtime::Builder as TokioRtBuilder;
+use serde_json::{Map, Value, json};
+use indicatif::{ProgressBar, ProgressStyle};
 
 pub use backend::{BackendError, BackendWithOverlay, StorageOverrides};
 pub use client::Client;
@@ -175,14 +175,44 @@ fn create_manual_seal_inherent_data_providers(
 
         let next_block_number =
             UniqueSaturatedInto::<u32>::unique_saturated_into(current_para_head.number) + 1;
-        let slot_duration = client.runtime_api().slot_duration(current_para_head.hash()).unwrap();
-        let para_id = client.runtime_api().parachain_id(current_para_head.hash()).unwrap();
+
+        let duration = client
+            .runtime_api()
+            .slot_duration(current_para_head.hash())
+            .map_err(|e| ServiceError::Other(format!("retrieving slot duration from runtime: {e}")));
+        let slot_duration = match duration {
+            Ok(duration) => duration,
+            Err(e) => return futures::future::ready(Err(Box::new(e)))
+        };
+
+
+        let id = client
+            .runtime_api()
+            .parachain_id(current_para_head.hash())
+            .map_err(|e| ServiceError::Other(format!("retrieving para id from runtime: {e}")));
+        let para_id = match id {
+            Ok(id) => id,
+            Err(e) => return futures::future::ready(Err(Box::new(e)))
+        };
+
+
         let next_time = time_manager.next_timestamp();
         let parachain_slot = next_time.saturating_div(slot_duration.as_millis());
 
-        let (slot_in_state, _) = backend.read_relay_slot_info(current_para_head.hash()).unwrap();
-        let last_rc_block_number =
-            backend.read_last_relay_chain_block_number(current_para_head.hash()).unwrap();
+        let slot_info = backend.read_relay_slot_info(current_para_head.hash());
+        let slot_in_state = match slot_info {
+            Ok(slot) => slot.0,
+            Err(e) => return futures::future::ready(Err(Box::new(ServiceError::Other(format!("reading relay slot info: {e}")))))
+        };
+
+
+        let last_block_number =backend
+            .read_last_relay_chain_block_number(current_para_head.hash())
+            .map_err(|e| ServiceError::Other(format!("reading last relay block number: {e}")));
+        let last_rc_block_number = match last_block_number {
+            Ok(last_block_number) => last_block_number,
+            Err(e) => return futures::future::ready(Err(Box::new(e)))
+        };
 
         // Used to set the relay chain slot provided via the proof (which is represented
         // by a set of relay chain state keys). The slot is read from the proof at the moment
