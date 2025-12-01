@@ -78,7 +78,7 @@ use polkadot_sdk::{
     sp_api::{Metadata as _, ProvideRuntimeApi},
     sp_blockchain::Info,
     sp_consensus_aura::AuraApi,
-    sp_consensus_babe::Slot,
+    sp_consensus_slots::Slot,
     sp_core::{self, Hasher, keccak_256},
     sp_runtime::{FixedU128, traits::BlakeTwo256},
 };
