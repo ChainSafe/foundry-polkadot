@@ -6,7 +6,7 @@ use forge::{MultiContractRunner, MultiContractRunnerBuilder, executors::Executor
 use foundry_cli::utils::install_crypto_provider;
 use foundry_compilers::{
     Project, ProjectCompileOutput, SolcConfig, Vyper,
-    artifacts::{EvmVersion, Libraries, Settings},
+    artifacts::{EvmVersion, Libraries, Settings, output_selection::ContractOutputSelection},
     compilers::{multi::MultiCompiler, resolc::dual_compiled_contracts::DualCompiledContracts},
     utils::RuntimeOrHandle,
 };
@@ -196,7 +196,9 @@ impl ForgeTestData {
     pub fn new_with_revive(profile: ForgeTestProfile) -> Self {
         install_crypto_provider();
         init_tracing();
-        let config = Arc::new(profile.config());
+        let mut config = profile.config();
+        config.extra_output.push(ContractOutputSelection::StorageLayout);
+        let config = Arc::new(config);
 
         let mut solc_config = (*config).clone();
         solc_config.out = solc_config.out.join(revive::SOLC_ARTIFACTS_SUBDIR);
@@ -327,7 +329,16 @@ impl ForgeTestData {
 
     /// Builds a runner with revive strategy for polkadot/substrate testing
     pub fn runner_revive(&self, runtime_mode: ReviveRuntimeMode) -> MultiContractRunner {
+        self.runner_revive_with(runtime_mode, |_| {})
+    }
+
+    pub fn runner_revive_with(
+        &self,
+        runtime_mode: ReviveRuntimeMode,
+        modify: impl FnOnce(&mut Config),
+    ) -> MultiContractRunner {
         let mut config = (*self.config).clone();
+        modify(&mut config);
         config.rpc_endpoints = rpc_endpoints();
         config.allow_paths.push(manifest_root().to_path_buf());
         if config.fs_permissions.is_empty() {

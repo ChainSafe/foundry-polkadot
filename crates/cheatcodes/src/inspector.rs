@@ -937,6 +937,7 @@ impl Cheatcodes {
         }
 
         self.strategy.runner.revive_remove_duplicate_account_access(self);
+        self.strategy.runner.revive_record_create_address(self, outcome);
     }
 
     // Tells whether PVM is enabled or not.
@@ -1816,6 +1817,10 @@ impl Inspector<EthEvmContext<&mut dyn DatabaseExt>> for Cheatcodes {
                 outcome.result.result = InstructionResult::Revert;
                 outcome.result.output = Error::encode(msg);
             }
+        }
+
+        if outcome.result.is_ok() {
+            self.strategy.runner.revive_call_end(self, ecx, call);
         }
     }
 

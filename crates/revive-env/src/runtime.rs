@@ -84,10 +84,17 @@ impl pallet_revive::Config for Runtime {
     type UploadOrigin = EnsureSigned<AccountId32>;
     type InstantiateOrigin = EnsureSigned<AccountId32>;
     type CodeHashLockupDepositPercent = CodeHashLockupDepositPercent;
-    type ChainId = ConstU64<420_420_420>;
-    type NativeToEthRatio = ConstU32<1_000_000_000>;
+    type ChainId = ChainId;
+    type NativeToEthRatio = NativeToEthRatio;
     type FindAuthor = Self;
     type DebugEnabled = ConstBool<true>;
+}
+
+parameter_types! {
+    pub storage ChainId: u64 = 420_420_420;
+    pub storage BlockAuthor: AccountId32 = {
+        [[0xff; 20].as_slice(), [0xee; 12].as_slice()].concat().as_slice().try_into().unwrap()
+    };
 }
 
 impl FindAuthor<<Self as frame_system::Config>::AccountId> for Runtime {
@@ -95,6 +102,6 @@ impl FindAuthor<<Self as frame_system::Config>::AccountId> for Runtime {
     where
         I: 'a + IntoIterator<Item = (frame_support::ConsensusEngineId, &'a [u8])>,
     {
-        Some([[0xff; 20].as_slice(), [0xee; 12].as_slice()].concat().as_slice().try_into().unwrap())
+        Some(BlockAuthor::get())
     }
 }

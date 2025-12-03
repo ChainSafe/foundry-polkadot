@@ -261,8 +261,20 @@ pub trait CheatcodeInspectorStrategyExt {
     ) -> Option<revm::interpreter::CallOutcome> {
         None
     }
+
+    // Needed to sync from test contract callbacks
+    fn revive_call_end(&self, _state: &mut crate::Cheatcodes, _ecx: Ecx, _call: &CallInputs) {}
+
     // Remove duplicate accesses in storage_recorder
     fn revive_remove_duplicate_account_access(&self, _state: &mut crate::Cheatcodes) {}
+
+    // Record create address for skip_pvm_addresses tracking
+    fn revive_record_create_address(
+        &self,
+        _state: &mut crate::Cheatcodes,
+        _outcome: &revm::interpreter::CreateOutcome,
+    ) {
+    }
 }
 
 // Legacy type aliases for backward compatibility
