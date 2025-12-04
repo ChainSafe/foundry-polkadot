@@ -1,4 +1,6 @@
-use crate::config::{AccountGenerator, ForkChoice, AnvilNodeConfig, DEFAULT_MNEMONIC, SubstrateNodeConfig};
+use crate::config::{
+    AccountGenerator, AnvilNodeConfig, DEFAULT_MNEMONIC, ForkChoice, SubstrateNodeConfig,
+};
 use alloy_genesis::Genesis;
 use alloy_primitives::{U256, utils::Unit};
 use alloy_signer_local::coins_bip39::{English, Mnemonic};
