@@ -10,5 +10,6 @@ mod sign;
 mod standard_rpc;
 mod state_injector;
 mod time_machine;
+mod traces;
 mod txpool;
 mod utils;

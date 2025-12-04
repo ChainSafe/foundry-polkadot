@@ -54,7 +54,8 @@ pub fn new(
     anvil_config: &AnvilNodeConfig,
     mut config: Configuration,
 ) -> Result<(Service, TaskManager), ServiceError> {
-    let storage_overrides = Arc::new(Mutex::new(StorageOverrides::default()));
+    let storage_overrides =
+        Arc::new(Mutex::new(StorageOverrides::new(anvil_config.revive_rpc_block_limit)));
     let executor = sc_service::new_wasm_executor(&config.executor);
 
     let (client, backend, keystore, mut task_manager) =
