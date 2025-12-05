@@ -11,21 +11,22 @@ use codec::Encode;
 use parking_lot::Mutex;
 use polkadot_sdk::{
     cumulus_client_parachain_inherent::MockValidationDataInherentDataProvider,
-    parachains_common::{Hash, opaque::Block},
     cumulus_primitives_core::{GetParachainInfo, relay_chain},
+    parachains_common::{Hash, opaque::Block},
     polkadot_primitives::HeadData,
     sc_basic_authorship, sc_consensus,
+    sc_consensus_manual_seal::{
+        ManualSealParams, consensus::aura::AuraConsensusDataProvider, run_manual_seal,
+    },
     sc_service::{
         self, Configuration, RpcHandlers, SpawnTaskHandle, TaskManager,
         error::Error as ServiceError,
     },
-    sc_consensus_manual_seal::{
-        ManualSealParams, consensus::aura::AuraConsensusDataProvider, run_manual_seal,
-    },
+    sc_transaction_pool,
     sp_api::ProvideRuntimeApi,
     sp_arithmetic::traits::UniqueSaturatedInto,
-    sc_transaction_pool, sp_timestamp,
     sp_consensus_aura::{AuraApi, Slot},
+    sp_timestamp,
 };
 use std::sync::Arc;
 use tokio_stream::wrappers::ReceiverStream;
@@ -80,21 +81,18 @@ fn create_manual_seal_inherent_data_providers(
             .expect("Header lookup should succeed")
             .expect("Header passed in as parent should be present in backend.");
 
-        let current_para_block_head =
-            Some(HeadData(current_para_head.encode()));
+        let current_para_block_head = Some(HeadData(current_para_head.encode()));
 
         let next_block_number =
             UniqueSaturatedInto::<u32>::unique_saturated_into(current_para_head.number) + 1;
 
-        let duration = client
-            .runtime_api()
-            .slot_duration(current_para_head.hash())
-            .map_err(|e| ServiceError::Other(format!("retrieving slot duration from runtime: {e}")));
+        let duration = client.runtime_api().slot_duration(current_para_head.hash()).map_err(|e| {
+            ServiceError::Other(format!("retrieving slot duration from runtime: {e}"))
+        });
         let slot_duration = match duration {
             Ok(duration) => duration,
-            Err(e) => return futures::future::ready(Err(Box::new(e)))
+            Err(e) => return futures::future::ready(Err(Box::new(e))),
         };
-
 
         let id = client
             .runtime_api()
@@ -102,9 +100,8 @@ fn create_manual_seal_inherent_data_providers(
             .map_err(|e| ServiceError::Other(format!("retrieving para id from runtime: {e}")));
         let para_id = match id {
             Ok(id) => id,
-            Err(e) => return futures::future::ready(Err(Box::new(e)))
+            Err(e) => return futures::future::ready(Err(Box::new(e))),
         };
-
 
         let next_time = time_manager.next_timestamp();
         let parachain_slot = next_time.saturating_div(slot_duration.as_millis());
@@ -112,16 +109,19 @@ fn create_manual_seal_inherent_data_providers(
         let slot_info = backend.read_relay_slot_info(current_para_head.hash());
         let slot_in_state = match slot_info {
             Ok(slot) => slot.0,
-            Err(e) => return futures::future::ready(Err(Box::new(ServiceError::Other(format!("reading relay slot info: {e}")))))
+            Err(e) => {
+                return futures::future::ready(Err(Box::new(ServiceError::Other(format!(
+                    "reading relay slot info: {e}"
+                )))));
+            }
         };
 
-
-        let last_block_number =backend
+        let last_block_number = backend
             .read_last_relay_chain_block_number(current_para_head.hash())
             .map_err(|e| ServiceError::Other(format!("reading last relay block number: {e}")));
         let last_rc_block_number = match last_block_number {
             Ok(last_block_number) => last_block_number,
-            Err(e) => return futures::future::ready(Err(Box::new(e)))
+            Err(e) => return futures::future::ready(Err(Box::new(e))),
         };
 
         // Used to set the relay chain slot provided via the proof (which is represented
@@ -155,7 +155,7 @@ fn create_manual_seal_inherent_data_providers(
 
         let timestamp_provider = sp_timestamp::InherentDataProvider::new(next_time.into());
 
-        println!("block!"); 
+        println!("block!");
 
         futures::future::ready(Ok((timestamp_provider, mocked_parachain)))
     })

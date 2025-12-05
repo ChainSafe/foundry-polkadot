@@ -42,7 +42,7 @@ pub enum BackendError {
     MissingBlockNumber,
     #[error("Could not find relay slot info in the state")]
     MissingRelaySlotInfo,
-     #[error("Could not find last relay block number in the state")]
+    #[error("Could not find last relay block number in the state")]
     MissingLastRelayBlockNumber,
     #[error("Could not find aura current slot in the state")]
     MissingAuraCurrentSlot,
@@ -109,8 +109,9 @@ impl BackendWithOverlay {
     pub fn read_last_relay_chain_block_number(&self, hash: Hash) -> Result<u32> {
         let key = well_known_keys::LAST_RELAY_CHAIN_BLOCK_NUMBER;
 
-        let value =
-            self.read_top_state(hash, key.to_vec())?.ok_or(BackendError::MissingLastRelayBlockNumber)?;
+        let value = self
+            .read_top_state(hash, key.to_vec())?
+            .ok_or(BackendError::MissingLastRelayBlockNumber)?;
         u32::decode(&mut &value[..]).map_err(BackendError::DecodeLastRelayBlockNumber)
     }
 
