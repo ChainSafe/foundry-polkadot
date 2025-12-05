@@ -11,31 +11,24 @@ use codec::Encode;
 use parking_lot::Mutex;
 use polkadot_sdk::{
     cumulus_client_parachain_inherent::MockValidationDataInherentDataProvider,
-    cumulus_primitives_core::{GetParachainInfo, relay_chain},
     parachains_common::{Hash, opaque::Block},
-    polkadot_primitives::{self},
-    sc_basic_authorship, sc_chain_spec,
-    sc_consensus::{self},
-    sc_consensus_manual_seal::{
-        ManualSealParams, consensus::aura::AuraConsensusDataProvider, run_manual_seal,
-    },
+    cumulus_primitives_core::{GetParachainInfo, relay_chain},
+    polkadot_primitives::HeadData,
+    sc_basic_authorship, sc_consensus,
     sc_service::{
         self, Configuration, RpcHandlers, SpawnTaskHandle, TaskManager,
         error::Error as ServiceError,
     },
-    sc_transaction_pool::{self},
+    sc_consensus_manual_seal::{
+        ManualSealParams, consensus::aura::AuraConsensusDataProvider, run_manual_seal,
+    },
     sp_api::ProvideRuntimeApi,
     sp_arithmetic::traits::UniqueSaturatedInto,
+    sc_transaction_pool, sp_timestamp,
     sp_consensus_aura::{AuraApi, Slot},
-    sp_timestamp,
 };
 use std::sync::Arc;
-use subxt::{PolkadotConfig, backend::rpc::RpcClient, ext::subxt_rpcs::rpc_params, utils::H256};
 use tokio_stream::wrappers::ReceiverStream;
-
-use tokio::runtime::Builder as TokioRtBuilder;
-use serde_json::{Map, Value, json};
-use indicatif::{ProgressBar, ProgressStyle};
 
 pub use backend::{BackendError, BackendWithOverlay, StorageOverrides};
 pub use client::Client;
@@ -63,89 +56,6 @@ pub struct Service {
     pub genesis_block_number: u64,
 }
 
-async fn fork_get_all_keys_paged(client: &RpcClient, hash: H256) -> eyre::Result<Vec<String>> {
-    let pb = ProgressBar::new_spinner();
-    pb.set_style(
-        ProgressStyle::with_template(
-            "{spinner:.green} Fetching key pages... {pos} pages collected",
-        )
-        .unwrap()
-        .tick_chars("/|\\- "),
-    );
-    pb.enable_steady_tick(std::time::Duration::from_millis(120));
-
-    let mut keys = Vec::new();
-    let mut start_key: Option<String> = None;
-    let mut page_count: u64 = 0;
-    loop {
-        let page: Vec<String> = client
-            .request("state_getKeysPaged", rpc_params!["0x", 1000u32, start_key.clone(), hash])
-            .await?;
-        if page.is_empty() {
-            break;
-        }
-        start_key = page.last().cloned();
-        keys.extend(page.into_iter());
-        page_count += 1;
-        pb.set_position(page_count);
-    }
-
-    pb.finish_with_message(format!("All keys fetched ✔ (total: {})", keys.len()));
-    Ok(keys)
-}
-
-async fn fork_storage_map(client: &RpcClient, hash: H256) -> eyre::Result<Map<String, Value>> {
-    let keys = fork_get_all_keys_paged(client, hash).await?;
-
-    let pb = ProgressBar::new(keys.len() as u64);
-    pb.set_style(
-        ProgressStyle::with_template("[{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} values")
-            .unwrap()
-            .progress_chars("=>-"),
-    );
-    pb.set_message("Downloading values...");
-
-    let mut storage: Map<String, Value> = Map::new();
-    for k in &keys {
-        let v: Option<String> =
-            client.request("state_getStorage", rpc_params![k.clone(), hash]).await?;
-        if let Some(val_hex) = v {
-            storage.insert(k.clone(), Value::String(val_hex));
-        }
-        pb.inc(1);
-    }
-
-    pb.finish_with_message("All values downloaded ✔");
-    Ok(storage)
-}
-
-fn fork_chainspec_from_raw_storage_map(
-    storage_map: Map<String, Value>,
-) -> sc_service::error::Result<Box<dyn sc_chain_spec::ChainSpec>> {
-    let children_default = serde_json::Map::<String, Value>::new();
-
-    let spec_json = json!({
-        "name": "Anvil Polkadot (Forked)",
-        "id": "anvil-polkadot-forked",
-        "chainType": "Development",
-        "bootNodes": [],
-        "telemetryEndpoints": null,
-        "protocolId": null,
-        "properties": null,
-        "codeSubstitutes": {},
-        "consensusEngine": null,
-        "genesis": { "raw": { "top": storage_map, "childrenDefault": children_default }}
-    });
-
-    let bytes = serde_json::to_vec(&spec_json)
-        .map_err(|e| ServiceError::Other(format!("serialize spec json failed: {e}")))?;
-    type EmptyExt = Option<()>;
-    let new_spec: sc_chain_spec::GenericChainSpec<EmptyExt> =
-        sc_chain_spec::GenericChainSpec::from_json_bytes(bytes)
-            .map_err(|e| ServiceError::Other(format!("from_json_bytes failed: {e}")))?;
-    Ok(Box::new(new_spec))
-}
-
 type CreateInherentDataProviders = Box<
     dyn Fn(
             Hash,
@@ -171,7 +81,7 @@ fn create_manual_seal_inherent_data_providers(
             .expect("Header passed in as parent should be present in backend.");
 
         let current_para_block_head =
-            Some(polkadot_primitives::HeadData(current_para_head.encode()));
+            Some(HeadData(current_para_head.encode()));
 
         let next_block_number =
             UniqueSaturatedInto::<u32>::unique_saturated_into(current_para_head.number) + 1;
@@ -245,6 +155,8 @@ fn create_manual_seal_inherent_data_providers(
 
         let timestamp_provider = sp_timestamp::InherentDataProvider::new(next_time.into());
 
+        println!("block!"); 
+
         futures::future::ready(Ok((timestamp_provider, mocked_parachain)))
     })
 }
@@ -301,7 +213,7 @@ pub fn new(
     ));
 
     let rpc_handlers = spawn_rpc_server(
-        genesis_block_number,
+        anvil_config.get_genesis_number(),
         &mut task_manager,
         client.clone(),
         config,
@@ -325,6 +237,12 @@ pub fn new(
     );
 
     let aura_digest_provider = AuraConsensusDataProvider::new(client.clone());
+    // let create_inherent_data_providers = {
+    //     move |_, ()| {
+    //         let next_timestamp = time_manager.next_timestamp();
+    //         async move { Ok(sp_timestamp::InherentDataProvider::new(next_timestamp.into())) }
+    //     }
+    // };
     let backend_with_overlay = BackendWithOverlay::new(backend.clone(), storage_overrides.clone());
     let create_inherent_data_providers = create_manual_seal_inherent_data_providers(
         backend_with_overlay,
@@ -359,7 +277,7 @@ pub fn new(
             rpc_handlers,
             mining_engine,
             storage_overrides,
-            genesis_block_number,
+            genesis_block_number: anvil_config.get_genesis_number(),
         },
         task_manager,
     ))
