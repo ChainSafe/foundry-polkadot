@@ -63,6 +63,7 @@ use pallet_revive_eth_rpc::{
     },
 };
 use polkadot_sdk::{
+    cumulus_primitives_core::GetParachainInfo,
     pallet_revive::{
         ReviveApi,
         evm::{
@@ -618,7 +619,24 @@ impl ApiServer {
     }
 
     fn chain_id(&self, at: Hash) -> u64 {
-        self.backend.read_chain_id(at).expect("Chain ID is populated on genesis")
+        // .expect("Chain ID is populated on genesis");
+        let id_res = self.backend.read_chain_id(at);
+
+        let para_id = match id_res {
+            Ok(id) => id,
+            Err(_) => {
+                let id = self
+                    .client
+                    .runtime_api()
+                    .parachain_id(at)
+                    .expect("retrieving chain id from runtime");
+
+                let id_u64: u32 = id.into();
+                id_u64 as u64
+            }
+        };
+
+        para_id
     }
 
     // Eth RPCs
@@ -828,6 +846,7 @@ impl ApiServer {
         }
 
         if transaction.chain_id.is_none() {
+            println!("chain id is none");
             transaction.chain_id =
                 Some(sp_core::U256::from_big_endian(&self.chain_id(latest_block).to_be_bytes()));
         }
