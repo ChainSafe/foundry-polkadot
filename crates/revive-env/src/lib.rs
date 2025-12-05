@@ -18,7 +18,7 @@ use polkadot_sdk::{
     sp_tracing,
 };
 
-pub use crate::runtime::{AccountId, Balance, Runtime, System, Timestamp};
+pub use crate::runtime::{AccountId, Balance, BlockAuthor, Runtime, System, Timestamp};
 
 mod runtime;
 
@@ -72,6 +72,7 @@ impl ExtBuilder {
                 frame_system::RawOrigin::Signed(pallet_account).into(),
             );
         });
+        ext.commit_all().unwrap();
         ext
     }
 }

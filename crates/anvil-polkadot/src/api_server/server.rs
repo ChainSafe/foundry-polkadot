@@ -2,12 +2,17 @@ use crate::{
     api_server::{
         ApiRequest,
         error::{Error, Result, ToRpcResponseResult},
-        filters::{BlockNotifications, EthFilter, Filters, eviction_task},
+        filters::{
+            BlockFilter, BlockNotifications, EthFilter, Filters, LogsFilter,
+            PendingTransactionsFilter, eviction_task,
+        },
         revive_conversions::{
             AlloyU256, ReviveAddress, ReviveBlockId, ReviveBlockNumberOrTag, ReviveBytes,
-            ReviveFilter, SubstrateU256, convert_to_generic_transaction,
+            ReviveFilter, ReviveTrace, ReviveTracerType, SubstrateU256,
+            convert_to_generic_transaction,
         },
         signer::DevSigner,
+        trace_helpers::{parity_block_trace_builder, parity_transaction_trace_builder},
         txpool_helpers::{
             TxpoolTransactionInfo, extract_sender, extract_tx_info, extract_tx_summary,
             transaction_matches_eth_hash,
@@ -36,6 +41,10 @@ use alloy_primitives::{Address, B256, U64, U256};
 use alloy_rpc_types::{
     Filter, TransactionRequest,
     anvil::{Forking, Metadata as AnvilMetadata, MineOptions, NodeEnvironment, NodeInfo},
+    trace::{
+        geth::{GethDebugTracingCallOptions, GethDebugTracingOptions, GethTrace},
+        parity::LocalizedTransactionTrace,
+    },
     txpool::{TxpoolContent, TxpoolInspect, TxpoolStatus},
 };
 use alloy_serde::WithOtherFields;
@@ -57,8 +66,9 @@ use polkadot_sdk::{
     pallet_revive::{
         ReviveApi,
         evm::{
-            Block, BlockNumberOrTagOrHash, BlockTag, Bytes, FeeHistoryResult, FilterResults,
-            ReceiptInfo, TransactionInfo, TransactionSigned,
+            self, Block, BlockNumberOrTagOrHash, BlockTag, Bytes, CallTracerConfig,
+            FeeHistoryResult, FilterResults, Log, ReceiptInfo, TracerType, TransactionInfo,
+            TransactionSigned,
         },
     },
     parachains_common::{AccountId, Hash, Nonce},
@@ -156,7 +166,9 @@ impl ApiServer {
         while let Some(msg) = self.req_receiver.next().await {
             let resp = self.execute(msg.req).await;
 
-            msg.resp_sender.send(resp).expect("Dropped receiver");
+            if let Err(resp) = msg.resp_sender.send(resp) {
+                node_info!("Request was cancelled before sending the response: {:?}", resp);
+            }
         }
     }
 
@@ -394,17 +406,29 @@ impl ApiServer {
             // --- Metadata ---
             EthRequest::NodeInfo(_) => self.anvil_node_info().await.to_rpc_result(),
             EthRequest::AnvilMetadata(_) => self.anvil_metadata().await.to_rpc_result(),
-            // --- Filters ---
-            EthRequest::EthNewFilter(_filter) => {
-                Err::<(), _>(Error::RpcUnimplemented).to_rpc_result()
+            // --- Trace ---
+            EthRequest::DebugTraceTransaction(tx_hash, geth_tracer_options) => {
+                self.debug_trace_transaction(tx_hash, geth_tracer_options).await.to_rpc_result()
             }
+            EthRequest::DebugTraceCall(request, block_number, geth_tracer_options) => self
+                .debug_trace_call(request, block_number, geth_tracer_options)
+                .await
+                .to_rpc_result(),
+            EthRequest::TraceTransaction(tx_hash) => {
+                self.trace_transaction(tx_hash).await.to_rpc_result()
+            }
+            EthRequest::TraceBlock(block_number) => {
+                self.trace_block(block_number).await.to_rpc_result()
+            }
+            // --- Filters ---
+            EthRequest::EthNewFilter(filter) => {
+                self.new_filter(ReviveFilter::from(filter).into_inner()).await.to_rpc_result()
+            }
+            EthRequest::EthGetFilterLogs(id) => self.get_filter_logs(&id).await.to_rpc_result(),
             EthRequest::EthGetFilterChanges(id) => self.get_filter_changes(&id).await,
             EthRequest::EthNewBlockFilter(_) => self.new_block_filter().await.to_rpc_result(),
             EthRequest::EthNewPendingTransactionFilter(_) => {
-                Err::<(), _>(Error::RpcUnimplemented).to_rpc_result()
-            }
-            EthRequest::EthGetFilterLogs(_id) => {
-                Err::<(), _>(Error::RpcUnimplemented).to_rpc_result()
+                self.new_pending_transactions_filter().await.to_rpc_result()
             }
             EthRequest::EthUninstallFilter(id) => self.uninstall_filter(&id).await.to_rpc_result(),
             _ => Err::<(), _>(Error::RpcUnimplemented).to_rpc_result(),
@@ -1355,7 +1379,9 @@ impl ApiServer {
     /// Creates a filter to notify about new blocks
     async fn new_block_filter(&self) -> Result<String> {
         node_info!("eth_newBlockFilter");
-        let filter = EthFilter::Blocks(BlockNotifications::new(self.new_block_notifications()?));
+        let filter = EthFilter::Blocks(BlockFilter::new(BlockNotifications::new(
+            self.new_block_notifications()?,
+        )));
         Ok(self.filters.add_filter(filter).await)
     }
 
@@ -1369,6 +1395,38 @@ impl ApiServer {
     async fn get_filter_changes(&self, id: &str) -> ResponseResult {
         node_info!("eth_getFilterChanges");
         self.filters.get_filter_changes(id).await
+    }
+
+    async fn new_pending_transactions_filter(&self) -> Result<String> {
+        node_info!("eth_newPendingTransactionFilter");
+        let filter = EthFilter::PendingTransactions(PendingTransactionsFilter::new(
+            BlockNotifications::new(self.new_block_notifications()?),
+            self.tx_pool.clone(),
+            self.eth_rpc_client.clone(),
+        ));
+        Ok(self.filters.add_filter(filter).await)
+    }
+
+    async fn new_filter(&self, filter: evm::Filter) -> Result<String> {
+        node_info!("eth_newFilter");
+        let eth_filter = EthFilter::Logs(
+            LogsFilter::new(
+                BlockNotifications::new(self.new_block_notifications()?),
+                self.eth_rpc_client.clone(),
+                filter,
+            )
+            .await?,
+        );
+        Ok(self.filters.add_filter(eth_filter).await)
+    }
+
+    async fn get_filter_logs(&self, id: &str) -> Result<Vec<Log>> {
+        node_info!("eth_getFilterLogs");
+        if let Some(filter) = self.filters.get_log_filter(id).await {
+            Ok(self.eth_rpc_client.logs(Some(filter)).await?)
+        } else {
+            Ok(Vec::new())
+        }
     }
 
     // ----- Helpers
@@ -1605,6 +1663,71 @@ impl ApiServer {
         Ok(())
     }
 
+    async fn debug_trace_transaction(
+        &self,
+        tx_hash: B256,
+        geth_tracer_options: GethDebugTracingOptions,
+    ) -> Result<GethTrace> {
+        node_info!("debug_traceTransaction");
+        let trace = self
+            .eth_rpc_client
+            .trace_transaction(
+                H256::from_slice(tx_hash.as_ref()),
+                ReviveTracerType::from(geth_tracer_options).inner(),
+            )
+            .await?;
+        Ok(ReviveTrace::new(trace).into())
+    }
+
+    async fn debug_trace_call(
+        &self,
+        request: WithOtherFields<TransactionRequest>,
+        block_number: Option<BlockId>,
+        geth_tracer_options: GethDebugTracingCallOptions,
+    ) -> Result<GethTrace> {
+        node_info!("debug_traceCall");
+        let hash = self.get_block_hash_for_tag(block_number).await?;
+        let runtime_api = self.eth_rpc_client.runtime_api(hash);
+        let transaction = convert_to_generic_transaction(request.into_inner());
+        let trace = runtime_api
+            .trace_call(transaction, ReviveTracerType::from(geth_tracer_options).inner())
+            .await?;
+        Ok(ReviveTrace::new(trace).into())
+    }
+
+    async fn trace_transaction(&self, tx_hash: B256) -> Result<Vec<LocalizedTransactionTrace>> {
+        node_info!("trace_transaction");
+        let trace = self
+            .eth_rpc_client
+            .trace_transaction(
+                H256::from_slice(tx_hash.as_ref()),
+                TracerType::CallTracer(Some(CallTracerConfig::default())),
+            )
+            .await?;
+        let tx_info = self.get_transaction_by_hash(tx_hash).await?;
+        parity_transaction_trace_builder(trace, tx_info)
+    }
+
+    async fn trace_block(
+        &self,
+        block_number: BlockNumberOrTag,
+    ) -> Result<Vec<LocalizedTransactionTrace>> {
+        node_info!("trace_block");
+        // hydrated_transactions is true because we need tx info to build the trace
+        let Some(block) = self.get_block_by_number(block_number, true).await? else {
+            return Ok(vec![]);
+        };
+        let traces = self
+            .eth_rpc_client
+            .trace_block_by_number(
+                ReviveBlockNumberOrTag::from(block_number).inner(),
+                TracerType::CallTracer(Some(CallTracerConfig::default())),
+            )
+            .await?;
+
+        parity_block_trace_builder(traces, block)
+    }
+
     // ----- Helpers -----
 
     async fn wait_for_receipt(
@@ -1809,7 +1932,8 @@ async fn create_revive_rpc_client(
             .await
             .map_err(Error::from)?;
 
-    eth_rpc_client.create_block_notifier();
+    // Capacity is chosen using random.org
+    eth_rpc_client.set_block_notifier(Some(tokio::sync::broadcast::channel::<H256>(50).0));
     let eth_rpc_client_clone = eth_rpc_client.clone();
     task_spawn_handle.spawn("block-subscription", "None", async move {
         let eth_rpc_client = eth_rpc_client_clone;

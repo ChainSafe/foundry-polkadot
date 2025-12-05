@@ -337,10 +337,10 @@ impl<Block: BlockT + DeserializeOwned> backend::Backend<Block> for Backend<Block
                 break;
             }
 
-            if let Some(count) = pinned.get(&current_hash) {
-                if *count > 0 {
-                    break;
-                }
+            if let Some(count) = pinned.get(&current_hash)
+                && *count > 0
+            {
+                break;
             }
 
             let Some(block) = storage.blocks.get(&current_hash) else {
@@ -364,10 +364,10 @@ impl<Block: BlockT + DeserializeOwned> backend::Backend<Block> for Backend<Block
             let hash_to_remove = current_hash;
 
             storage.blocks.remove(&hash_to_remove);
-            if let Some(entry) = storage.hashes.get(&number) {
-                if *entry == hash_to_remove {
-                    storage.hashes.remove(&number);
-                }
+            if let Some(entry) = storage.hashes.get(&number)
+                && *entry == hash_to_remove
+            {
+                storage.hashes.remove(&number);
             }
             states.remove(&hash_to_remove);
 
