@@ -94,6 +94,8 @@ fn create_manual_seal_inherent_data_providers(
             Err(e) => return futures::future::ready(Err(Box::new(e))),
         };
 
+        println!("nex block num {}", next_block_number);
+
         let id = client
             .runtime_api()
             .parachain_id(current_para_head.hash())
@@ -109,11 +111,7 @@ fn create_manual_seal_inherent_data_providers(
         let slot_info = backend.read_relay_slot_info(current_para_head.hash());
         let slot_in_state = match slot_info {
             Ok(slot) => slot.0,
-            Err(e) => {
-                return futures::future::ready(Err(Box::new(ServiceError::Other(format!(
-                    "reading relay slot info: {e}"
-                )))));
-            }
+            Err(_) => Slot::from(0), // For starting from genesis
         };
 
         let last_block_number = backend
@@ -121,7 +119,7 @@ fn create_manual_seal_inherent_data_providers(
             .map_err(|e| ServiceError::Other(format!("reading last relay block number: {e}")));
         let last_rc_block_number = match last_block_number {
             Ok(last_block_number) => last_block_number,
-            Err(e) => return futures::future::ready(Err(Box::new(e))),
+            Err(_) => 0, // For starting from genesis
         };
 
         // Used to set the relay chain slot provided via the proof (which is represented
@@ -154,8 +152,6 @@ fn create_manual_seal_inherent_data_providers(
         };
 
         let timestamp_provider = sp_timestamp::InherentDataProvider::new(next_time.into());
-
-        println!("block!");
 
         futures::future::ready(Ok((timestamp_provider, mocked_parachain)))
     })
