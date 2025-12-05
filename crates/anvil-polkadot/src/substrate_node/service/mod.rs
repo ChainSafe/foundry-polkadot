@@ -4,20 +4,28 @@ use crate::{
         lazy_loading::backend::Backend as LazyLoadingBackend,
         mining_engine::{MiningEngine, MiningMode, run_mining_engine},
         rpc::spawn_rpc_server,
-        service::consensus::SameSlotConsensusDataProvider,
     },
 };
 use anvil::eth::backend::time::TimeManager;
+use codec::Encode;
 use parking_lot::Mutex;
 use polkadot_sdk::{
-    parachains_common::opaque::Block,
+    cumulus_client_parachain_inherent::MockValidationDataInherentDataProvider,
+    parachains_common::{Hash, opaque::Block},
+    cumulus_primitives_core::{GetParachainInfo, relay_chain},
+    polkadot_primitives::HeadData,
     sc_basic_authorship, sc_consensus,
-    sc_consensus_manual_seal::{self},
     sc_service::{
         self, Configuration, RpcHandlers, SpawnTaskHandle, TaskManager,
         error::Error as ServiceError,
     },
+    sc_consensus_manual_seal::{
+        ManualSealParams, consensus::aura::AuraConsensusDataProvider, run_manual_seal,
+    },
+    sp_api::ProvideRuntimeApi,
+    sp_arithmetic::traits::UniqueSaturatedInto,
     sc_transaction_pool, sp_timestamp,
+    sp_consensus_aura::{AuraApi, Slot},
 };
 use std::sync::Arc;
 use tokio_stream::wrappers::ReceiverStream;
@@ -27,7 +35,6 @@ pub use client::Client;
 
 mod backend;
 mod client;
-mod consensus;
 mod executor;
 pub mod storage;
 
@@ -47,6 +54,109 @@ pub struct Service {
     pub mining_engine: Arc<MiningEngine>,
     pub storage_overrides: Arc<Mutex<StorageOverrides>>,
     pub genesis_block_number: u64,
+}
+
+type CreateInherentDataProviders = Box<
+    dyn Fn(
+            Hash,
+            (),
+        ) -> futures::future::Ready<
+            Result<
+                (sp_timestamp::InherentDataProvider, MockValidationDataInherentDataProvider<()>),
+                Box<dyn std::error::Error + Send + Sync>,
+            >,
+        > + Send
+        + Sync,
+>;
+
+fn create_manual_seal_inherent_data_providers(
+    backend: BackendWithOverlay,
+    client: Arc<Client>,
+    time_manager: Arc<TimeManager>,
+) -> CreateInherentDataProviders {
+    Box::new(move |block: Hash, ()| {
+        let current_para_head = client
+            .header(block)
+            .expect("Header lookup should succeed")
+            .expect("Header passed in as parent should be present in backend.");
+
+        let current_para_block_head =
+            Some(HeadData(current_para_head.encode()));
+
+        let next_block_number =
+            UniqueSaturatedInto::<u32>::unique_saturated_into(current_para_head.number) + 1;
+
+        let duration = client
+            .runtime_api()
+            .slot_duration(current_para_head.hash())
+            .map_err(|e| ServiceError::Other(format!("retrieving slot duration from runtime: {e}")));
+        let slot_duration = match duration {
+            Ok(duration) => duration,
+            Err(e) => return futures::future::ready(Err(Box::new(e)))
+        };
+
+
+        let id = client
+            .runtime_api()
+            .parachain_id(current_para_head.hash())
+            .map_err(|e| ServiceError::Other(format!("retrieving para id from runtime: {e}")));
+        let para_id = match id {
+            Ok(id) => id,
+            Err(e) => return futures::future::ready(Err(Box::new(e)))
+        };
+
+
+        let next_time = time_manager.next_timestamp();
+        let parachain_slot = next_time.saturating_div(slot_duration.as_millis());
+
+        let slot_info = backend.read_relay_slot_info(current_para_head.hash());
+        let slot_in_state = match slot_info {
+            Ok(slot) => slot.0,
+            Err(e) => return futures::future::ready(Err(Box::new(ServiceError::Other(format!("reading relay slot info: {e}")))))
+        };
+
+
+        let last_block_number =backend
+            .read_last_relay_chain_block_number(current_para_head.hash())
+            .map_err(|e| ServiceError::Other(format!("reading last relay block number: {e}")));
+        let last_rc_block_number = match last_block_number {
+            Ok(last_block_number) => last_block_number,
+            Err(e) => return futures::future::ready(Err(Box::new(e)))
+        };
+
+        // Used to set the relay chain slot provided via the proof (which is represented
+        // by a set of relay chain state keys). The slot is read from the proof at the moment
+        // we call consensus hook to perform validations of the relay chain state. We will
+        // check:
+        // - Ensures blocks are not produced faster than the specified velocity `V` (however, given
+        // the nature of the anvil-polkadot mining strategies, we'll hack the check to never fail)
+        // - Verifies parachain slot alignment with relay chain slot (meaning time passes similarly
+        // on both chains, and the additional key values set below ensures it)
+        let additional_key_values = vec![(
+            relay_chain::well_known_keys::CURRENT_SLOT.to_vec(),
+            Slot::from(parachain_slot).encode(),
+        )];
+
+        // This helps with allowing greater block production velocity per relay chain slot.
+        backend.inject_relay_slot_info(current_para_head.hash(), (slot_in_state, 0));
+
+        let mocked_parachain = MockValidationDataInherentDataProvider::<()> {
+            current_para_block: next_block_number,
+            para_id,
+            // This is used behind the scenes to set the relay parent number
+            // on top of which we build this block. The new last rc block number
+            // known by the parachain will be set to the value bellow when the parachain
+            // block is finalized.
+            relay_offset: last_rc_block_number + 1,
+            current_para_block_head,
+            additional_key_values: Some(additional_key_values),
+            ..Default::default()
+        };
+
+        let timestamp_provider = sp_timestamp::InherentDataProvider::new(next_time.into());
+
+        futures::future::ready(Ok((timestamp_provider, mocked_parachain)))
+    })
 }
 
 /// Builds a new service for a full client.
@@ -124,24 +234,31 @@ pub fn new(
         None,
     );
 
-    let create_inherent_data_providers = {
-        move |_, ()| {
-            let next_timestamp = time_manager.next_timestamp();
-            async move { Ok(sp_timestamp::InherentDataProvider::new(next_timestamp.into())) }
-        }
-    };
+    let aura_digest_provider = AuraConsensusDataProvider::new(client.clone());
+    // let create_inherent_data_providers = {
+    //     move |_, ()| {
+    //         let next_timestamp = time_manager.next_timestamp();
+    //         async move { Ok(sp_timestamp::InherentDataProvider::new(next_timestamp.into())) }
+    //     }
+    // };
+    let backend_with_overlay = BackendWithOverlay::new(backend.clone(), storage_overrides.clone());
+    let create_inherent_data_providers = create_manual_seal_inherent_data_providers(
+        backend_with_overlay,
+        client.clone(),
+        time_manager,
+    );
 
-    let params = sc_consensus_manual_seal::ManualSealParams {
+    let params = ManualSealParams {
         block_import: client.clone(),
         env: proposer,
         client: client.clone(),
         pool: transaction_pool.clone(),
         select_chain: SelectChain::new(backend.clone()),
         commands_stream: Box::pin(commands_stream),
-        consensus_data_provider: Some(Box::new(SameSlotConsensusDataProvider::new())),
+        consensus_data_provider: Some(Box::new(aura_digest_provider)),
         create_inherent_data_providers,
     };
-    let authorship_future = sc_consensus_manual_seal::run_manual_seal(params);
+    let authorship_future = run_manual_seal(params);
 
     task_manager.spawn_essential_handle().spawn_blocking(
         "manual-seal",
