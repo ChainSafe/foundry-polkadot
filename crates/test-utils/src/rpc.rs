@@ -39,10 +39,10 @@ static DRPC_KEYS: LazyLock<Vec<String>> = LazyLock::new(|| {
         "AjUPUPonSEInt2CZ_7A-ai3hMyxxBlsR8I4EssvAG40d".to_owned(),
     ];
     // Fetch secret from GitHub Actions environment variable
-    if let Ok(secret) = std::env::var("DLRP_API_KEY") {
+    /*if let Ok(secret) = std::env::var("DLRP_API_KEY") {
         keys.clear();
         keys.push(secret);
-    }
+    }*/
 
     keys.shuffle(&mut rand::rng());
 
