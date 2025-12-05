@@ -155,6 +155,8 @@ fn create_manual_seal_inherent_data_providers(
 
         let timestamp_provider = sp_timestamp::InherentDataProvider::new(next_time.into());
 
+        println!("block!"); 
+
         futures::future::ready(Ok((timestamp_provider, mocked_parachain)))
     })
 }
