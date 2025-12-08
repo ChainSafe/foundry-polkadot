@@ -73,7 +73,7 @@ use polkadot_sdk::{
     },
     parachains_common::{AccountId, Hash, Nonce},
     polkadot_sdk_frame::runtime::types_common::OpaqueBlock,
-    sc_client_api::HeaderBackend,
+    sc_client_api::{Backend as BackendT, HeaderBackend},
     sc_service::{InPoolTransaction, SpawnTaskHandle, TransactionPool},
     sp_api::{Metadata as _, ProvideRuntimeApi},
     sp_blockchain::Info,
@@ -137,6 +137,10 @@ impl ApiServer {
         let api = create_online_client(&substrate_service, rpc_client.clone()).await?;
         let rpc = LegacyRpcMethods::<SrcChainConfig>::new(rpc_client.clone());
         let block_provider = SubxtBlockInfoProvider::new(api.clone(), rpc.clone()).await?;
+
+        // Check if we're in fork mode by checking if the backend has an RPC client
+        let is_fork_mode = substrate_service.backend.rpc().is_some();
+
         let eth_rpc_client = create_revive_rpc_client(
             api.clone(),
             rpc_client.clone(),
@@ -144,6 +148,7 @@ impl ApiServer {
             block_provider.clone(),
             substrate_service.spawn_handle.clone(),
             revive_rpc_block_limit,
+            is_fork_mode,
         )
         .await?;
 
@@ -1868,21 +1873,15 @@ async fn create_online_client(
     substrate_service: &Service,
     rpc_client: RpcClient,
 ) -> Result<OnlineClient<SrcChainConfig>> {
-    let genesis_block_number = substrate_service.genesis_block_number.try_into().map_err(|_| {
-        Error::InternalError(format!(
-            "Genesis block number {} is too large for u32 (max: {})",
-            substrate_service.genesis_block_number,
-            u32::MAX
-        ))
-    })?;
+    // Get genesis hash directly from blockchain info instead of querying by number
+    // This works correctly for both normal and fork modes
+    let genesis_hash = substrate_service.backend.blockchain().info().genesis_hash;
 
-    let Some(genesis_hash) = substrate_service.client.hash(genesis_block_number).ok().flatten()
-    else {
-        return Err(Error::InternalError(format!(
-            "Genesis hash not found for genesis block number {}",
-            substrate_service.genesis_block_number
-        )));
-    };
+    if genesis_hash == Default::default() {
+        return Err(Error::InternalError(
+            "Genesis hash not initialized in blockchain storage".to_string(),
+        ));
+    }
 
     let Ok(runtime_version) = substrate_service.client.runtime_version_at(genesis_hash) else {
         return Err(Error::InternalError(
@@ -1895,11 +1894,17 @@ async fn create_online_client(
         transaction_version: runtime_version.transaction_version,
     };
 
-    let Ok(supported_metadata_versions) =
-        substrate_service.client.runtime_api().metadata_versions(genesis_hash)
-    else {
-        return Err(Error::InternalError("Unable to fetch metadata versions".to_string()));
-    };
+    // In fork mode, genesis block may not have runtime code available.
+    // Try genesis first, then fall back to best block if that fails.
+    let supported_metadata_versions = substrate_service
+        .client
+        .runtime_api()
+        .metadata_versions(genesis_hash)
+        .or_else(|_| {
+            let best_hash = substrate_service.backend.blockchain().info().best_hash;
+            substrate_service.client.runtime_api().metadata_versions(best_hash)
+        })
+        .map_err(|e| Error::InternalError(format!("Unable to fetch metadata versions: {e}")))?;
 
     let Some(latest_metadata_version) = supported_metadata_versions.into_iter().max() else {
         return Err(Error::InternalError("No stable metadata versions supported".to_string()));
@@ -1938,6 +1943,7 @@ async fn create_revive_rpc_client(
     block_provider: SubxtBlockInfoProvider,
     task_spawn_handle: SpawnTaskHandle,
     keep_latest_n_blocks: Option<usize>,
+    is_fork_mode: bool,
 ) -> Result<EthRpcClient> {
     let pool = SqlitePoolOptions::new()
         .max_connections(1)
@@ -1970,18 +1976,26 @@ async fn create_revive_rpc_client(
 
     // Capacity is chosen using random.org
     eth_rpc_client.set_block_notifier(Some(tokio::sync::broadcast::channel::<H256>(50).0));
-    let eth_rpc_client_clone = eth_rpc_client.clone();
-    task_spawn_handle.spawn("block-subscription", "None", async move {
-        let eth_rpc_client = eth_rpc_client_clone;
-        let best_future =
-            eth_rpc_client.subscribe_and_cache_new_blocks(SubscriptionType::BestBlocks);
-        let finalized_future =
-            eth_rpc_client.subscribe_and_cache_new_blocks(SubscriptionType::FinalizedBlocks);
-        let res = tokio::try_join!(best_future, finalized_future).map(|_| ());
-        if let Err(err) = res {
-            panic!("Block subscription task failed: {err:?}")
-        }
-    });
+
+    // In fork mode, we don't subscribe to new blocks from the remote chain because:
+    // 1. We're working with a snapshot at the fork checkpoint
+    // 2. Subscribing to blocks beyond the checkpoint causes ReceiptDataNotFound errors
+    // 3. New blocks after the fork are produced locally, not fetched from remote
+    if !is_fork_mode {
+        let eth_rpc_client_clone = eth_rpc_client.clone();
+        task_spawn_handle.spawn("block-subscription", "None", async move {
+            let eth_rpc_client = eth_rpc_client_clone;
+            let best_future =
+                eth_rpc_client.subscribe_and_cache_new_blocks(SubscriptionType::BestBlocks);
+            let finalized_future =
+                eth_rpc_client.subscribe_and_cache_new_blocks(SubscriptionType::FinalizedBlocks);
+            let res = tokio::try_join!(best_future, finalized_future).map(|_| ());
+            if let Err(err) = res {
+                // Log the error instead of panicking - this is expected during shutdown
+                warn!("Block subscription task ended: {err:?}");
+            }
+        });
+    }
 
     Ok(eth_rpc_client)
 }

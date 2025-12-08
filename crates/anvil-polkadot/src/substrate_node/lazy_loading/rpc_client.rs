@@ -124,7 +124,7 @@ impl<Block: BlockT + DeserializeOwned> Rpc<Block> {
                 );
 
                 // Explicit request delay, to avoid getting 429 errors
-                let _ = tokio::time::sleep(delay_between_requests).await;
+                tokio::time::sleep(delay_between_requests).await;
 
                 // Execute the request
                 let result = future.await;

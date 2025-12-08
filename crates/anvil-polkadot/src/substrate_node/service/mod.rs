@@ -94,8 +94,6 @@ fn create_manual_seal_inherent_data_providers(
             Err(e) => return futures::future::ready(Err(Box::new(e))),
         };
 
-        println!("nex block num {}", next_block_number);
-
         let id = client
             .runtime_api()
             .parachain_id(current_para_head.hash())
@@ -138,6 +136,36 @@ fn create_manual_seal_inherent_data_providers(
         // This helps with allowing greater block production velocity per relay chain slot.
         backend.inject_relay_slot_info(current_para_head.hash(), (slot_in_state, 0));
 
+        // Read the DMQ MQC head from parachain storage to avoid "DMQ head mismatch" errors
+        // The storage key is: twox_128("ParachainSystem") + twox_128("LastDmqMqcHead")
+        let pallet_prefix = polkadot_sdk::sp_core::twox_128(b"ParachainSystem");
+        let storage_prefix = polkadot_sdk::sp_core::twox_128(b"LastDmqMqcHead");
+        let mut dmq_storage_key = Vec::new();
+        dmq_storage_key.extend_from_slice(&pallet_prefix);
+        dmq_storage_key.extend_from_slice(&storage_prefix);
+
+        // Read the MessageQueueChain from storage and extract its head hash
+        use polkadot_sdk::sc_client_api::StorageProvider;
+        let dmq_mqc_head = client
+            .storage(
+                current_para_head.hash(),
+                &polkadot_sdk::sc_client_api::StorageKey(dmq_storage_key),
+            )
+            .ok()
+            .flatten()
+            .and_then(|encoded_data| {
+                // MessageQueueChain is just a wrapper around a Hash, decode it
+                // The MessageQueueChain stores the head as the last 32 bytes
+                if encoded_data.0.len() >= 32 {
+                    let mut hash_bytes = [0u8; 32];
+                    hash_bytes.copy_from_slice(&encoded_data.0[encoded_data.0.len() - 32..]);
+                    Some(polkadot_sdk::cumulus_primitives_core::relay_chain::Hash::from(hash_bytes))
+                } else {
+                    None
+                }
+            })
+            .unwrap_or_default(); // Use default (zeros) if we can't read it
+
         let mocked_parachain = MockValidationDataInherentDataProvider::<()> {
             current_para_block: next_block_number,
             para_id,
@@ -148,6 +176,10 @@ fn create_manual_seal_inherent_data_providers(
             relay_offset: last_rc_block_number + 1,
             current_para_block_head,
             additional_key_values: Some(additional_key_values),
+            xcm_config: polkadot_sdk::cumulus_client_parachain_inherent::MockXcmConfig {
+                starting_dmq_mqc_head: dmq_mqc_head,
+                starting_hrmp_mqc_heads: Default::default(),
+            },
             ..Default::default()
         };
 
