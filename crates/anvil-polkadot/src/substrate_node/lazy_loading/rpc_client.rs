@@ -125,9 +125,8 @@ impl<Block: BlockT + DeserializeOwned> Rpc<Block> {
 
         // Use the global RPC runtime to avoid Tokio context conflicts
         // The runtime is spawned on a separate thread to completely isolate from the main runtime
-        let (tx, rx) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
-            let result = get_rpc_runtime().block_on(async move {
+            get_rpc_runtime().block_on(async move {
                 let start_req = std::time::Instant::now();
                 tracing::debug!(
                     target: super::LAZY_LOADING_LOG_TARGET,
@@ -151,11 +150,10 @@ impl<Block: BlockT + DeserializeOwned> Rpc<Block> {
                 );
 
                 result
-            });
-            let _ = tx.send(result);
-        });
-
-        rx.recv().expect("RPC thread terminated unexpectedly")
+            })
+        })
+        .join()
+        .expect("RPC thread panicked")
     }
 }
 
