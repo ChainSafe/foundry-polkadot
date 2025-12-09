@@ -55,6 +55,7 @@ pub struct Service {
     pub mining_engine: Arc<MiningEngine>,
     pub storage_overrides: Arc<Mutex<StorageOverrides>>,
     pub genesis_block_number: u64,
+    pub fork_url: Option<String>,
 }
 
 type CreateInherentDataProviders = Box<
@@ -306,6 +307,7 @@ pub fn new(
             mining_engine,
             storage_overrides,
             genesis_block_number: anvil_config.get_genesis_number(),
+            fork_url: anvil_config.eth_rpc_url.clone(),
         },
         task_manager,
     ))

@@ -13,12 +13,21 @@ use serde::de::DeserializeOwned;
 use std::{
     marker::PhantomData,
     sync::{
-        Arc,
+        Arc, OnceLock,
         atomic::{AtomicU64, Ordering},
     },
     time::Duration,
 };
-use tokio::runtime::Handle;
+use tokio::runtime::Runtime;
+
+// Global runtime for RPC calls that persists for the entire process lifetime
+// This avoids issues with dropping runtimes in async contexts
+fn get_rpc_runtime() -> &'static Runtime {
+    static RPC_RUNTIME: OnceLock<Runtime> = OnceLock::new();
+    RPC_RUNTIME.get_or_init(|| {
+        Runtime::new().expect("Failed to create RPC runtime")
+    })
+}
 
 type BlockNumber = u64;
 
@@ -106,16 +115,19 @@ impl<Block: BlockT + DeserializeOwned> Rpc<Block> {
 
     fn block_on<F, T, E>(&self, future: F) -> Result<T, E>
     where
-        F: std::future::Future<Output = Result<T, E>> + Send,
-        T: Send,
-        E: Send,
+        F: std::future::Future<Output = Result<T, E>> + Send + 'static,
+        T: Send + 'static,
+        E: Send + 'static,
     {
         let id = self.counter.fetch_add(1, Ordering::SeqCst);
         let start = std::time::Instant::now();
         let delay_between_requests = Duration::from_millis(self.delay_between_requests_ms.into());
 
-        tokio::task::block_in_place(move || {
-            Handle::current().block_on(async move {
+        // Use the global RPC runtime to avoid Tokio context conflicts
+        // The runtime is spawned on a separate thread to completely isolate from the main runtime
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let result = get_rpc_runtime().block_on(async move {
                 let start_req = std::time::Instant::now();
                 tracing::debug!(
                     target: super::LAZY_LOADING_LOG_TARGET,
@@ -139,8 +151,11 @@ impl<Block: BlockT + DeserializeOwned> Rpc<Block> {
                 );
 
                 result
-            })
-        })
+            });
+            let _ = tx.send(result);
+        });
+
+        rx.recv().expect("RPC thread terminated unexpectedly")
     }
 }
 
@@ -447,6 +462,7 @@ mod tests {
         let (addr, handle) = start_mock_server_ok().await;
         let url = format!("http://{addr}");
         let client = HttpClientBuilder::default().build(&url).unwrap();
+
         (Rpc::<BlockType>::new(client, 0), handle)
     }
 

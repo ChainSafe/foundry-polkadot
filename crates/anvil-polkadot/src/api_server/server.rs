@@ -37,7 +37,7 @@ use crate::{
 };
 use alloy_dyn_abi::TypedData;
 use alloy_eips::{BlockId, BlockNumberOrTag};
-use alloy_primitives::{Address, B256, U64, U256};
+use alloy_primitives::{hex, Address, B256, U64, U256};
 use alloy_rpc_types::{
     Filter, TransactionRequest,
     anvil::{Forking, Metadata as AnvilMetadata, MineOptions, NodeEnvironment, NodeInfo},
@@ -98,7 +98,7 @@ pub const CLIENT_VERSION: &str = concat!("anvil-polkadot/v", env!("CARGO_PKG_VER
 const TIMEOUT_DURATION: Duration = Duration::from_secs(30);
 
 pub struct ApiServer {
-    eth_rpc_client: EthRpcClient,
+    eth_rpc_client: Option<EthRpcClient>,
     req_receiver: mpsc::Receiver<ApiRequest>,
     backend: BackendWithOverlay,
     logging_manager: LoggingManager,
@@ -144,6 +144,7 @@ impl ApiServer {
             block_provider.clone(),
             substrate_service.spawn_handle.clone(),
             revive_rpc_block_limit,
+            substrate_service.fork_url.is_some(), // in_fork_mode
         )
         .await?;
 
@@ -176,6 +177,15 @@ impl ApiServer {
             instance_id: B256::random(),
             filters,
             hardcoded_chain_id: chain_id,
+        })
+    }
+
+    /// Returns a reference to the eth_rpc_client, or an error if it's not available (fork mode without ReviveApi)
+    fn eth_rpc_client(&self) -> Result<&EthRpcClient> {
+        self.eth_rpc_client.as_ref().ok_or_else(|| {
+            Error::InternalError(
+                "EVM RPC functionality not available. This chain was forked without ReviveApi support.".to_string()
+            )
         })
     }
 
@@ -481,7 +491,7 @@ impl ApiServer {
         }
 
         // Subscribe to new best blocks.
-        let receiver = self.eth_rpc_client.block_notifier().map(|sender| sender.subscribe());
+        let receiver = self.eth_rpc_client()?.block_notifier().map(|sender| sender.subscribe());
 
         let awaited_hash = self
             .mining_engine
@@ -522,7 +532,7 @@ impl ApiServer {
         node_info!("evm_mine");
 
         // Subscribe to new best blocks.
-        let receiver = self.eth_rpc_client.block_notifier().map(|sender| sender.subscribe());
+        let receiver = self.eth_rpc_client()?.block_notifier().map(|sender| sender.subscribe());
         let awaited_hash = self.mining_engine.evm_mine(mine.and_then(|p| p.params)).await?;
         self.wait_for_hash(receiver, awaited_hash).await?;
         Ok("0x0".to_string())
@@ -535,7 +545,7 @@ impl ApiServer {
         node_info!("evm_mine_detailed");
 
         // Subscribe to new best blocks.
-        let receiver = self.eth_rpc_client.block_notifier().map(|sender| sender.subscribe());
+        let receiver = self.eth_rpc_client()?.block_notifier().map(|sender| sender.subscribe());
 
         let (mined_blocks, awaited_hash) =
             self.mining_engine.do_evm_mine(mine.and_then(|p| p.params)).await?;
@@ -672,14 +682,14 @@ impl ApiServer {
 
     async fn transaction_receipt(&self, tx_hash: B256) -> Result<Option<ReceiptInfo>> {
         node_info!("eth_getTransactionReceipt");
-        Ok(self.eth_rpc_client.receipt(&(tx_hash.0.into())).await)
+        Ok(self.eth_rpc_client()?.receipt(&(tx_hash.0.into())).await)
     }
 
     async fn get_balance(&self, addr: Address, block: Option<BlockId>) -> Result<U256> {
         node_info!("eth_getBalance");
         let hash = self.get_block_hash_for_tag(block).await?;
 
-        let runtime_api = self.eth_rpc_client.runtime_api(hash);
+        let runtime_api = self.eth_rpc_client()?.runtime_api(hash);
         let balance = runtime_api.balance(ReviveAddress::from(addr).inner()).await?;
         Ok(AlloyU256::from(balance).inner())
     }
@@ -692,7 +702,7 @@ impl ApiServer {
     ) -> Result<B256> {
         node_info!("eth_getStorageAt");
         let hash = self.get_block_hash_for_tag(block).await?;
-        let runtime_api = self.eth_rpc_client.runtime_api(hash);
+        let runtime_api = self.eth_rpc_client()?.runtime_api(hash);
         let bytes: B256 = match runtime_api
             .get_storage(ReviveAddress::from(addr).inner(), slot.to_be_bytes())
             .await
@@ -711,7 +721,7 @@ impl ApiServer {
 
         let hash = self.get_block_hash_for_tag(block).await?;
         let code = self
-            .eth_rpc_client
+            .eth_rpc_client()?
             .runtime_api(hash)
             .code(ReviveAddress::from(address).inner())
             .await?;
@@ -725,11 +735,11 @@ impl ApiServer {
     ) -> Result<Option<Block>> {
         node_info!("eth_getBlockByHash");
         let Some(block) =
-            self.eth_rpc_client.block_by_hash(&H256::from_slice(block_hash.as_slice())).await?
+            self.eth_rpc_client()?.block_by_hash(&H256::from_slice(block_hash.as_slice())).await?
         else {
             return Ok(None);
         };
-        let block = self.eth_rpc_client.evm_block(block, hydrated_transactions).await;
+        let block = self.eth_rpc_client()?.evm_block(block, hydrated_transactions).await;
         Ok(block)
     }
 
@@ -741,7 +751,7 @@ impl ApiServer {
         node_info!("eth_estimateGas");
 
         let hash = self.get_block_hash_for_tag(block).await?;
-        let runtime_api = self.eth_rpc_client.runtime_api(hash);
+        let runtime_api = self.eth_rpc_client()?.runtime_api(hash);
         let dry_run = runtime_api
             .dry_run(
                 convert_to_generic_transaction(request.into_inner()),
@@ -760,7 +770,7 @@ impl ApiServer {
 
         let hash = self.get_block_hash_for_tag(block).await?;
 
-        let runtime_api = self.eth_rpc_client.runtime_api(hash);
+        let runtime_api = self.eth_rpc_client()?.runtime_api(hash);
         let dry_run = runtime_api
             .dry_run(
                 convert_to_generic_transaction(request.into_inner()),
@@ -776,7 +786,7 @@ impl ApiServer {
 
         let hash = self.latest_block();
 
-        let runtime_api = self.eth_rpc_client.runtime_api(hash);
+        let runtime_api = self.eth_rpc_client()?.runtime_api(hash);
         runtime_api.gas_price().await.map_err(Error::from)
     }
 
@@ -787,7 +797,7 @@ impl ApiServer {
     ) -> Result<sp_core::U256> {
         node_info!("eth_getTransactionCount");
         let hash = self.get_block_hash_for_tag(block).await?;
-        let runtime_api = self.eth_rpc_client.runtime_api(hash);
+        let runtime_api = self.eth_rpc_client()?.runtime_api(hash);
         let nonce = runtime_api.nonce(address).await?;
         Ok(nonce)
     }
@@ -795,7 +805,7 @@ impl ApiServer {
     async fn send_raw_transaction(&self, transaction: Bytes) -> Result<H256> {
         let hash = H256(keccak_256(&transaction.0));
         let call = subxt_client::tx().revive().eth_transact(transaction.0);
-        self.eth_rpc_client.submit(call).await?;
+        self.eth_rpc_client()?.submit(call).await?;
         Ok(hash)
     }
 
@@ -803,7 +813,7 @@ impl ApiServer {
         node_info!("eth_sendRawTransactionSync");
         // Subscribe to new best blocks.
         let receiver = self
-            .eth_rpc_client
+            .eth_rpc_client()?
             .block_notifier()
             .ok_or_else(|| {
                 Error::InternalError("Invalid receiver. Unable to wait for receipt".to_string())
@@ -884,7 +894,7 @@ impl ApiServer {
         node_info!("eth_sendTransactionSync");
         // Subscribe to new best blocks.
         let receiver = self
-            .eth_rpc_client
+            .eth_rpc_client()?
             .block_notifier()
             .ok_or_else(|| {
                 Error::InternalError("Invalid receiver. Unable to wait for receipt".to_string())
@@ -900,13 +910,13 @@ impl ApiServer {
         hydrated_transactions: bool,
     ) -> Result<Option<Block>> {
         let Some(block) = self
-            .eth_rpc_client
+            .eth_rpc_client()?
             .block_by_number_or_tag(&ReviveBlockNumberOrTag::from(block_number).inner())
             .await?
         else {
             return Ok(None);
         };
-        let block = self.eth_rpc_client.evm_block(block, hydrated_transactions).await;
+        let block = self.eth_rpc_client()?.evm_block(block, hydrated_transactions).await;
         Ok(block)
     }
 
@@ -1027,7 +1037,7 @@ impl ApiServer {
 
     async fn get_block_transaction_count_by_hash(&self, block_hash: B256) -> Result<Option<U256>> {
         let block_hash = H256::from_slice(block_hash.as_slice());
-        Ok(self.eth_rpc_client.receipts_count_per_block(&block_hash).await.map(U256::from))
+        Ok(self.eth_rpc_client()?.receipts_count_per_block(&block_hash).await.map(U256::from))
     }
 
     async fn get_block_transaction_count_by_number(
@@ -1040,7 +1050,7 @@ impl ApiServer {
             return Ok(None);
         };
 
-        Ok(self.eth_rpc_client.receipts_count_per_block(&hash).await.map(U256::from))
+        Ok(self.eth_rpc_client()?.receipts_count_per_block(&hash).await.map(U256::from))
     }
 
     async fn get_transaction_by_block_hash_and_index(
@@ -1049,7 +1059,7 @@ impl ApiServer {
         transaction_index: U256,
     ) -> Result<Option<TransactionInfo>> {
         let Some(receipt) = self
-            .eth_rpc_client
+            .eth_rpc_client()?
             .receipt_by_hash_and_index(
                 &H256::from_slice(block_hash.as_ref()),
                 transaction_index.try_into().map_err(|_| EthRpcError::ConversionError)?,
@@ -1060,7 +1070,7 @@ impl ApiServer {
         };
 
         let Some(signed_tx) =
-            self.eth_rpc_client.signed_tx_by_hash(&receipt.transaction_hash).await
+            self.eth_rpc_client()?.signed_tx_by_hash(&receipt.transaction_hash).await
         else {
             return Ok(None);
         };
@@ -1074,7 +1084,7 @@ impl ApiServer {
         transaction_index: U256,
     ) -> Result<Option<TransactionInfo>> {
         let Some(block) = self
-            .eth_rpc_client
+            .eth_rpc_client()?
             .block_by_number_or_tag(&ReviveBlockNumberOrTag::from(block).inner())
             .await?
         else {
@@ -1092,8 +1102,8 @@ impl ApiServer {
         transaction_hash: B256,
     ) -> Result<Option<TransactionInfo>> {
         let tx_hash = H256::from_slice(transaction_hash.as_ref());
-        let receipt = self.eth_rpc_client.receipt(&tx_hash).await;
-        let signed_tx = self.eth_rpc_client.signed_tx_by_hash(&tx_hash).await;
+        let receipt = self.eth_rpc_client()?.receipt(&tx_hash).await;
+        let signed_tx = self.eth_rpc_client()?.signed_tx_by_hash(&tx_hash).await;
         if let (Some(receipt), Some(signed_tx)) = (receipt, signed_tx) {
             return Ok(Some(TransactionInfo::new(&receipt, signed_tx)));
         }
@@ -1109,7 +1119,7 @@ impl ApiServer {
     ) -> Result<FeeHistoryResult> {
         let block_count: u32 = block_count.try_into().map_err(|_| EthRpcError::ConversionError)?;
         let result = self
-            .eth_rpc_client
+            .eth_rpc_client()?
             .fee_history(
                 block_count,
                 ReviveBlockNumberOrTag::from(newest_block).inner(),
@@ -1136,7 +1146,7 @@ impl ApiServer {
     }
 
     async fn get_logs(&self, filter: Filter) -> Result<FilterResults> {
-        let logs = self.eth_rpc_client.logs(Some(ReviveFilter::from(filter).into_inner())).await?;
+        let logs = self.eth_rpc_client()?.logs(Some(ReviveFilter::from(filter).into_inner())).await?;
         Ok(FilterResults::Logs(logs))
     }
 
@@ -1438,7 +1448,7 @@ impl ApiServer {
         let filter = EthFilter::PendingTransactions(PendingTransactionsFilter::new(
             BlockNotifications::new(self.new_block_notifications()?),
             self.tx_pool.clone(),
-            self.eth_rpc_client.clone(),
+            self.eth_rpc_client()?.clone(),
         ));
         Ok(self.filters.add_filter(filter).await)
     }
@@ -1448,7 +1458,7 @@ impl ApiServer {
         let eth_filter = EthFilter::Logs(
             LogsFilter::new(
                 BlockNotifications::new(self.new_block_notifications()?),
-                self.eth_rpc_client.clone(),
+                self.eth_rpc_client()?.clone(),
                 filter,
             )
             .await?,
@@ -1459,7 +1469,7 @@ impl ApiServer {
     async fn get_filter_logs(&self, id: &str) -> Result<Vec<Log>> {
         node_info!("eth_getFilterLogs");
         if let Some(filter) = self.filters.get_log_filter(id).await {
-            Ok(self.eth_rpc_client.logs(Some(filter)).await?)
+            Ok(self.eth_rpc_client()?.logs(Some(filter)).await?)
         } else {
             Ok(Vec::new())
         }
@@ -1513,14 +1523,14 @@ impl ApiServer {
                 let n = block_number.try_into().map_err(|_| {
                     Error::InvalidParams("Block number conversion failed".to_string())
                 })?;
-                Ok(self.eth_rpc_client.get_block_hash(n).await?)
+                Ok(self.eth_rpc_client()?.get_block_hash(n).await?)
             }
             BlockNumberOrTagOrHash::BlockTag(BlockTag::Finalized | BlockTag::Safe) => {
-                let block = self.eth_rpc_client.latest_finalized_block().await;
+                let block = self.eth_rpc_client()?.latest_finalized_block().await;
                 Ok(Some(block.hash()))
             }
             BlockNumberOrTagOrHash::BlockTag(_) => {
-                let block = self.eth_rpc_client.latest_block().await;
+                let block = self.eth_rpc_client()?.latest_block().await;
                 Ok(Some(block.hash()))
             }
         }
@@ -1706,7 +1716,7 @@ impl ApiServer {
     ) -> Result<GethTrace> {
         node_info!("debug_traceTransaction");
         let trace = self
-            .eth_rpc_client
+            .eth_rpc_client()?
             .trace_transaction(
                 H256::from_slice(tx_hash.as_ref()),
                 ReviveTracerType::from(geth_tracer_options).inner(),
@@ -1723,7 +1733,7 @@ impl ApiServer {
     ) -> Result<GethTrace> {
         node_info!("debug_traceCall");
         let hash = self.get_block_hash_for_tag(block_number).await?;
-        let runtime_api = self.eth_rpc_client.runtime_api(hash);
+        let runtime_api = self.eth_rpc_client()?.runtime_api(hash);
         let transaction = convert_to_generic_transaction(request.into_inner());
         let trace = runtime_api
             .trace_call(transaction, ReviveTracerType::from(geth_tracer_options).inner())
@@ -1734,7 +1744,7 @@ impl ApiServer {
     async fn trace_transaction(&self, tx_hash: B256) -> Result<Vec<LocalizedTransactionTrace>> {
         node_info!("trace_transaction");
         let trace = self
-            .eth_rpc_client
+            .eth_rpc_client()?
             .trace_transaction(
                 H256::from_slice(tx_hash.as_ref()),
                 TracerType::CallTracer(Some(CallTracerConfig::default())),
@@ -1754,7 +1764,7 @@ impl ApiServer {
             return Ok(vec![]);
         };
         let traces = self
-            .eth_rpc_client
+            .eth_rpc_client()?
             .trace_block_by_number(
                 ReviveBlockNumberOrTag::from(block_number).inner(),
                 TracerType::CallTracer(Some(CallTracerConfig::default())),
@@ -1814,7 +1824,7 @@ impl ApiServer {
     }
 
     fn new_block_notifications(&self) -> Result<tokio::sync::broadcast::Receiver<H256>> {
-        self.eth_rpc_client
+        self.eth_rpc_client()?
             .block_notifier()
             .map(|sender| sender.subscribe())
             .ok_or(Error::InternalError("Could not subscribe to new blocks. 😢".to_string()))
@@ -1884,51 +1894,86 @@ async fn create_online_client(
         )));
     };
 
-    let Ok(runtime_version) = substrate_service.client.runtime_version_at(genesis_hash) else {
-        return Err(Error::InternalError(
-            "Runtime version not found for given genesis hash".to_string(),
-        ));
-    };
+    // In fork mode, fetch metadata from remote RPC to avoid Tokio runtime conflicts
+    // Note: Remote metadata may not have ReviveApi, so we skip block processing in fork mode
+    if let Some(fork_url) = &substrate_service.fork_url {
+        use jsonrpsee::core::client::ClientT;
+        use subxt::ext::jsonrpsee::core::params::ArrayParams as RpcParams;
 
-    let subxt_runtime_version = SubxtRuntimeVersion {
-        spec_version: runtime_version.spec_version,
-        transaction_version: runtime_version.transaction_version,
-    };
+        let http_client = jsonrpsee::http_client::HttpClientBuilder::default()
+            .max_request_size(u32::MAX)
+            .max_response_size(u32::MAX)
+            .request_timeout(std::time::Duration::from_secs(30))
+            .build(fork_url)
+            .map_err(|e| Error::InternalError(format!("Failed to build HTTP client: {e}")))?;
 
-    let Ok(supported_metadata_versions) =
-        substrate_service.client.runtime_api().metadata_versions(genesis_hash)
-    else {
-        return Err(Error::InternalError("Unable to fetch metadata versions".to_string()));
-    };
+        let runtime_version: polkadot_sdk::sp_version::RuntimeVersion = http_client
+            .request("state_getRuntimeVersion", RpcParams::new())
+            .await
+            .map_err(|e| Error::InternalError(format!("Failed to fetch runtime version: {e}")))?;
 
-    let Some(latest_metadata_version) = supported_metadata_versions.into_iter().max() else {
-        return Err(Error::InternalError("No stable metadata versions supported".to_string()));
-    };
+        let subxt_runtime_version = SubxtRuntimeVersion {
+            spec_version: runtime_version.spec_version,
+            transaction_version: runtime_version.transaction_version,
+        };
 
-    let opaque_metadata = substrate_service
-        .client
-        .runtime_api()
-        .metadata_at_version(genesis_hash, latest_metadata_version)
-        .map_err(|_| {
-            Error::InternalError("Failed to get runtime API for genesis hash".to_string())
-        })?
-        .ok_or_else(|| {
-            Error::InternalError(format!(
-                "Metadata not found for version {latest_metadata_version} at genesis hash"
-            ))
-        })?;
-    let subxt_metadata = SubxtMetadata::decode(&mut (*opaque_metadata).as_slice())
-        .map_err(|_| Error::InternalError("Unable to decode metadata".to_string()))?;
+        let metadata_hex: String = http_client
+            .request("state_getMetadata", RpcParams::new())
+            .await
+            .map_err(|e| Error::InternalError(format!("Failed to fetch metadata: {e}")))?;
 
-    OnlineClient::<SrcChainConfig>::from_rpc_client_with(
-        genesis_hash,
-        subxt_runtime_version,
-        subxt_metadata,
-        rpc_client,
-    )
-    .map_err(|err| {
-        Error::InternalError(format!("Failed to initialize the subxt online client: {err}"))
-    })
+        let metadata_bytes = hex::decode(metadata_hex.trim_start_matches("0x"))
+            .map_err(|e| Error::InternalError(format!("Failed to decode metadata: {e}")))?;
+
+        let subxt_metadata = SubxtMetadata::decode(&mut &metadata_bytes[..])
+            .map_err(|e| Error::InternalError(format!("Failed to decode metadata: {e}")))?;
+
+        OnlineClient::<SrcChainConfig>::from_rpc_client_with(
+            genesis_hash,
+            subxt_runtime_version,
+            subxt_metadata,
+            rpc_client,
+        )
+        .map_err(|err| Error::InternalError(format!("Failed to initialize online client: {err}")))
+    } else {
+        // Normal mode: use local runtime metadata
+        let Ok(runtime_version) = substrate_service.client.runtime_version_at(genesis_hash) else {
+            return Err(Error::InternalError("Runtime version not found".to_string()));
+        };
+
+        let subxt_runtime_version = SubxtRuntimeVersion {
+            spec_version: runtime_version.spec_version,
+            transaction_version: runtime_version.transaction_version,
+        };
+
+        let Ok(supported_metadata_versions) =
+            substrate_service.client.runtime_api().metadata_versions(genesis_hash)
+        else {
+            return Err(Error::InternalError("Unable to fetch metadata versions".to_string()));
+        };
+
+        let Some(latest_metadata_version) = supported_metadata_versions.into_iter().max() else {
+            return Err(Error::InternalError("No stable metadata versions supported".to_string()));
+        };
+
+        let opaque_metadata = substrate_service
+            .client
+            .runtime_api()
+            .metadata_at_version(genesis_hash, latest_metadata_version)
+            .map_err(|_| Error::InternalError("Failed to get runtime API".to_string()))?
+            .ok_or_else(|| Error::InternalError(format!("Metadata not found for version {latest_metadata_version}")))?;
+
+        let subxt_metadata = SubxtMetadata::decode(&mut (*opaque_metadata).as_slice())
+            .map_err(|_| Error::InternalError("Unable to decode metadata".to_string()))?;
+
+        OnlineClient::<SrcChainConfig>::from_rpc_client_with(
+            genesis_hash,
+            subxt_runtime_version,
+            subxt_metadata,
+            rpc_client,
+        )
+        .map_err(|err| Error::InternalError(format!("Failed to initialize online client: {err}")))
+    }
 }
 
 async fn create_revive_rpc_client(
@@ -1938,7 +1983,24 @@ async fn create_revive_rpc_client(
     block_provider: SubxtBlockInfoProvider,
     task_spawn_handle: SpawnTaskHandle,
     keep_latest_n_blocks: Option<usize>,
-) -> Result<EthRpcClient> {
+    in_fork_mode: bool,
+) -> Result<Option<EthRpcClient>> {
+    // In fork mode, check if ReviveApi exists in metadata before proceeding
+    if in_fork_mode {
+        let metadata = api.metadata();
+        let has_revive_api = metadata.runtime_api_traits().any(|trait_metadata| {
+            trait_metadata.name() == "ReviveApi"
+        });
+
+        if !has_revive_api {
+            tracing::warn!(
+                "ReviveApi runtime trait not found in metadata. \
+                Forking in limited mode - EVM RPC functionality will not be available."
+            );
+            return Ok(None);
+        }
+    }
+
     let pool = SqlitePoolOptions::new()
         .max_connections(1)
         // see sqlite in-memory issue: https://github.com/launchbadge/sqlx/issues/2510
@@ -1948,6 +2010,7 @@ async fn create_revive_rpc_client(
         .await
         .map_err(|err| Error::ReviveRpc(EthRpcError::ClientError(ClientError::SqlxError(err))))?;
 
+    // Create ReceiptExtractor - this should succeed if ReviveApi is present
     let receipt_extractor = ReceiptExtractor::new_with_custom_address_recovery(
         api.clone(),
         None,
@@ -1968,20 +2031,23 @@ async fn create_revive_rpc_client(
             .await
             .map_err(Error::from)?;
 
-    // Capacity is chosen using random.org
-    eth_rpc_client.set_block_notifier(Some(tokio::sync::broadcast::channel::<H256>(50).0));
-    let eth_rpc_client_clone = eth_rpc_client.clone();
-    task_spawn_handle.spawn("block-subscription", "None", async move {
-        let eth_rpc_client = eth_rpc_client_clone;
-        let best_future =
-            eth_rpc_client.subscribe_and_cache_new_blocks(SubscriptionType::BestBlocks);
-        let finalized_future =
-            eth_rpc_client.subscribe_and_cache_new_blocks(SubscriptionType::FinalizedBlocks);
-        let res = tokio::try_join!(best_future, finalized_future).map(|_| ());
-        if let Err(err) = res {
-            panic!("Block subscription task failed: {err:?}")
-        }
-    });
+    // Skip block subscription task in fork mode since it requires ReviveApi
+    if !in_fork_mode {
+        // Capacity is chosen using random.org
+        eth_rpc_client.set_block_notifier(Some(tokio::sync::broadcast::channel::<H256>(50).0));
+        let eth_rpc_client_clone = eth_rpc_client.clone();
+        task_spawn_handle.spawn("block-subscription", "None", async move {
+            let eth_rpc_client = eth_rpc_client_clone;
+            let best_future =
+                eth_rpc_client.subscribe_and_cache_new_blocks(SubscriptionType::BestBlocks);
+            let finalized_future =
+                eth_rpc_client.subscribe_and_cache_new_blocks(SubscriptionType::FinalizedBlocks);
+            let res = tokio::try_join!(best_future, finalized_future).map(|_| ());
+            if let Err(err) = res {
+                panic!("Block subscription task failed: {err:?}")
+            }
+        });
+    }
 
-    Ok(eth_rpc_client)
+    Ok(Some(eth_rpc_client))
 }
