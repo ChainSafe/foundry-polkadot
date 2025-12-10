@@ -12,7 +12,7 @@ use anvil_polkadot::{
     api_server::revive_conversions::ReviveAddress,
     config::{AnvilNodeConfig, ForkChoice, SubstrateNodeConfig},
 };
-use polkadot_sdk::pallet_revive::evm::Account;
+use polkadot_sdk::{pallet_revive::evm::Account, sp_blockchain::HeaderBackend, sp_core::H256};
 
 /// Tests that forking preserves state from the source chain and allows local modifications
 #[tokio::test(flavor = "multi_thread")]
@@ -411,6 +411,64 @@ async fn test_fork_from_negative_block_number() {
     // Step 7: Verify fork advanced to block 4
     let fork_new_block = fork_node.best_block_number().await;
     assert_eq!(fork_new_block, 4, "Forked node should be at block 4");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_fork_from_westend_assethub() {
+    // Step 1: Set a specific block height to fork from
+    let fork_block_number = 13268000;
+    let assethub_rpc_url = "https://westend-asset-hub-rpc.polkadot.io".to_string();
+
+    // Step 2: Create a forked node from Westend AssetHub at the specific block
+    let fork_config = AnvilNodeConfig::test_config()
+        .with_port(0)
+        .with_eth_rpc_url(Some(assethub_rpc_url.clone()))
+        .with_fork_block_number(Some(fork_block_number as u64));
+
+    let fork_substrate_config = SubstrateNodeConfig::new(&fork_config);
+
+    // Step 3: Verify the forked node can start successfully
+    let mut fork_node = match TestNode::new(fork_config.clone(), fork_substrate_config).await {
+        Ok(node) => node,
+        Err(e) => {
+            panic!("Failed to start forked node from AssetHub: {e}");
+        }
+    };
+
+    // Step 4: Get the initial block number from the fork
+    let fork_initial_block = fork_node.best_block_number().await;
+
+    // Verify the fork started at the expected block number
+    assert_eq!(
+        fork_initial_block, fork_block_number,
+        "Fork should start from block {fork_block_number}"
+    );
+
+    // Step 5: Query AssetHub to get expected block hash
+    let rpc_client = fork_node
+        .service
+        .backend
+        .rpc()
+        .expect("Fork mode should have RPC client configured");
+
+    let expected_block_hash: H256 = rpc_client
+        .block_hash(Some(fork_block_number))
+        .expect("Failed to get block hash from AssetHub RPC")
+        .expect("Block not found on AssetHub");
+
+    // Step 6: Get the Substrate block hash from the forked node's client
+    let fork_substrate_hash = fork_node
+        .service
+        .client
+        .hash(fork_initial_block)
+        .expect("Failed to get block hash")
+        .expect("Block should exist");
+
+    // Step 7: Verify the fork's Substrate block hash matches the expected hash from AssetHub
+    assert_eq!(
+        fork_substrate_hash, expected_block_hash,
+        "Fork Substrate block hash should match AssetHub block hash at block {fork_block_number}"
+    );
 }
 
 /// Tests that forking preserves contract state from source chain and that multiple contract
