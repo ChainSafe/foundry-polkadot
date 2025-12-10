@@ -37,7 +37,7 @@ use crate::{
 };
 use alloy_dyn_abi::TypedData;
 use alloy_eips::{BlockId, BlockNumberOrTag};
-use alloy_primitives::{hex, Address, B256, U64, U256};
+use alloy_primitives::{Address, B256, U64, U256};
 use alloy_rpc_types::{
     Filter, TransactionRequest,
     anvil::{Forking, Metadata as AnvilMetadata, MineOptions, NodeEnvironment, NodeInfo},
@@ -1894,58 +1894,26 @@ async fn create_online_client(
         )));
     };
 
-    // In fork mode, fetch metadata from remote RPC to avoid Tokio runtime conflicts
-    // Note: Remote metadata may not have ReviveApi, so we skip block processing in fork mode
-    if let Some(fork_url) = &substrate_service.fork_url {
-        use jsonrpsee::core::client::ClientT;
-        use subxt::ext::jsonrpsee::core::params::ArrayParams as RpcParams;
+    // Fetch runtime version - this works without triggering lazy loading
+    let Ok(runtime_version) = substrate_service.client.runtime_version_at(genesis_hash) else {
+        return Err(Error::InternalError("Runtime version not found".to_string()));
+    };
 
-        let http_client = jsonrpsee::http_client::HttpClientBuilder::default()
-            .max_request_size(u32::MAX)
-            .max_response_size(u32::MAX)
-            .request_timeout(std::time::Duration::from_secs(30))
-            .build(fork_url)
-            .map_err(|e| Error::InternalError(format!("Failed to build HTTP client: {e}")))?;
+    let subxt_runtime_version = SubxtRuntimeVersion {
+        spec_version: runtime_version.spec_version,
+        transaction_version: runtime_version.transaction_version,
+    };
 
-        let runtime_version: polkadot_sdk::sp_version::RuntimeVersion = http_client
-            .request("state_getRuntimeVersion", RpcParams::new())
+    // In fork mode, use OnlineClient::from_rpc_client() which fetches metadata from RPC automatically
+    // In normal mode, use local client metadata to avoid unnecessary RPC calls
+    if substrate_service.backend.rpc().is_some() {
+        // Fork mode: Let OnlineClient fetch metadata from the remote RPC
+        // This avoids triggering the lazy loading backend during initialization
+        OnlineClient::<SrcChainConfig>::from_rpc_client(rpc_client)
             .await
-            .map_err(|e| Error::InternalError(format!("Failed to fetch runtime version: {e}")))?;
-
-        let subxt_runtime_version = SubxtRuntimeVersion {
-            spec_version: runtime_version.spec_version,
-            transaction_version: runtime_version.transaction_version,
-        };
-
-        let metadata_hex: String = http_client
-            .request("state_getMetadata", RpcParams::new())
-            .await
-            .map_err(|e| Error::InternalError(format!("Failed to fetch metadata: {e}")))?;
-
-        let metadata_bytes = hex::decode(metadata_hex.trim_start_matches("0x"))
-            .map_err(|e| Error::InternalError(format!("Failed to decode metadata: {e}")))?;
-
-        let subxt_metadata = SubxtMetadata::decode(&mut &metadata_bytes[..])
-            .map_err(|e| Error::InternalError(format!("Failed to decode metadata: {e}")))?;
-
-        OnlineClient::<SrcChainConfig>::from_rpc_client_with(
-            genesis_hash,
-            subxt_runtime_version,
-            subxt_metadata,
-            rpc_client,
-        )
-        .map_err(|err| Error::InternalError(format!("Failed to initialize online client: {err}")))
+            .map_err(|err| Error::InternalError(format!("Failed to initialize online client from RPC: {err}")))
     } else {
-        // Normal mode: use local runtime metadata
-        let Ok(runtime_version) = substrate_service.client.runtime_version_at(genesis_hash) else {
-            return Err(Error::InternalError("Runtime version not found".to_string()));
-        };
-
-        let subxt_runtime_version = SubxtRuntimeVersion {
-            spec_version: runtime_version.spec_version,
-            transaction_version: runtime_version.transaction_version,
-        };
-
+        // Normal mode: Use local client runtime API (no lazy loading involved)
         let Ok(supported_metadata_versions) =
             substrate_service.client.runtime_api().metadata_versions(genesis_hash)
         else {
@@ -1961,7 +1929,9 @@ async fn create_online_client(
             .runtime_api()
             .metadata_at_version(genesis_hash, latest_metadata_version)
             .map_err(|_| Error::InternalError("Failed to get runtime API".to_string()))?
-            .ok_or_else(|| Error::InternalError(format!("Metadata not found for version {latest_metadata_version}")))?;
+            .ok_or_else(|| {
+                Error::InternalError(format!("Metadata not found for version {latest_metadata_version}"))
+            })?;
 
         let subxt_metadata = SubxtMetadata::decode(&mut (*opaque_metadata).as_slice())
             .map_err(|_| Error::InternalError("Unable to decode metadata".to_string()))?;
@@ -1985,22 +1955,57 @@ async fn create_revive_rpc_client(
     keep_latest_n_blocks: Option<usize>,
     in_fork_mode: bool,
 ) -> Result<Option<EthRpcClient>> {
-    // In fork mode, check if ReviveApi exists in metadata before proceeding
+    // In fork mode, try to create the EthRpcClient. If it fails (e.g., ReviveApi not available),
+    // return None to indicate limited mode without EVM RPC functionality.
+    // This is more robust than checking metadata, which may not include runtime API information.
     if in_fork_mode {
-        let metadata = api.metadata();
-        let has_revive_api = metadata.runtime_api_traits().any(|trait_metadata| {
-            trait_metadata.name() == "ReviveApi"
-        });
-
-        if !has_revive_api {
-            tracing::warn!(
-                "ReviveApi runtime trait not found in metadata. \
-                Forking in limited mode - EVM RPC functionality will not be available."
-            );
-            return Ok(None);
+        // Try to create the client - if ReviveApi doesn't exist, this will fail
+        match create_revive_client_impl(
+            api.clone(),
+            rpc_client.clone(),
+            rpc.clone(),
+            block_provider.clone(),
+            task_spawn_handle.clone(),
+            keep_latest_n_blocks,
+        )
+        .await
+        {
+            Ok(client) => {
+                tracing::info!("ReviveApi available - EVM RPC functionality enabled");
+                return Ok(Some(client));
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "ReviveApi not available in forked chain: {}. \
+                    Forking in limited mode - EVM RPC functionality will not be available.",
+                    e
+                );
+                return Ok(None);
+            }
         }
     }
 
+    // Normal mode: create the client and return errors if it fails
+    create_revive_client_impl(
+        api,
+        rpc_client,
+        rpc,
+        block_provider,
+        task_spawn_handle,
+        keep_latest_n_blocks,
+    )
+    .await
+    .map(Some)
+}
+
+async fn create_revive_client_impl(
+    api: OnlineClient<SrcChainConfig>,
+    rpc_client: RpcClient,
+    rpc: LegacyRpcMethods<SrcChainConfig>,
+    block_provider: SubxtBlockInfoProvider,
+    task_spawn_handle: SpawnTaskHandle,
+    keep_latest_n_blocks: Option<usize>,
+) -> Result<EthRpcClient> {
     let pool = SqlitePoolOptions::new()
         .max_connections(1)
         // see sqlite in-memory issue: https://github.com/launchbadge/sqlx/issues/2510
@@ -2031,23 +2036,20 @@ async fn create_revive_rpc_client(
             .await
             .map_err(Error::from)?;
 
-    // Skip block subscription task in fork mode since it requires ReviveApi
-    if !in_fork_mode {
-        // Capacity is chosen using random.org
-        eth_rpc_client.set_block_notifier(Some(tokio::sync::broadcast::channel::<H256>(50).0));
-        let eth_rpc_client_clone = eth_rpc_client.clone();
-        task_spawn_handle.spawn("block-subscription", "None", async move {
-            let eth_rpc_client = eth_rpc_client_clone;
-            let best_future =
-                eth_rpc_client.subscribe_and_cache_new_blocks(SubscriptionType::BestBlocks);
-            let finalized_future =
-                eth_rpc_client.subscribe_and_cache_new_blocks(SubscriptionType::FinalizedBlocks);
-            let res = tokio::try_join!(best_future, finalized_future).map(|_| ());
-            if let Err(err) = res {
-                panic!("Block subscription task failed: {err:?}")
-            }
-        });
-    }
+    // Capacity is chosen using random.org
+    eth_rpc_client.set_block_notifier(Some(tokio::sync::broadcast::channel::<H256>(50).0));
+    let eth_rpc_client_clone = eth_rpc_client.clone();
+    task_spawn_handle.spawn("block-subscription", "None", async move {
+        let eth_rpc_client = eth_rpc_client_clone;
+        let best_future =
+            eth_rpc_client.subscribe_and_cache_new_blocks(SubscriptionType::BestBlocks);
+        let finalized_future =
+            eth_rpc_client.subscribe_and_cache_new_blocks(SubscriptionType::FinalizedBlocks);
+        let res = tokio::try_join!(best_future, finalized_future).map(|_| ());
+        if let Err(err) = res {
+            panic!("Block subscription task failed: {err:?}")
+        }
+    });
 
-    Ok(Some(eth_rpc_client))
+    Ok(eth_rpc_client)
 }
