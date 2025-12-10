@@ -1967,7 +1967,6 @@ async fn create_revive_rpc_client(
             block_provider.clone(),
             task_spawn_handle.clone(),
             keep_latest_n_blocks,
-            in_fork_mode,
         )
         .await
         {
@@ -1994,7 +1993,6 @@ async fn create_revive_rpc_client(
         block_provider,
         task_spawn_handle,
         keep_latest_n_blocks,
-        in_fork_mode,
     )
     .await
     .map(Some)
@@ -2007,7 +2005,6 @@ async fn create_revive_client_impl(
     block_provider: SubxtBlockInfoProvider,
     task_spawn_handle: SpawnTaskHandle,
     keep_latest_n_blocks: Option<usize>,
-    in_fork_mode: bool,
 ) -> Result<EthRpcClient> {
     let pool = SqlitePoolOptions::new()
         .max_connections(1)
@@ -2041,28 +2038,18 @@ async fn create_revive_client_impl(
 
     // Capacity is chosen using random.org
     eth_rpc_client.set_block_notifier(Some(tokio::sync::broadcast::channel::<H256>(50).0));
-
-    // In fork mode, skip block subscription to avoid ReceiptDataNotFound errors
-    // when processing blocks from the remote chain. In fork mode, we create our own
-    // local blocks using manual-seal, and don't need to subscribe to remote blocks.
-    if !in_fork_mode {
-        let eth_rpc_client_clone = eth_rpc_client.clone();
-        task_spawn_handle.spawn("block-subscription", "None", async move {
-            let eth_rpc_client = eth_rpc_client_clone;
-            let best_future =
-                eth_rpc_client.subscribe_and_cache_new_blocks(SubscriptionType::BestBlocks);
-            let finalized_future =
-                eth_rpc_client.subscribe_and_cache_new_blocks(SubscriptionType::FinalizedBlocks);
-            let res = tokio::try_join!(best_future, finalized_future).map(|_| ());
-            if let Err(err) = res {
-                panic!("Block subscription task failed: {err:?}")
-            }
-        });
-    } else {
-        tracing::info!(
-            "Skipping block subscription in fork mode - blocks will be created locally via manual-seal"
-        );
-    }
+    let eth_rpc_client_clone = eth_rpc_client.clone();
+    task_spawn_handle.spawn("block-subscription", "None", async move {
+        let eth_rpc_client = eth_rpc_client_clone;
+        let best_future =
+            eth_rpc_client.subscribe_and_cache_new_blocks(SubscriptionType::BestBlocks);
+        let finalized_future =
+            eth_rpc_client.subscribe_and_cache_new_blocks(SubscriptionType::FinalizedBlocks);
+        let res = tokio::try_join!(best_future, finalized_future).map(|_| ());
+        if let Err(err) = res {
+            panic!("Block subscription task failed: {err:?}")
+        }
+    });
 
     Ok(eth_rpc_client)
 }
