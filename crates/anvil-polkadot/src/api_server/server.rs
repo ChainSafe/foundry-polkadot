@@ -1868,20 +1868,28 @@ async fn create_online_client(
     substrate_service: &Service,
     rpc_client: RpcClient,
 ) -> Result<OnlineClient<SrcChainConfig>> {
-    let genesis_block_number = substrate_service.genesis_block_number.try_into().map_err(|_| {
-        Error::InternalError(format!(
-            "Genesis block number {} is too large for u32 (max: {})",
-            substrate_service.genesis_block_number,
-            u32::MAX
-        ))
-    })?;
+    // In fork mode, use the checkpoint hash directly to avoid lazy loading issues
+    // In normal mode, get the hash from the genesis block number
+    let genesis_hash = if let Some(checkpoint_hash) = substrate_service.checkpoint_hash {
+        // Fork mode: use the actual checkpoint block hash
+        checkpoint_hash
+    } else {
+        // Normal mode: get hash from genesis block number
+        let genesis_block_number = substrate_service.genesis_block_number.try_into().map_err(|_| {
+            Error::InternalError(format!(
+                "Genesis block number {} is too large for u32 (max: {})",
+                substrate_service.genesis_block_number,
+                u32::MAX
+            ))
+        })?;
 
-    let Some(genesis_hash) = substrate_service.client.hash(genesis_block_number).ok().flatten()
-    else {
-        return Err(Error::InternalError(format!(
-            "Genesis hash not found for genesis block number {}",
-            substrate_service.genesis_block_number
-        )));
+        let Some(hash) = substrate_service.client.hash(genesis_block_number).ok().flatten() else {
+            return Err(Error::InternalError(format!(
+                "Genesis hash not found for genesis block number {}",
+                substrate_service.genesis_block_number
+            )));
+        };
+        hash
     };
 
     let Ok(runtime_version) = substrate_service.client.runtime_version_at(genesis_hash) else {
