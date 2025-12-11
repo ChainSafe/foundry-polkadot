@@ -56,7 +56,7 @@ impl<Block: BlockT + DeserializeOwned> Backend<Block> {
     }
 
     #[inline]
-    fn fork_checkpoint(&self) -> Option<&Block::Header> {
+    pub fn fork_checkpoint(&self) -> Option<&Block::Header> {
         self.fork_config.as_ref().map(|(_, checkpoint)| checkpoint)
     }
 }

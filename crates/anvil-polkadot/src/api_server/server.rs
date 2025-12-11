@@ -63,7 +63,6 @@ use pallet_revive_eth_rpc::{
     },
 };
 use polkadot_sdk::{
-    cumulus_primitives_core::GetParachainInfo,
     pallet_revive::{
         ReviveApi,
         evm::{
@@ -113,6 +112,13 @@ pub struct ApiServer {
     instance_id: B256,
     /// Tracks all active filters
     filters: Filters,
+    hardcoded_chain_id: u64,
+}
+
+/// Fetch the chain ID from the substrate chain.
+async fn chain_id(api: &OnlineClient<SrcChainConfig>) -> Result<u64> {
+    let query = subxt_client::constants().revive().chain_id();
+    api.constants().at(&query).map_err(|err| err.into())
 }
 
 impl ApiServer {
@@ -141,6 +147,16 @@ impl ApiServer {
         )
         .await?;
 
+        let backend = BackendWithOverlay::new(
+            substrate_service.backend.clone(),
+            substrate_service.storage_overrides.clone(),
+        );
+
+        // When forking we need to use the chain ID of the forked network, but for non-forking we do
+        // not want to use this as we allow for the chain_id to be customized. So we will
+        // not write this to the backend, but cache it to use if we are forking.
+        let chain_id = chain_id(&api).await?;
+
         let filters_clone = filters.clone();
         substrate_service.spawn_handle.spawn("filter-eviction-task", "None", async move {
             eviction_task(filters_clone).await;
@@ -149,10 +165,7 @@ impl ApiServer {
             block_provider,
             req_receiver,
             logging_manager,
-            backend: BackendWithOverlay::new(
-                substrate_service.backend.clone(),
-                substrate_service.storage_overrides.clone(),
-            ),
+            backend,
             client: substrate_service.client.clone(),
             mining_engine: substrate_service.mining_engine.clone(),
             eth_rpc_client,
@@ -162,6 +175,7 @@ impl ApiServer {
             wallet: DevSigner::new(signers)?,
             instance_id: B256::random(),
             filters,
+            hardcoded_chain_id: chain_id,
         })
     }
 
@@ -618,25 +632,17 @@ impl ApiServer {
         Ok(())
     }
 
-    fn chain_id(&self, at: Hash) -> u64 {
-        // .expect("Chain ID is populated on genesis");
+    fn chain_id_from_metadata(&self, at: Hash) -> u64 {
         let id_res = self.backend.read_chain_id(at);
 
-        let para_id = match id_res {
+        let id = match id_res {
             Ok(id) => id,
-            Err(_) => {
-                let id = self
-                    .client
-                    .runtime_api()
-                    .parachain_id(at)
-                    .expect("retrieving chain id from runtime");
-
-                let id_u64: u32 = id.into();
-                id_u64 as u64
-            }
+            // If chain_id is not found in the backend, we are forking so use the cached chain_id
+            // from the forked network
+            Err(_) => self.hardcoded_chain_id,
         };
 
-        para_id
+        id
     }
 
     // Eth RPCs
@@ -644,14 +650,14 @@ impl ApiServer {
         node_info!("eth_chainId");
         let latest_block = self.latest_block();
 
-        Ok(U256::from(self.chain_id(latest_block)).to::<U64>())
+        Ok(U256::from(self.chain_id_from_metadata(latest_block)).to::<U64>())
     }
 
     fn network_id(&self) -> Result<u64> {
         node_info!("eth_networkId");
         let latest_block = self.latest_block();
 
-        Ok(self.chain_id(latest_block))
+        Ok(self.chain_id_from_metadata(latest_block))
     }
 
     fn net_listening(&self) -> Result<bool> {
@@ -847,8 +853,9 @@ impl ApiServer {
 
         if transaction.chain_id.is_none() {
             println!("chain id is none");
-            transaction.chain_id =
-                Some(sp_core::U256::from_big_endian(&self.chain_id(latest_block).to_be_bytes()));
+            transaction.chain_id = Some(sp_core::U256::from_big_endian(
+                &self.chain_id_from_metadata(latest_block).to_be_bytes(),
+            ));
         }
 
         let tx = transaction
@@ -985,7 +992,7 @@ impl ApiServer {
             transaction_order: "fifo".to_string(),
             environment: NodeEnvironment {
                 base_fee,
-                chain_id: self.chain_id(best_hash),
+                chain_id: self.chain_id_from_metadata(best_hash),
                 gas_limit,
                 gas_price: base_fee,
             },
@@ -1008,7 +1015,7 @@ impl ApiServer {
 
         Ok(AnvilMetadata {
             client_version: CLIENT_VERSION.to_string(),
-            chain_id: self.chain_id(best_hash),
+            chain_id: self.chain_id_from_metadata(best_hash),
             latest_block_hash: B256::from_slice(best_hash.as_ref()),
             latest_block_number,
             instance_id: self.instance_id,
@@ -1861,20 +1868,28 @@ async fn create_online_client(
     substrate_service: &Service,
     rpc_client: RpcClient,
 ) -> Result<OnlineClient<SrcChainConfig>> {
-    let genesis_block_number = substrate_service.genesis_block_number.try_into().map_err(|_| {
-        Error::InternalError(format!(
-            "Genesis block number {} is too large for u32 (max: {})",
-            substrate_service.genesis_block_number,
-            u32::MAX
-        ))
-    })?;
+    // In fork mode, use the checkpoint hash directly to avoid lazy loading issues
+    // In normal mode, get the hash from the genesis block number
+    let genesis_hash = if let Some(checkpoint_hash) = substrate_service.checkpoint_hash {
+        // Fork mode: use the actual checkpoint block hash
+        checkpoint_hash
+    } else {
+        // Normal mode: get hash from genesis block number
+        let genesis_block_number = substrate_service.genesis_block_number.try_into().map_err(|_| {
+            Error::InternalError(format!(
+                "Genesis block number {} is too large for u32 (max: {})",
+                substrate_service.genesis_block_number,
+                u32::MAX
+            ))
+        })?;
 
-    let Some(genesis_hash) = substrate_service.client.hash(genesis_block_number).ok().flatten()
-    else {
-        return Err(Error::InternalError(format!(
-            "Genesis hash not found for genesis block number {}",
-            substrate_service.genesis_block_number
-        )));
+        let Some(hash) = substrate_service.client.hash(genesis_block_number).ok().flatten() else {
+            return Err(Error::InternalError(format!(
+                "Genesis hash not found for genesis block number {}",
+                substrate_service.genesis_block_number
+            )));
+        };
+        hash
     };
 
     let Ok(runtime_version) = substrate_service.client.runtime_version_at(genesis_hash) else {
@@ -1888,59 +1903,30 @@ async fn create_online_client(
         transaction_version: runtime_version.transaction_version,
     };
 
-    // In fork mode, use RPC to fetch metadata directly to avoid lazy loading issues
-    // In normal mode, use the local runtime API
-    let subxt_metadata = if let Some(fork_url) = &substrate_service.fork_url {
-        // Fork mode: Create a temporary RPC client pointing to the remote fork URL
-        // to fetch metadata directly, avoiding lazy loading backend issues
-
-        // Convert HTTP(S) URLs to WebSocket URLs (ws/wss) as required by RpcClient
-        let ws_url = fork_url.replace("https://", "wss://").replace("http://", "ws://");
-
-        let remote_client = subxt::backend::rpc::RpcClient::from_url(&ws_url)
-            .await
-            .map_err(|err| {
-                Error::InternalError(format!(
-                    "Failed to connect to fork URL for metadata fetch: {err}"
-                ))
-            })?;
-
-        OnlineClient::<SrcChainConfig>::from_rpc_client(remote_client)
-            .await
-            .map_err(|err| {
-                Error::InternalError(format!(
-                    "Failed to create temporary client for metadata fetch in fork mode: {err}"
-                ))
-            })?
-            .metadata()
-            .clone()
-    } else {
-        // Normal mode: use local runtime API
-        let Ok(supported_metadata_versions) =
-            substrate_service.client.runtime_api().metadata_versions(genesis_hash)
-        else {
-            return Err(Error::InternalError("Unable to fetch metadata versions".to_string()));
-        };
-
-        let Some(latest_metadata_version) = supported_metadata_versions.into_iter().max() else {
-            return Err(Error::InternalError("No stable metadata versions supported".to_string()));
-        };
-
-        let opaque_metadata = substrate_service
-            .client
-            .runtime_api()
-            .metadata_at_version(genesis_hash, latest_metadata_version)
-            .map_err(|_| {
-                Error::InternalError("Failed to get runtime API for genesis hash".to_string())
-            })?
-            .ok_or_else(|| {
-                Error::InternalError(format!(
-                    "Metadata not found for version {latest_metadata_version} at genesis hash"
-                ))
-            })?;
-        SubxtMetadata::decode(&mut (*opaque_metadata).as_slice())
-            .map_err(|_| Error::InternalError("Unable to decode metadata".to_string()))?
+    let Ok(supported_metadata_versions) =
+        substrate_service.client.runtime_api().metadata_versions(genesis_hash)
+    else {
+        return Err(Error::InternalError("Unable to fetch metadata versions".to_string()));
     };
+
+    let Some(latest_metadata_version) = supported_metadata_versions.into_iter().max() else {
+        return Err(Error::InternalError("No stable metadata versions supported".to_string()));
+    };
+
+    let opaque_metadata = substrate_service
+        .client
+        .runtime_api()
+        .metadata_at_version(genesis_hash, latest_metadata_version)
+        .map_err(|_| {
+            Error::InternalError("Failed to get runtime API for genesis hash".to_string())
+        })?
+        .ok_or_else(|| {
+            Error::InternalError(format!(
+                "Metadata not found for version {latest_metadata_version} at genesis hash"
+            ))
+        })?;
+    let subxt_metadata = SubxtMetadata::decode(&mut (*opaque_metadata).as_slice())
+        .map_err(|_| Error::InternalError("Unable to decode metadata".to_string()))?;
 
     OnlineClient::<SrcChainConfig>::from_rpc_client_with(
         genesis_hash,

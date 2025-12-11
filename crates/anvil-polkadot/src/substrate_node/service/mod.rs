@@ -56,6 +56,9 @@ pub struct Service {
     pub storage_overrides: Arc<Mutex<StorageOverrides>>,
     pub genesis_block_number: u64,
     pub fork_url: Option<String>,
+    /// Hash of the checkpoint block when in fork mode. Used to avoid lazy loading issues
+    /// when fetching metadata at startup.
+    pub checkpoint_hash: Option<Hash>,
 }
 
 type CreateInherentDataProviders = Box<
@@ -301,13 +304,14 @@ pub fn new(
         Service {
             spawn_handle: task_manager.spawn_handle(),
             client,
-            backend,
+            backend: backend.clone(),
             tx_pool: transaction_pool,
             rpc_handlers,
             mining_engine,
             storage_overrides,
             genesis_block_number: anvil_config.get_genesis_number(),
             fork_url: anvil_config.eth_rpc_url.clone(),
+            checkpoint_hash: backend.fork_checkpoint().map(|h| h.hash()),
         },
         task_manager,
     ))
