@@ -2,21 +2,24 @@ use std::time::Duration;
 
 use crate::{
     abi::SimpleStorage,
-    utils::{TestNode, get_contract_code, simplestorage_get_value, unwrap_response},
+    utils::{TestNode, get_contract_code, simplestorage_get_value,assert_with_tolerance, unwrap_response},
 };
 use alloy_primitives::{Address, Bytes, U256};
 use alloy_rpc_types::{TransactionInput, TransactionRequest};
 use alloy_sol_types::SolCall;
-use anvil_core::eth::EthRequest;
+use anvil_core::eth::{EthRequest, Params};
 use anvil_polkadot::{
-    api_server::revive_conversions::ReviveAddress,
+    api_server::revive_conversions::{AlloyU256, ReviveAddress},
     config::{AnvilNodeConfig, ForkChoice, SubstrateNodeConfig},
 };
-use polkadot_sdk::pallet_revive::evm::Account;
+use polkadot_sdk::pallet_revive::evm::{Account, ReceiptInfo};
+use subxt::utils::H160;
+use anvil_rpc::error::ErrorCode;
+use alloy_serde::WithOtherFields;
 
 /// Westend Asset Hub zombienet local URL for forking tests
 /// This URL should point to a running zombienet instance
-const WESTEND_ASSET_HUB_URL: &str = "http://127.0.0.1:63982";
+const WESTEND_ASSET_HUB_URL: &str = "http://127.0.0.1:51738";
 
 /// Tests that forking preserves state from the source chain and allows local modifications
 #[tokio::test(flavor = "multi_thread")]
@@ -981,3 +984,205 @@ async fn test_fork_can_send_tx_from_westend() {
     let final_block = fork_node.best_block_number().await;
     println!("Final block number: {}", final_block);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_fork_eth_get_balance_from_westend_non_zero() {
+    let fork_config = westend_fork_config();
+    let fork_substrate_config = SubstrateNodeConfig::new(&fork_config);
+    let mut fork_node = TestNode::new(fork_config.clone(), fork_substrate_config).await.unwrap();
+
+    // Get dev accounts
+    let alith = Account::from(subxt_signer::eth::dev::alith());
+    let alith_address = Address::from(ReviveAddress::new(alith.address()));
+    let baltathar = Account::from(subxt_signer::eth::dev::baltathar());
+
+    // Get balances from forked state
+    let alith_balance = fork_node.get_balance(alith.address(), None).await;
+    let baltathar_balance = fork_node.get_balance(baltathar.address(), None).await;
+
+    let initial_balance = U256::from(100_000_000_000_000_000_000u128); // 100 ether
+    unwrap_response::<()>(
+        fork_node
+            .eth_rpc(EthRequest::SetBalance(alith_address, initial_balance))
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+
+    // Dev accounts should have some balance in the forked state
+    // The exact balance depends on the state of the zombienet
+    println!("Alith balance in fork: {}", alith_balance);
+    println!("Baltathar balance in fork: {}", baltathar_balance);
+
+    // Mine a block and verify we can still get balances
+    unwrap_response::<()>(fork_node.eth_rpc(EthRequest::Mine(None, None)).await.unwrap()).unwrap();
+
+    let alith_balance_after_mine = fork_node.get_balance(alith.address(), None).await;
+    println!("Alith balance after mine: {}", alith_balance_after_mine);
+
+    // Balance should be the same (no transactions were made)
+    assert_eq!(initial_balance, alith_balance_after_mine, "Balance should not change after mining empty block");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_impersonate_account_fork() {
+    let fork_config = westend_fork_config();
+    let fork_substrate_config = SubstrateNodeConfig::new(&fork_config);
+    let mut fork_node = TestNode::new(fork_config.clone(), fork_substrate_config).await.unwrap();
+
+    // Enable automine.
+    unwrap_response::<()>(fork_node.eth_rpc(EthRequest::SetAutomine(true)).await.unwrap()).unwrap();
+
+    // Create a random account.
+    let alith_account = Account::from(subxt_signer::eth::dev::alith());
+    let alith_addr = Address::from(ReviveAddress::new(alith_account.address()));
+
+    let initial_balance = U256::from(100_000_000_000_000_000_000u128); // 100 ether
+    unwrap_response::<()>(
+        fork_node
+            .eth_rpc(EthRequest::SetBalance(alith_addr, initial_balance))
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+
+    let transfer_amount = U256::from(16e17);
+    let (dest_addr, _) =
+        fork_node.eth_transfer_to_unitialized_random_account(alith_addr, transfer_amount).await;
+    let dest_h160 = H160::from_slice(dest_addr.as_slice());
+
+    // Impersonate destination
+    unwrap_response::<()>(fork_node.eth_rpc(EthRequest::ImpersonateAccount(dest_addr)).await.unwrap())
+        .unwrap();
+    let transfer_amount = U256::from(1e11);
+    let alith_balance = fork_node.get_balance(alith_account.address(), None).await;
+    let dest_balance = fork_node.get_balance(dest_h160, None).await;
+    let transaction =
+        TransactionRequest::default().value(transfer_amount).from(dest_addr).to(alith_addr);
+    let tx_hash = fork_node.send_transaction(transaction).await.unwrap();
+    let receipt_info = fork_node.get_transaction_receipt(tx_hash).await;
+
+    // Assert on balances after second transfer.
+    let alith_final_balance = fork_node.get_balance(alith_account.address(), None).await;
+    let dest_final_balance = fork_node.get_balance(dest_h160, None).await;
+    assert_eq!(alith_final_balance, alith_balance + transfer_amount);
+    assert_eq!(
+        dest_final_balance,
+        dest_balance
+            - transfer_amount
+            - AlloyU256::from(receipt_info.effective_gas_price * receipt_info.gas_used).inner()
+    );
+
+    // Stop impersonating destination, and assert on error when retrying the same transfer.
+    unwrap_response::<()>(
+        fork_node.eth_rpc(EthRequest::StopImpersonatingAccount(dest_addr)).await.unwrap(),
+    )
+    .unwrap();
+    let transaction =
+        TransactionRequest::default().value(transfer_amount).from(dest_addr).to(alith_addr);
+    let err = fork_node.send_transaction(transaction.clone()).await.unwrap_err();
+    assert_eq!(err.code, ErrorCode::InternalError);
+    assert!(err.message.contains(
+        format!("Account not found for address {}", dest_addr.to_string().to_lowercase()).as_str()
+    ));
+}
+
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_auto_mine_fork() {
+    let fork_config = westend_fork_config();
+    let fork_substrate_config = SubstrateNodeConfig::new(&fork_config);
+    let mut node = TestNode::new(fork_config.clone(), fork_substrate_config).await.unwrap();
+
+    unwrap_response::<()>(node.eth_rpc(EthRequest::SetAutomine(true)).await.unwrap()).unwrap();
+
+    let alith_account = Account::from(subxt_signer::eth::dev::alith());
+    let alith_addr = Address::from(ReviveAddress::new(alith_account.address()));
+
+    let initial_balance = U256::from(100_000_000_000_000_000_000u128); // 100 ether
+    unwrap_response::<()>(
+        node
+            .eth_rpc(EthRequest::SetBalance(alith_addr, initial_balance))
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+
+    let curr_block_number = node.best_block_number().await;
+    assert_eq!(node.best_block_number().await, curr_block_number);
+    let transaction = TransactionRequest::default()
+        .value(U256::from_str_radix("100000000000000000", 10).unwrap())
+        .from(alith_addr)
+        .to(Address::from(ReviveAddress::new(
+            Account::from(subxt_signer::eth::dev::baltathar()).address(),
+        )));
+    let _tx_hash0 = node.send_transaction(transaction).await.unwrap();
+    assert_eq!(node.best_block_number().await, curr_block_number+1);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_evm_mine_empty_params_fork() {
+    let fork_config = westend_fork_config();
+    let fork_substrate_config = SubstrateNodeConfig::new(&fork_config);
+    let mut node = TestNode::new(fork_config.clone(), fork_substrate_config).await.unwrap();
+    let curr_block_number = node.best_block_number().await;
+    assert_eq!(
+        unwrap_response::<String>(node.eth_rpc(EthRequest::EvmMine(None)).await.unwrap()).unwrap(),
+        "0x0"
+    );
+    assert_eq!(node.best_block_number().await, curr_block_number+1);
+    assert_eq!(
+        unwrap_response::<String>(
+            node.eth_rpc(EthRequest::EvmMine(Some(Params { params: None }))).await.unwrap()
+        )
+        .unwrap(),
+        "0x0"
+    );
+    assert_eq!(node.best_block_number().await, curr_block_number+2);
+}
+
+// WIP
+// #[tokio::test(flavor = "multi_thread")]
+// async fn test_mixed_mining_fork() {
+//     let mut fork_config = westend_fork_config();
+//     fork_config.mixed_mining = true;
+//     fork_config.block_time = Some(Duration::from_secs(1));
+//     let fork_substrate_config = SubstrateNodeConfig::new(&fork_config);
+//     let mut node = TestNode::new(fork_config.clone(), fork_substrate_config).await.unwrap();
+
+//     let alith_account = Account::from(subxt_signer::eth::dev::alith());
+//     let alith_addr = Address::from(ReviveAddress::new(alith_account.address()));
+
+//     let initial_balance = U256::from(100_000_000_000_000_000_000u128); // 100 ether
+//     unwrap_response::<()>(
+//         node
+//             .eth_rpc(EthRequest::SetBalance(alith_addr, initial_balance))
+//             .await
+//             .unwrap(),
+//     )
+//     .unwrap();
+
+//    let curr_block_number = node.best_block_number().await;
+
+//     // Wait for automined block after sending a transaction.
+//     let transaction = TransactionRequest::default()
+//         .value(U256::from_str_radix("100000000000000000", 10).unwrap())
+//         .from(alith_addr)
+//         .to(Address::from(ReviveAddress::new(
+//             Account::from(subxt_signer::eth::dev::baltathar()).address(),
+//         )));
+//     let _tx_hash0 = unwrap_response::<ReceiptInfo>(
+//         node.eth_rpc(EthRequest::EthSendTransactionSync(Box::new(WithOtherFields::new(
+//             transaction,
+//         ))))
+//         .await
+//         .unwrap(),
+//     )
+//     .unwrap()
+//     .transaction_hash;
+//     assert_eq!(node.best_block_number().await, curr_block_number+1);
+
+//     // Wait for second block mined through interval mining.
+//     node.wait_for_block_with_timeout(curr_block_number+2, std::time::Duration::from_secs(2)).await.unwrap();
+//     assert_eq!(node.best_block_number().await, curr_block_number+2);
+// }
