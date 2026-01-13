@@ -8,7 +8,6 @@ use alloy_primitives::{Address, Bytes, U256};
 use alloy_rpc_types::{TransactionInput, TransactionRequest};
 use alloy_sol_types::SolCall;
 use anvil_core::eth::EthRequest;
-use anvil_rpc::response::ResponseResult;
 use anvil_polkadot::{
     api_server::revive_conversions::ReviveAddress,
     config::{AnvilNodeConfig, ForkChoice, SubstrateNodeConfig},
@@ -719,31 +718,14 @@ async fn test_fork_eth_get_nonce_from_westend() {
         .from(alith_address)
         .to(Address::from(baltathar_address));
 
-    fork_node.send_transaction(transaction).await.unwrap();
-
-    // When forking with lazy loading, transaction validation can take a long time
-    // because state needs to be fetched from the remote chain. We need to wait
-    // for the transaction to be validated and become ready in the pool before mining.
-    // Poll the nonce until it increases (transaction included in a block) or timeout.
-    let start = std::time::Instant::now();
-    let timeout = std::time::Duration::from_secs(120); // 2 minutes timeout
-    let mut nonce_after_tx = initial_nonce;
-
-    while start.elapsed() < timeout {
-        // Mine a block to try to include the transaction
-        unwrap_response::<()>(fork_node.eth_rpc(EthRequest::Mine(None, None)).await.unwrap())
-            .unwrap();
-
-        nonce_after_tx = fork_node.get_nonce(alith_address).await;
-        if nonce_after_tx > initial_nonce {
-            break;
-        }
-
-        // Wait a bit before trying again to allow transaction validation to progress
-        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-    }
+    // Send and wait for transaction to be included
+    fork_node
+        .send_transaction_and_wait(transaction, 120)
+        .await
+        .expect("Transaction receipt not found within timeout");
 
     // Nonce should have increased by 1
+    let nonce_after_tx = fork_node.get_nonce(alith_address).await;
     assert_eq!(
         nonce_after_tx,
         initial_nonce + U256::from(1),
@@ -805,29 +787,21 @@ async fn test_fork_state_snapshotting_from_westend() {
         .from(alith_address)
         .to(baltathar_address);
 
-    fork_node.send_transaction(transaction).await.unwrap();
-
-    // When forking with lazy loading, transaction validation can take a long time.
-    // Poll until the nonce increases (transaction included in block) or timeout.
-    let start = std::time::Instant::now();
-    let timeout = std::time::Duration::from_secs(120);
-    let mut nonce_after = initial_alith_nonce;
-
-    while start.elapsed() < timeout {
-        unwrap_response::<()>(fork_node.eth_rpc(EthRequest::Mine(None, None)).await.unwrap())
-            .unwrap();
-
-        nonce_after = fork_node.get_nonce(alith_address).await;
-        if nonce_after > initial_alith_nonce {
-            break;
-        }
-
-        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-    }
+    // Send and wait for transaction to be included
+    let receipt = fork_node
+        .send_transaction_and_wait(transaction, 120)
+        .await
+        .expect("Transaction receipt not found within timeout");
+    assert_eq!(
+        receipt.status,
+        Some(polkadot_sdk::pallet_revive::U256::from(1)),
+        "Transaction should succeed"
+    );
 
     // Verify state changed
     let alith_balance_after = fork_node.get_balance(alith.address(), None).await;
     let baltathar_balance_after = fork_node.get_balance(baltathar.address(), None).await;
+    let nonce_after = fork_node.get_nonce(alith_address).await;
 
     assert!(
         alith_balance_after < initial_alith_balance,
@@ -906,71 +880,11 @@ async fn test_fork_can_send_tx_from_westend() {
         .from(alith_address)
         .to(baltathar_address);
 
-    let tx_hash = fork_node.send_transaction(transaction).await.unwrap();
-    eprintln!("[DEBUG] Transaction sent: {:?}", tx_hash);
-
-    // Check pool content before mining (this shows if tx is in ready or pending)
-    let pool_content = fork_node.eth_rpc(EthRequest::TxPoolContent(())).await;
-    eprintln!("[DEBUG] Pool content before mine: {:?}", pool_content);
-
-    // Check pool status before mining
-    let pool_status = fork_node.eth_rpc(EthRequest::TxPoolStatus(())).await;
-    eprintln!("[DEBUG] Pool status before mine: {:?}", pool_status);
-
-    // Check block number before mining
-    let block_before = fork_node.best_block_number().await;
-    eprintln!("[DEBUG] Block number before mine: {}", block_before);
-
-    // Mine the transaction
-    eprintln!("[DEBUG] Mining block...");
-    let mine_result = fork_node.eth_rpc(EthRequest::Mine(None, None)).await;
-    eprintln!("[DEBUG] Mine result: {:?}", mine_result);
-    unwrap_response::<()>(mine_result.unwrap()).unwrap();
-
-    // Check block number after mining
-    let block_after = fork_node.best_block_number().await;
-    eprintln!("[DEBUG] Block number after mine: {}", block_after);
-
-    // Check if block was actually created
-    if block_after != block_before + 1 {
-        eprintln!("[DEBUG] WARNING: Block number did not increase by 1!");
-    }
-    eprintln!("[DEBUG] Block mined");
-
-    // When forking with lazy loading, transaction validation can take a long time
-    // because state needs to be fetched from the remote chain. Poll for receipt.
-    let start = std::time::Instant::now();
-    let timeout = std::time::Duration::from_secs(120);
-    let mut receipt = None;
-
-    while start.elapsed() < timeout {
-        // Check pool status
-        let pool_status_after = fork_node.eth_rpc(EthRequest::TxPoolStatus(())).await;
-        eprintln!("[DEBUG] Pool status: {:?}", pool_status_after);
-
-        // Try to get receipt
-        let receipt_result = fork_node
-            .eth_rpc(EthRequest::EthGetTransactionReceipt(
-                alloy_primitives::B256::from_slice(tx_hash.as_bytes()),
-            ))
-            .await;
-
-        if let Ok(resp) = receipt_result {
-            if let ResponseResult::Success(val) = resp {
-                if !val.is_null() {
-                    receipt = Some(fork_node.get_transaction_receipt(tx_hash).await);
-                    break;
-                }
-            }
-        }
-
-        // Mine another block and wait
-        let _ = fork_node.eth_rpc(EthRequest::Mine(None, None)).await;
-        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-    }
-
-    // Get receipt and verify transaction succeeded
-    let receipt = receipt.expect("Transaction receipt not found within timeout");
+    // Send and wait for transaction to be included
+    let receipt = fork_node
+        .send_transaction_and_wait(transaction, 120)
+        .await
+        .expect("Transaction receipt not found within timeout");
     assert_eq!(
         receipt.status,
         Some(polkadot_sdk::pallet_revive::U256::from(1)),
@@ -998,32 +912,11 @@ async fn test_fork_can_send_tx_from_westend() {
         .from(baltathar_address)
         .to(alith_address);
 
-    let tx_hash2 = fork_node.send_transaction(transaction2).await.unwrap();
-
-    // Wait for second transaction receipt with polling
-    let start = std::time::Instant::now();
-    let mut receipt2 = None;
-    while start.elapsed() < timeout {
-        let receipt_result = fork_node
-            .eth_rpc(EthRequest::EthGetTransactionReceipt(
-                alloy_primitives::B256::from_slice(tx_hash2.as_bytes()),
-            ))
-            .await;
-
-        if let Ok(resp) = receipt_result {
-            if let ResponseResult::Success(val) = resp {
-                if !val.is_null() {
-                    receipt2 = Some(fork_node.get_transaction_receipt(tx_hash2).await);
-                    break;
-                }
-            }
-        }
-
-        let _ = fork_node.eth_rpc(EthRequest::Mine(None, None)).await;
-        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-    }
-
-    let receipt2 = receipt2.expect("Second transaction receipt not found within timeout");
+    // Send and wait for second transaction
+    let receipt2 = fork_node
+        .send_transaction_and_wait(transaction2, 120)
+        .await
+        .expect("Second transaction receipt not found within timeout");
     assert_eq!(
         receipt2.status,
         Some(polkadot_sdk::pallet_revive::U256::from(1)),
@@ -1081,37 +974,12 @@ async fn test_fork_can_deploy_contract_from_westend() {
     )
     .unwrap();
 
-    // Deploy SimpleStorage contract
+    // Deploy SimpleStorage contract and wait for receipt
     let contract_code = get_contract_code("SimpleStorage");
-    let tx_hash = fork_node.deploy_contract(&contract_code.init, alith.address()).await;
-
-    // When forking with lazy loading, transaction validation can take a long time.
-    // Poll for receipt.
-    let start = std::time::Instant::now();
-    let timeout = std::time::Duration::from_secs(120);
-    let mut receipt = None;
-
-    while start.elapsed() < timeout {
-        let receipt_result = fork_node
-            .eth_rpc(EthRequest::EthGetTransactionReceipt(
-                alloy_primitives::B256::from_slice(tx_hash.as_bytes()),
-            ))
-            .await;
-
-        if let Ok(resp) = receipt_result {
-            if let ResponseResult::Success(val) = resp {
-                if !val.is_null() {
-                    receipt = Some(fork_node.get_transaction_receipt(tx_hash).await);
-                    break;
-                }
-            }
-        }
-
-        let _ = fork_node.eth_rpc(EthRequest::Mine(None, None)).await;
-        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-    }
-
-    let receipt = receipt.expect("Contract deployment receipt not found within timeout");
+    let receipt = fork_node
+        .deploy_contract_and_wait(&contract_code.init, alith.address(), 120)
+        .await
+        .expect("Contract deployment receipt not found within timeout");
     assert_eq!(
         receipt.status,
         Some(polkadot_sdk::pallet_revive::U256::from(1)),
@@ -1134,33 +1002,10 @@ async fn test_fork_can_deploy_contract_from_westend() {
     assert!(!code.is_empty(), "Deployed contract should have code");
 
     // Deploy another contract to verify chain continues working
-    let tx_hash2 = fork_node.deploy_contract(&contract_code.init, alith.address()).await;
-
-    // Poll for second deployment receipt
-    let start = std::time::Instant::now();
-    let mut receipt2 = None;
-
-    while start.elapsed() < timeout {
-        let receipt_result = fork_node
-            .eth_rpc(EthRequest::EthGetTransactionReceipt(
-                alloy_primitives::B256::from_slice(tx_hash2.as_bytes()),
-            ))
-            .await;
-
-        if let Ok(resp) = receipt_result {
-            if let ResponseResult::Success(val) = resp {
-                if !val.is_null() {
-                    receipt2 = Some(fork_node.get_transaction_receipt(tx_hash2).await);
-                    break;
-                }
-            }
-        }
-
-        let _ = fork_node.eth_rpc(EthRequest::Mine(None, None)).await;
-        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-    }
-
-    let receipt2 = receipt2.expect("Second contract deployment receipt not found within timeout");
+    let receipt2 = fork_node
+        .deploy_contract_and_wait(&contract_code.init, alith.address(), 120)
+        .await
+        .expect("Second contract deployment receipt not found within timeout");
     assert_eq!(
         receipt2.status,
         Some(polkadot_sdk::pallet_revive::U256::from(1)),
@@ -1203,35 +1048,11 @@ async fn test_fork_impersonate_account_from_westend() {
         .from(impersonated_addr)
         .to(recipient_addr);
 
-    let tx_hash = fork_node.send_transaction(transaction).await.unwrap();
-
-    // When forking with lazy loading, transaction validation can take a long time.
-    // Poll for receipt.
-    let start = std::time::Instant::now();
-    let timeout = std::time::Duration::from_secs(120);
-    let mut receipt = None;
-
-    while start.elapsed() < timeout {
-        let receipt_result = fork_node
-            .eth_rpc(EthRequest::EthGetTransactionReceipt(
-                alloy_primitives::B256::from_slice(tx_hash.as_bytes()),
-            ))
-            .await;
-
-        if let Ok(resp) = receipt_result {
-            if let ResponseResult::Success(val) = resp {
-                if !val.is_null() {
-                    receipt = Some(fork_node.get_transaction_receipt(tx_hash).await);
-                    break;
-                }
-            }
-        }
-
-        let _ = fork_node.eth_rpc(EthRequest::Mine(None, None)).await;
-        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-    }
-
-    let receipt = receipt.expect("Impersonated transaction receipt not found within timeout");
+    // Send and wait for transaction to be included
+    let receipt = fork_node
+        .send_transaction_and_wait(transaction, 120)
+        .await
+        .expect("Impersonated transaction receipt not found within timeout");
     assert_eq!(
         receipt.status,
         Some(polkadot_sdk::pallet_revive::U256::from(1)),

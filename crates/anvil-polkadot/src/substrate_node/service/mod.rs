@@ -59,8 +59,6 @@ pub struct Service {
     pub mining_engine: Arc<MiningEngine>,
     pub storage_overrides: Arc<Mutex<StorageOverrides>>,
     pub genesis_block_number: u64,
-    /// The fork URL if running in forking mode, used for correct transaction encoding
-    pub fork_url: Option<String>,
 }
 
 type CreateInherentDataProviders = Box<
@@ -366,7 +364,6 @@ pub fn new(
             mining_engine,
             storage_overrides,
             genesis_block_number,
-            fork_url: anvil_config.eth_rpc_url.clone(),
         },
         task_manager,
     ))
