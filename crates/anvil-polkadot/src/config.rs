@@ -11,7 +11,7 @@ use foundry_common::{REQUEST_TIMEOUT, duration_since_unix_epoch, sh_println};
 use polkadot_sdk::{
     pallet_revive::evm::Account,
     sc_cli::{
-        self, CliConfiguration as SubstrateCliConfiguration, Cors, DEFAULT_WASM_EXECUTION_METHOD,
+        self, CliConfiguration as SubstrateCliConfiguration, DEFAULT_WASM_EXECUTION_METHOD,
         DEFAULT_WASMTIME_INSTANTIATION_STRATEGY, RPC_DEFAULT_MAX_CONNECTIONS,
         RPC_DEFAULT_MAX_REQUEST_SIZE_MB, RPC_DEFAULT_MAX_RESPONSE_SIZE_MB,
         RPC_DEFAULT_MAX_SUBS_PER_CONN, RPC_DEFAULT_MESSAGE_CAPACITY_PER_CONN,
@@ -97,7 +97,7 @@ impl SubstrateNodeConfig {
             rpc_message_buffer_capacity_per_connection: RPC_DEFAULT_MESSAGE_CAPACITY_PER_CONN,
             rpc_disable_batch_requests: false,
             rpc_max_batch_request_len: None,
-            rpc_cors: None,
+            rpc_cors: Some(sc_cli::Cors::All),
         };
 
         // Anvil node requires these cli params configured by default except the state_pruning and
@@ -194,7 +194,8 @@ impl SubstrateCliConfiguration for SubstrateNodeConfig {
     }
 
     fn rpc_cors(&self, _is_dev: bool) -> sc_cli::Result<Option<Vec<String>>> {
-        Ok(self.rpc_params.rpc_cors.clone().unwrap_or(Cors::All).into())
+        // CORS is explicitly set to avoid the "Running in --dev mode" warning from polkadot-sdk
+        Ok(self.rpc_params.rpc_cors.clone().unwrap_or(sc_cli::Cors::All).into())
     }
 
     fn rpc_addr(

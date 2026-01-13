@@ -89,6 +89,7 @@ use substrate_runtime::{Balance, constants::NATIVE_TO_ETH_RATIO};
 use subxt::{
     Metadata as SubxtMetadata, OnlineClient, backend::rpc::RpcClient,
     client::RuntimeVersion as SubxtRuntimeVersion, config::substrate::H256,
+    dynamic::{Value as DynamicValue, tx as dynamic_tx},
     ext::subxt_rpcs::LegacyRpcMethods, utils::H160,
 };
 use subxt_signer::eth::Keypair;
@@ -113,6 +114,13 @@ pub struct ApiServer {
     /// Tracks all active filters
     filters: Filters,
     hardcoded_chain_id: u64,
+    /// RPC methods for submitting transactions
+    rpc: LegacyRpcMethods<SrcChainConfig>,
+    /// Subxt OnlineClient for dynamic transaction building (uses local runtime metadata)
+    api: OnlineClient<SrcChainConfig>,
+    /// Optional OnlineClient connected to forked chain for correct transaction encoding
+    /// When forking, the pallet indices may differ from the local runtime
+    fork_api: Option<OnlineClient<SrcChainConfig>>,
 }
 
 /// Fetch the chain ID from the substrate chain.
@@ -140,7 +148,7 @@ impl ApiServer {
         let eth_rpc_client = create_revive_rpc_client(
             api.clone(),
             rpc_client.clone(),
-            rpc,
+            rpc.clone(),
             block_provider.clone(),
             substrate_service.spawn_handle.clone(),
             revive_rpc_block_limit,
@@ -156,6 +164,30 @@ impl ApiServer {
         // not want to use this as we allow for the chain_id to be customized. So we will
         // not write this to the backend, but cache it to use if we are forking.
         let chain_id = chain_id_from_metadata(&api).await?;
+
+        // When forking, create a separate OnlineClient connected to the forked chain.
+        // This is needed because the local node's metadata may have different pallet indices
+        // than the forked chain's runtime. For example, Revive is at index 4 in our local
+        // substrate_runtime but at index 59 on Asset Hub Westend.
+        let fork_api = if let Some(ref fork_url) = substrate_service.fork_url {
+            // Convert to websocket URL for subxt
+            let ws_url = fork_url
+                .replacen("https://", "wss://", 1)
+                .replacen("http://", "ws://", 1);
+            tracing::info!(target: "forking_debug", "Creating fork_api connected to: {}", ws_url);
+            match OnlineClient::<SrcChainConfig>::from_url(&ws_url).await {
+                Ok(client) => {
+                    tracing::info!(target: "forking_debug", "Successfully connected fork_api to forked chain");
+                    Some(client)
+                }
+                Err(e) => {
+                    tracing::warn!(target: "forking_debug", "Failed to connect to forked chain for metadata: {:?}. Falling back to local metadata.", e);
+                    None
+                }
+            }
+        } else {
+            None
+        };
 
         let filters_clone = filters.clone();
         substrate_service.spawn_handle.spawn("filter-eviction-task", "None", async move {
@@ -176,6 +208,9 @@ impl ApiServer {
             instance_id: B256::random(),
             filters,
             hardcoded_chain_id: chain_id,
+            rpc,
+            api,
+            fork_api,
         })
     }
 
@@ -789,9 +824,64 @@ impl ApiServer {
 
     async fn send_raw_transaction(&self, transaction: Bytes) -> Result<H256> {
         let hash = H256(keccak_256(&transaction.0));
-        let call = subxt_client::tx().revive().eth_transact(transaction.0);
-        self.eth_rpc_client.submit(call).await?;
-        Ok(hash)
+        tracing::info!(target: "forking_debug", "send_raw_transaction: hash={:?}, tx_len={}", hash, transaction.0.len());
+
+        // Prefetch storage keys for the sender to speed up transaction validation.
+        // This is especially important when forking from a remote chain, as each storage
+        // read would otherwise require a separate RPC call (~100-500ms each).
+        if self.fork_api.is_some() {
+            if let Ok(signed_tx) = TransactionSigned::decode(&transaction.0) {
+                if let Ok(sender) = recover_maybe_impersonated_address(&signed_tx) {
+                    tracing::debug!(target: "forking_debug", "Prefetching storage keys for sender: {:?}", sender);
+                    self.backend.prefetch_eth_transaction_keys(sender);
+                }
+            }
+        }
+
+        // Use dynamic transaction building to ensure the correct pallet index is used.
+        // When forking from a remote chain (e.g., Asset Hub Westend), the runtime used for
+        // transaction validation is the forked chain's runtime. The pallet indices may differ
+        // from our local substrate_runtime (e.g., Revive is at index 4 locally but index 59
+        // on Asset Hub Westend).
+        //
+        // If we have a fork_api (connected to the forked chain), use it for transaction encoding
+        // to get the correct pallet indices from the forked chain's metadata. Otherwise fall back
+        // to the local api's metadata.
+        let tx_api = self.fork_api.as_ref().unwrap_or(&self.api);
+
+        // Debug: print the pallet index for Revive from the metadata being used
+        if let Some(pallet) = tx_api.metadata().pallet_by_name("Revive") {
+            tracing::debug!(target: "forking_debug", "Using Revive pallet index: {}", pallet.index());
+        } else {
+            tracing::warn!(target: "forking_debug", "Revive pallet not found in metadata!");
+        }
+
+        let payload_value = DynamicValue::from_bytes(transaction.0.clone());
+        let tx_payload = dynamic_tx("Revive", "eth_transact", vec![payload_value]);
+
+        // Create and submit the extrinsic using dynamic transaction
+        let ext = tx_api
+            .tx()
+            .create_unsigned(&tx_payload)
+            .map_err(|e| {
+                tracing::error!(target: "forking_debug", "Failed to create unsigned extrinsic: {:?}", e);
+                Error::InternalError(format!("Failed to create unsigned extrinsic: {e}"))
+            })?;
+
+        let ext_bytes = ext.encoded();
+        tracing::debug!(target: "forking_debug", "Dynamic tx encoded bytes (first 20): {:?}", &ext_bytes[..std::cmp::min(20, ext_bytes.len())]);
+
+        // Submit the extrinsic to the transaction pool
+        match self.rpc.author_submit_extrinsic(ext_bytes).await {
+            Ok(submitted_hash) => {
+                tracing::info!(target: "forking_debug", "send_raw_transaction: successfully submitted to pool, submitted_hash={:?}", submitted_hash);
+                Ok(hash)
+            }
+            Err(e) => {
+                tracing::error!(target: "forking_debug", "send_raw_transaction: failed to submit: {:?}", e);
+                Err(Error::InternalError(format!("Failed to submit transaction: {e}")))
+            }
+        }
     }
 
     pub async fn send_raw_transaction_sync(&self, tx: Bytes) -> Result<ReceiptInfo> {
@@ -814,6 +904,8 @@ impl ApiServer {
         unsigned_tx: bool,
     ) -> Result<H256> {
         node_info!("eth_sendTransaction");
+        tracing::info!(target: "forking_debug", "send_transaction: from={:?} to={:?} value={:?} unsigned={}",
+            transaction_req.from, transaction_req.to, transaction_req.value, unsigned_tx);
         let mut transaction = convert_to_generic_transaction(transaction_req.clone().into_inner());
         let Some(from) = transaction.from else {
             return Err(Error::ReviveRpc(EthRpcError::InvalidTransaction));
