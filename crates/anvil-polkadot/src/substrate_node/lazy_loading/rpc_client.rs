@@ -344,12 +344,8 @@ impl<Block: BlockT + DeserializeOwned> RPCClient<Block> for Rpc<Block> {
         let keys_clone = keys.clone();
 
         let result = self.block_on(async move {
-            substrate_rpc_client::StateApi::<Block::Hash>::query_storage_at(
-                &client,
-                keys_clone,
-                at,
-            )
-            .await
+            substrate_rpc_client::StateApi::<Block::Hash>::query_storage_at(&client, keys_clone, at)
+                .await
         })?;
 
         // query_storage_at returns Vec<StorageChangeSet<Hash>>

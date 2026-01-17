@@ -47,8 +47,7 @@ use std::{fmt::Debug, time::Duration};
 use subxt::utils::H160;
 use tempfile::TempDir;
 
-use crate::abi::Multicall;
-use crate::abi::SimpleStorage;
+use crate::abi::{Multicall, SimpleStorage};
 
 pub struct BlockWaitTimeout {
     pub block_number: u32,
@@ -164,9 +163,7 @@ impl TestNode {
         while start.elapsed() < timeout {
             // Check if receipt is available
             let receipt_result = self
-                .eth_rpc(EthRequest::EthGetTransactionReceipt(B256::from(
-                    tx_hash.to_fixed_bytes(),
-                )))
+                .eth_rpc(EthRequest::EthGetTransactionReceipt(B256::from(tx_hash.to_fixed_bytes())))
                 .await;
 
             if let Ok(ResponseResult::Success(val)) = receipt_result {

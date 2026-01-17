@@ -87,10 +87,13 @@ use sqlx::sqlite::SqlitePoolOptions;
 use std::{collections::BTreeSet, sync::Arc, time::Duration};
 use substrate_runtime::{Balance, constants::NATIVE_TO_ETH_RATIO};
 use subxt::{
-    Metadata as SubxtMetadata, OnlineClient, backend::rpc::RpcClient,
-    client::RuntimeVersion as SubxtRuntimeVersion, config::substrate::H256,
+    Metadata as SubxtMetadata, OnlineClient,
+    backend::rpc::RpcClient,
+    client::RuntimeVersion as SubxtRuntimeVersion,
+    config::substrate::H256,
     dynamic::{Value as DynamicValue, tx as dynamic_tx},
-    ext::subxt_rpcs::LegacyRpcMethods, utils::H160,
+    ext::subxt_rpcs::LegacyRpcMethods,
+    utils::H160,
 };
 use subxt_signer::eth::Keypair;
 use tokio::try_join;
@@ -822,11 +825,9 @@ impl ApiServer {
         let payload_value = DynamicValue::from_bytes(transaction.0.clone());
         let tx_payload = dynamic_tx("Revive", "eth_transact", vec![payload_value]);
 
-        let ext = self
-            .api
-            .tx()
-            .create_unsigned(&tx_payload)
-            .map_err(|e| Error::InternalError(format!("Failed to create unsigned extrinsic: {e}")))?;
+        let ext = self.api.tx().create_unsigned(&tx_payload).map_err(|e| {
+            Error::InternalError(format!("Failed to create unsigned extrinsic: {e}"))
+        })?;
 
         // Submit the extrinsic to the transaction pool
         self.rpc
