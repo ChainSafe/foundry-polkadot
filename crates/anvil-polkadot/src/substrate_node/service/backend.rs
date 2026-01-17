@@ -317,15 +317,7 @@ impl BackendWithOverlay {
         keys.push(well_known_keys::system_account_info(sender_account_id));
 
         // Prefetch all keys in a single batch
-        let count = self.prefetch_storage_keys(&keys);
-        if count > 0 {
-            tracing::debug!(
-                target: "forking_debug",
-                "Prefetched {} storage keys for sender {:?}",
-                count,
-                sender
-            );
-        }
+        self.prefetch_storage_keys(&keys);
     }
 }
 

@@ -849,8 +849,6 @@ impl ApiServer {
         unsigned_tx: bool,
     ) -> Result<H256> {
         node_info!("eth_sendTransaction");
-        tracing::info!(target: "forking_debug", "send_transaction: from={:?} to={:?} value={:?} unsigned={}",
-            transaction_req.from, transaction_req.to, transaction_req.value, unsigned_tx);
         let mut transaction = convert_to_generic_transaction(transaction_req.clone().into_inner());
         let Some(from) = transaction.from else {
             return Err(Error::ReviveRpc(EthRpcError::InvalidTransaction));

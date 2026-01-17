@@ -35,34 +35,20 @@ pub(super) fn decode_eth_transaction(
     tx_data: &Arc<polkadot_sdk::sp_runtime::OpaqueExtrinsic>,
 ) -> Option<(Vec<u8>, TransactionSigned)> {
     let encoded = tx_data.encode();
-    tracing::debug!(target: "txpool_decode", "decode_eth_transaction: encoded len={}", encoded.len());
-
-    let ext = match UncheckedExtrinsic::decode_all_with_depth_limit(MAX_EXTRINSIC_DEPTH, &mut &encoded[..]) {
-        Ok(ext) => ext,
-        Err(e) => {
-            tracing::debug!(target: "txpool_decode", "decode_eth_transaction: UncheckedExtrinsic decode failed: {:?}", e);
-            return None;
-        }
-    };
+    let ext =
+        UncheckedExtrinsic::decode_all_with_depth_limit(MAX_EXTRINSIC_DEPTH, &mut &encoded[..])
+            .ok()?;
 
     let polkadot_sdk::sp_runtime::generic::UncheckedExtrinsic {
         function: RuntimeCall::Revive(polkadot_sdk::pallet_revive::Call::eth_transact { payload }),
         ..
     } = ext.0
     else {
-        tracing::debug!(target: "txpool_decode", "decode_eth_transaction: RuntimeCall pattern match failed, got: {:?}", ext.0.function);
         return None;
     };
 
-    let signed_tx = match TransactionSigned::decode(&payload) {
-        Ok(tx) => tx,
-        Err(e) => {
-            tracing::debug!(target: "txpool_decode", "decode_eth_transaction: TransactionSigned decode failed: {:?}", e);
-            return None;
-        }
-    };
+    let signed_tx = TransactionSigned::decode(&payload).ok()?;
 
-    tracing::debug!(target: "txpool_decode", "decode_eth_transaction: success!");
     Some((payload, signed_tx))
 }
 

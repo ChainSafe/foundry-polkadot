@@ -142,11 +142,6 @@ impl<Block: BlockT + DeserializeOwned> ForkedLazyBackend<Block> {
         }
 
         let fetch_count = keys_to_fetch.len();
-        tracing::debug!(
-            target: super::super::LAZY_LOADING_LOG_TARGET,
-            "Prefetching {} storage keys in batch",
-            fetch_count
-        );
 
         // Use the batch RPC call
         let block_to_query = if self.before_fork { self.block_hash } else { self.fork_block };
@@ -158,14 +153,7 @@ impl<Block: BlockT + DeserializeOwned> ForkedLazyBackend<Block> {
                 }
                 fetch_count
             }
-            Err(e) => {
-                tracing::warn!(
-                    target: super::super::LAZY_LOADING_LOG_TARGET,
-                    "Batch storage prefetch failed: {:?}, falling back to individual fetches",
-                    e
-                );
-                0
-            }
+            Err(_) => 0,
         }
     }
 }
