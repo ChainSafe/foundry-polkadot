@@ -48,7 +48,6 @@ use subxt::utils::H160;
 use tempfile::TempDir;
 
 use crate::abi::Multicall;
-#[cfg(feature = "forking-tests")]
 use crate::abi::SimpleStorage;
 
 pub struct BlockWaitTimeout {
@@ -152,7 +151,6 @@ impl TestNode {
     /// Execute an ethereum transaction and wait for its receipt.
     /// This is useful for forking tests where transaction validation can take time
     /// due to lazy loading of state from the remote chain.
-    #[cfg(feature = "forking-tests")]
     pub async fn send_transaction_and_wait(
         &mut self,
         transaction: TransactionRequest,
@@ -264,7 +262,6 @@ impl TestNode {
         self.eth_best_block().await.number.as_u32()
     }
 
-    #[cfg(feature = "forking-tests")]
     pub fn substrate_rpc_port(&self) -> u16 {
         self.service
             .rpc_handlers
@@ -394,7 +391,6 @@ impl TestNode {
     /// Deploy a contract and wait for its receipt.
     /// This is useful for forking tests where transaction validation can take time
     /// due to lazy loading of state from the remote chain.
-    #[cfg(feature = "forking-tests")]
     pub async fn deploy_contract_and_wait(
         &mut self,
         code: &[u8],
@@ -587,7 +583,6 @@ pub fn to_hex_string(value: u64) -> String {
 }
 
 /// Helper function to call getValue() on a SimpleStorage contract
-#[cfg(feature = "forking-tests")]
 pub async fn simplestorage_get_value(
     node: &mut TestNode,
     contract_address: polkadot_sdk::pallet_revive::H160,
